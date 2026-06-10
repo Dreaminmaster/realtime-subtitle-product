@@ -7,7 +7,7 @@ macOS real-time speech recognition + translation with floating subtitle overlay.
 Usage:
     python3 main.py                    # Launch with dashboard
     python3 main.py --overlay-only     # Launch overlay directly
-    python3 main.py --diagnostics      # Run system diagnostics
+    python3 main.py --diagnostics      # Run system diagnostics (no GUI needed)
 """
 
 import os
@@ -17,9 +17,6 @@ import argparse
 
 # Fix library conflicts
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import QTimer
 
 
 def parse_args():
@@ -34,27 +31,70 @@ def parse_args():
 
 
 def run_diagnostics():
-    """Run and display diagnostics"""
+    """Run and display system diagnostics (no GUI required)"""
     from diagnostics import diagnostics, logger
     
     print(diagnostics.get_status_text())
     
-    logs = logger.get_logs(10)
+    logs = logger.get_logs(20)
     if logs:
         print("\n--- Recent Logs ---")
         for line in logs:
             print(line.rstrip())
+    
+    print("\n--- Translation Engine Check ---")
+    try:
+        from translation_engine import TranslationEngine
+        engine = TranslationEngine()
+        for mode in ['off', 'online', 'local', 'custom']:
+            try:
+                engine.set_mode(mode)
+                print(f"  {mode}: {engine.current_name} — OK")
+            except Exception as e:
+                print(f"  {mode}: FAILED — {e}")
+    except Exception as e:
+        print(f"  Translation engine load FAILED: {e}")
+    
+    print("\n--- Model Manager Check ---")
+    try:
+        from model_manager import model_manager
+        whisper_models = model_manager.get_models('whisper')
+        downloaded = [m for m in whisper_models if m.get('downloaded')]
+        print(f"  Whisper models: {len(whisper_models)} available, {len(downloaded)} downloaded")
+        for m in downloaded:
+            print(f"    - {m['name']}: {m['installed_size_mb']} MB")
+        disk = model_manager.get_disk_usage()
+        print(f"  Total disk: {disk['total_mb']} MB across {disk['model_count']} models")
+    except Exception as e:
+        print(f"  Model manager check FAILED: {e}")
+    
+    print("\n--- Python Environment ---")
+    print(f"  Python: {sys.version}")
+    print(f"  Executable: {sys.executable}")
+    print(f"  Platform: {sys.platform}")
+    print(f"  Prefix: {sys.prefix}")
 
 
 def main():
     args = parse_args()
     
-    # Handle diagnostics mode
+    # Handle diagnostics mode — no GUI imports needed
     if args.diagnostics:
         run_diagnostics()
         return
     
-    # Initialize Qt Application
+    # Lazy import PyQt6 only when GUI is needed
+    try:
+        from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtCore import QTimer
+    except ImportError:
+        print("ERROR: PyQt6 is required for GUI mode.")
+        print("Install it with: pip install PyQt6>=6.5")
+        print("")
+        print("Or run diagnostics without GUI:")
+        print("  python3 main.py --diagnostics")
+        sys.exit(1)
+    
     app = QApplication.instance()
     if not app:
         app = QApplication(sys.argv)
@@ -62,7 +102,7 @@ def main():
     # Set up signal handler
     signal.signal(signal.SIGINT, lambda sig, frame: os._exit(0))
     
-    # First-launch permission guide
+    # First-launch permission guide (GUI)
     if not args.no_permission_check:
         try:
             from permission_guide import PermissionGuide
@@ -99,14 +139,13 @@ def main():
 # Backward-compatible overlay session starter
 def start_overlay_session():
     """Start overlay and pipeline (imported by dashboard and main)"""
+    from PyQt6.QtCore import QObject, pyqtSignal
     from enhanced_overlay_window import EnhancedOverlayWindow
     from config import config
     import threading
-    import queue
     import time
     import numpy as np
     from concurrent.futures import ThreadPoolExecutor
-    from PyQt6.QtCore import QObject, pyqtSignal
     
     class WorkerSignals(QObject):
         update_text = pyqtSignal(int, str, str)
@@ -179,7 +218,6 @@ def start_overlay_session():
             logger.info("Pipeline processing loop started")
             
             is_mlx = (config.asr_backend == "mlx")
-            num_workers = 1 if is_mlx else config.transcription_workers
             
             if config.asr_backend == "funasr":
                 model_size = config.funasr_model
@@ -233,11 +271,9 @@ def start_overlay_session():
                         prompt = self.last_final_text
                         
                         overall_rms = np.sqrt(np.mean(final_buffer**2))
-                        if overall_rms < self.audio.silence_threshold:
-                            pass
-                        else:
+                        if overall_rms >= self.audio.silence_threshold:
                             transcribe_executor.submit(
-                                self._process_final_chunk, 
+                                self._process_final_chunk,
                                 final_buffer, cid, prompt, translate_executor
                             )
                         
@@ -269,7 +305,7 @@ def start_overlay_session():
                 text = self.transcriber.transcribe(audio_data, prompt=prompt)
                 if text:
                     self.signals.update_text.emit(chunk_id, text, "")
-            except Exception as e:
+            except Exception:
                 pass
         
         def _process_final_chunk(self, audio_data, chunk_id, prompt="", translate_executor=None):
@@ -279,7 +315,6 @@ def start_overlay_session():
                     if len(text.split()) > 2:
                         self.last_final_text = text
                     
-                    # Show immediately with "translating..." placeholder
                     self.signals.update_text.emit(chunk_id, text, "(translating...)")
                     
                     if translate_executor:

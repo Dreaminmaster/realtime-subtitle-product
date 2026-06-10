@@ -33,7 +33,7 @@ class Transcriber:
         print(f"[Transcriber] Using faster-whisper (CPU/CUDA) with model: {model_size}")
     
     def _init_mlx(self, model_size):
-        sssss
+        """Initialize MLX Whisper backend for Apple Silicon"""
         try:
             import mlx_whisper
             # MLX doesn't need explicit model loading here

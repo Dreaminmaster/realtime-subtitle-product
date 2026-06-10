@@ -236,10 +236,14 @@ class Diagnostics:
             }
     
     def _collect_issues(self) -> list:
+        seen = set()
         issues = []
         for cat in self.results:
             if isinstance(self.results[cat], dict):
-                issues.extend(self.results[cat].get("issues", []))
+                for issue in self.results[cat].get("issues", []):
+                    if issue not in seen:
+                        seen.add(issue)
+                        issues.append(issue)
         return issues
     
     def get_status_text(self) -> str:
