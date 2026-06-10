@@ -1,0 +1,513 @@
+#!/usr/bin/env python3
+"""
+Enhanced Overlay Window - Floating subtitle display with style customization.
+
+Features:
+  - Always on top, translucent background
+  - Draggable, resizable
+  - Configurable font size, colors, opacity, border radius
+  - Bilingual display (original + translation)
+  - Toggle show/hide, switch display modes
+  - Save transcript to file
+"""
+
+from PyQt6.QtWidgets import (
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
+    QLabel, QScrollArea, QFrame, QPushButton, QSizePolicy
+)
+from PyQt6.QtCore import Qt, QPoint, QTimer, pyqtSignal
+from PyQt6.QtGui import QFont, QColor, QPalette, QAction, QFontDatabase
+import time
+import os
+
+# macOS: show on all Spaces
+try:
+    from AppKit import NSWindowCollectionBehaviorCanJoinAllSpaces, NSWindowCollectionBehaviorStationary
+    import objc
+    from ctypes import c_void_p
+    HAS_APPKIT = True
+except ImportError:
+    HAS_APPKIT = False
+
+
+class SubtitleBubble(QFrame):
+    """A single subtitle bubble showing original + translation"""
+    
+    def __init__(self, chunk_id, timestamp, original_text, translated_text="", 
+                 parent_style=None):
+        super().__init__()
+        self.chunk_id = chunk_id
+        self.parent_style = parent_style or {}
+        
+        self.setStyleSheet(self._get_bubble_style())
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        
+        layout = QVBoxLayout()
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(4)
+        self.setLayout(layout)
+        
+        # Timestamp
+        ts_label = QLabel(f"[{timestamp}]")
+        ts_label.setStyleSheet("color: rgba(200,200,200,120); font-size: 10px;")
+        layout.addWidget(ts_label)
+        
+        # Original text
+        self.original_label = QLabel(original_text)
+        original_font_size = self.parent_style.get("original_font_size", 18)
+        original_color = self.parent_style.get("original_color", "#ffffff")
+        self.original_label.setStyleSheet(
+            f"color: {original_color}; font-size: {original_font_size}px; "
+            f"font-weight: bold; background: transparent;"
+        )
+        self.original_label.setWordWrap(True)
+        layout.addWidget(self.original_label)
+        
+        # Translated text
+        self.translated_label = QLabel(translated_text or "...")
+        translation_font_size = self.parent_style.get("translation_font_size", 16)
+        translation_color = self.parent_style.get("translation_color", "#89b4fa")
+        self.translated_label.setStyleSheet(
+            f"color: {translation_color}; font-size: {translation_font_size}px; "
+            f"background: transparent;"
+        )
+        self.translated_label.setWordWrap(True)
+        self.translated_label.setVisible(self.parent_style.get("show_translation", True))
+        layout.addWidget(self.translated_label)
+    
+    def _get_bubble_style(self):
+        bg = self.parent_style.get("bubble_bg", "rgba(0, 0, 0, 150)")
+        radius = self.parent_style.get("bubble_radius", 10)
+        return (
+            f"background-color: {bg}; "
+            f"border-radius: {radius}px; "
+            f"margin-bottom: 8px;"
+        )
+    
+    def update_original(self, text):
+        self.original_label.setText(text)
+    
+    def update_translated(self, text):
+        self.translated_label.setText(text)
+        if text and not self.translated_label.isVisible():
+            self.translated_label.setVisible(True)
+    
+    def update_style(self, parent_style):
+        """Update styling dynamically"""
+        self.parent_style = parent_style
+        
+        original_font_size = parent_style.get("original_font_size", 18)
+        original_color = parent_style.get("original_color", "#ffffff")
+        self.original_label.setStyleSheet(
+            f"color: {original_color}; font-size: {original_font_size}px; "
+            f"font-weight: bold; background: transparent;"
+        )
+        
+        translation_font_size = parent_style.get("translation_font_size", 16)
+        translation_color = parent_style.get("translation_color", "#89b4fa")
+        self.translated_label.setStyleSheet(
+            f"color: {translation_color}; font-size: {translation_font_size}px; "
+            f"background: transparent;"
+        )
+        self.translated_label.setVisible(parent_style.get("show_translation", True))
+        
+        self.setStyleSheet(self._get_bubble_style())
+
+
+class ResizeHandle(QLabel):
+    """Drag handle for window resize"""
+    
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.parent_window = parent
+        self.setText("◢")
+        self.setStyleSheet("color: rgba(255, 255, 255, 80); font-size: 14px;")
+        self.setFixedSize(20, 20)
+        self.setAlignment(Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight)
+        self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+        self.startPos = None
+    
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.startPos = event.globalPosition().toPoint()
+            event.accept()
+    
+    def mouseMoveEvent(self, event):
+        if self.startPos:
+            delta = event.globalPosition().toPoint() - self.startPos
+            new_w = max(self.parent_window.minimumWidth(), self.parent_window.width() + delta.x())
+            new_h = max(self.parent_window.minimumHeight(), self.parent_window.height() + delta.y())
+            self.parent_window.resize(new_w, new_h)
+            # Update stored width
+            self.parent_window.subtitle_style["window_width"] = new_w
+            self.startPos = event.globalPosition().toPoint()
+            event.accept()
+    
+    def mouseReleaseEvent(self, event):
+        self.startPos = None
+
+
+class EnhancedOverlayWindow(QWidget):
+    """Floating subtitle overlay with rich customization"""
+    
+    stop_requested = pyqtSignal()
+    style_changed = pyqtSignal(dict)
+    
+    def __init__(self, subtitle_style=None):
+        super().__init__()
+        
+        # Default style
+        self.subtitle_style = {
+            "window_width": 400,
+            "window_opacity": 0.85,
+            "original_font_size": 18,
+            "translation_font_size": 16,
+            "original_color": "#ffffff",
+            "translation_color": "#89b4fa",
+            "bubble_bg": "rgba(0, 0, 0, 160)",
+            "bubble_radius": 10,
+            "show_translation": True,
+            "show_original": True,
+            "show_timestamp": True,
+            "font_family": "Helvetica Neue",
+            "display_mode": "bilingual",  # bilingual, original_only, translation_only
+            "auto_scroll": True,
+            "max_bubbles": 50,
+            "border_width": 0,
+            "border_color": "rgba(255,255,255,50)",
+        }
+        
+        if subtitle_style:
+            self.subtitle_style.update(subtitle_style)
+        
+        self.items = []  # [(chunk_id, widget)]
+        self.transcript_data = {}  # chunk_id -> {timestamp, original, translated}
+        self.is_moving = False
+        self.oldPos = None
+        self.hidden = False
+        
+        self.init_ui()
+    
+    def showEvent(self, event):
+        super().showEvent(event)
+        if HAS_APPKIT:
+            self._set_all_spaces()
+    
+    def _set_all_spaces(self):
+        try:
+            win_id = int(self.winId())
+            ns_view = objc.objc_object(c_void_p=c_void_p(win_id))
+            ns_window = ns_view.window()
+            ns_window.setCollectionBehavior_(
+                NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorStationary
+            )
+        except Exception as e:
+            print(f"[Overlay] Could not set all-spaces: {e}")
+    
+    def init_ui(self):
+        # Window flags
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowStaysOnTopHint |
+            Qt.WindowType.WindowDoesNotAcceptFocus
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        
+        self.setWindowOpacity(self.subtitle_style.get("window_opacity", 0.85))
+        self.setMouseTracking(True)
+        
+        # Main layout
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(5, 5, 5, 0)
+        main_layout.setSpacing(0)
+        self.setLayout(main_layout)
+        
+        # Scroll area
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll_area.setStyleSheet("""
+            QScrollArea { background: transparent; border: none; }
+            QScrollBar:vertical { width: 0px; }
+        """)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        
+        # Container
+        self.container = QFrame()
+        self.container.setStyleSheet("background: transparent;")
+        self.container_layout = QVBoxLayout()
+        self.container_layout.setContentsMargins(5, 5, 5, 5)
+        self.container_layout.setSpacing(0)
+        self.container_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.container.setLayout(self.container_layout)
+        
+        self.scroll_area.setWidget(self.container)
+        main_layout.addWidget(self.scroll_area)
+        
+        # Control bar
+        control_bar = QHBoxLayout()
+        control_bar.setContentsMargins(5, 2, 5, 5)
+        
+        # Toggle translation button
+        self.toggle_btn = QPushButton("🌐")
+        self.toggle_btn.setToolTip("Toggle: Bilingual / Original Only / Translation Only")
+        self.toggle_btn.setFixedSize(28, 28)
+        self.toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.toggle_btn.setStyleSheet(self._control_btn_style())
+        self.toggle_btn.clicked.connect(self._toggle_display_mode)
+        control_bar.addWidget(self.toggle_btn)
+        
+        # Font size buttons
+        self.font_plus_btn = QPushButton("A+")
+        self.font_plus_btn.setToolTip("Increase font size")
+        self.font_plus_btn.setFixedSize(28, 28)
+        self.font_plus_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.font_plus_btn.setStyleSheet(self._control_btn_style())
+        self.font_plus_btn.clicked.connect(self._increase_font)
+        control_bar.addWidget(self.font_plus_btn)
+        
+        self.font_minus_btn = QPushButton("A-")
+        self.font_minus_btn.setToolTip("Decrease font size")
+        self.font_minus_btn.setFixedSize(28, 28)
+        self.font_minus_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.font_minus_btn.setStyleSheet(self._control_btn_style())
+        self.font_minus_btn.clicked.connect(self._decrease_font)
+        control_bar.addWidget(self.font_minus_btn)
+        
+        control_bar.addStretch()
+        
+        # Save button
+        self.save_btn = QPushButton("💾")
+        self.save_btn.setToolTip("Save transcript")
+        self.save_btn.setFixedSize(28, 28)
+        self.save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.save_btn.setStyleSheet(self._control_btn_style())
+        self.save_btn.clicked.connect(self._save_transcript)
+        control_bar.addWidget(self.save_btn)
+        
+        # Stop button
+        self.stop_btn = QPushButton("⏹")
+        self.stop_btn.setToolTip("Stop translation")
+        self.stop_btn.setFixedSize(28, 28)
+        self.stop_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.stop_btn.setStyleSheet(
+            "QPushButton { background: rgba(243,139,168,150); color: white; "
+            "border-radius: 14px; border: none; font-size: 12px; } "
+            "QPushButton:hover { background: rgba(243,139,168,220); }"
+        )
+        self.stop_btn.clicked.connect(self.stop_requested.emit)
+        control_bar.addWidget(self.stop_btn)
+        
+        # Resize handle
+        self.grip = ResizeHandle(self)
+        control_bar.addWidget(self.grip)
+        
+        main_layout.addLayout(control_bar)
+        
+        # Initial size and position
+        w = self.subtitle_style.get("window_width", 400)
+        h = 350
+        self.resize(w, h)
+        
+        screen = QApplication.primaryScreen().availableGeometry()
+        x = screen.x() + screen.width() - w - 20
+        y = screen.y() + 100
+        self.move(x, y)
+    
+    def _control_btn_style(self):
+        return (
+            "QPushButton { background: rgba(255,255,255,40); color: white; "
+            "border-radius: 14px; border: none; font-size: 12px; } "
+            "QPushButton:hover { background: rgba(255,255,255,100); }"
+        )
+    
+    def _toggle_display_mode(self):
+        modes = ["bilingual", "original_only", "translation_only"]
+        current = self.subtitle_style.get("display_mode", "bilingual")
+        try:
+            idx = modes.index(current)
+            next_mode = modes[(idx + 1) % len(modes)]
+        except ValueError:
+            next_mode = "bilingual"
+        
+        self.subtitle_style["display_mode"] = next_mode
+        
+        # Update visibility
+        if next_mode == "bilingual":
+            self.subtitle_style["show_original"] = True
+            self.subtitle_style["show_translation"] = True
+            self.toggle_btn.setText("🌐")
+            self.toggle_btn.setToolTip("Bilingual mode")
+        elif next_mode == "original_only":
+            self.subtitle_style["show_original"] = True
+            self.subtitle_style["show_translation"] = False
+            self.toggle_btn.setText("A")
+            self.toggle_btn.setToolTip("Original text only")
+        elif next_mode == "translation_only":
+            self.subtitle_style["show_original"] = False
+            self.subtitle_style["show_translation"] = True
+            self.toggle_btn.setText("文")
+            self.toggle_btn.setToolTip("Translation only")
+        
+        self._refresh_all_bubbles()
+        self.style_changed.emit(self.subtitle_style.copy())
+    
+    def _increase_font(self):
+        self.subtitle_style["original_font_size"] = min(36, self.subtitle_style["original_font_size"] + 2)
+        self.subtitle_style["translation_font_size"] = min(32, self.subtitle_style["translation_font_size"] + 2)
+        self._refresh_all_bubbles()
+        self.style_changed.emit(self.subtitle_style.copy())
+    
+    def _decrease_font(self):
+        self.subtitle_style["original_font_size"] = max(10, self.subtitle_style["original_font_size"] - 2)
+        self.subtitle_style["translation_font_size"] = max(8, self.subtitle_style["translation_font_size"] - 2)
+        self._refresh_all_bubbles()
+        self.style_changed.emit(self.subtitle_style.copy())
+    
+    def _refresh_all_bubbles(self):
+        """Refresh all existing bubbles with new style"""
+        for chunk_id, widget in self.items:
+            widget.update_style(self.subtitle_style)
+    
+    def set_style(self, style_dict: dict):
+        """Set multiple style properties at once"""
+        self.subtitle_style.update(style_dict)
+        self.setWindowOpacity(self.subtitle_style.get("window_opacity", 0.85))
+        self._refresh_all_bubbles()
+        self.style_changed.emit(self.subtitle_style.copy())
+    
+    def update_text(self, chunk_id, original_text, translated_text=""):
+        """Update or add a subtitle bubble"""
+        if not original_text and not translated_text:
+            return
+        
+        # Cap max bubbles
+        max_bubbles = self.subtitle_style.get("max_bubbles", 50)
+        while len(self.items) >= max_bubbles:
+            old_id, old_widget = self.items.pop(0)
+            self.container_layout.removeWidget(old_widget)
+            old_widget.deleteLater()
+            if old_id in self.transcript_data:
+                del self.transcript_data[old_id]
+        
+        # Store data
+        if chunk_id not in self.transcript_data:
+            self.transcript_data[chunk_id] = {
+                'timestamp': time.strftime("%H:%M:%S"),
+                'original': original_text,
+                'translated': translated_text
+            }
+        else:
+            if original_text:
+                self.transcript_data[chunk_id]['original'] = original_text
+            if translated_text:
+                self.transcript_data[chunk_id]['translated'] = translated_text
+        
+        # Check if widget exists
+        existing = None
+        existing_idx = -1
+        for i, (cid, widget) in enumerate(self.items):
+            if cid == chunk_id:
+                existing = widget
+                existing_idx = i
+                break
+        
+        if existing:
+            if original_text:
+                existing.update_original(original_text)
+            if translated_text:
+                existing.update_translated(translated_text)
+        else:
+            # Create new bubble
+            timestamp = self.transcript_data[chunk_id]['timestamp']
+            bubble = SubtitleBubble(
+                chunk_id, timestamp, original_text, translated_text,
+                parent_style=self.subtitle_style
+            )
+            
+            # Insert in order
+            insert_idx = len(self.items)
+            for i, (cid, _) in enumerate(self.items):
+                if cid > chunk_id:
+                    insert_idx = i
+                    break
+            
+            self.items.insert(insert_idx, (chunk_id, bubble))
+            self.container_layout.insertWidget(insert_idx, bubble)
+        
+        # Auto scroll
+        if self.subtitle_style.get("auto_scroll", True):
+            QTimer.singleShot(10, self._scroll_to_bottom)
+    
+    def _scroll_to_bottom(self):
+        sb = self.scroll_area.verticalScrollBar()
+        sb.setValue(sb.maximum())
+    
+    def toggle_hide(self):
+        """Toggle window visibility"""
+        if self.isVisible():
+            self.hide()
+            self.hidden = True
+        else:
+            self.show()
+            self.hidden = False
+    
+    def clear_all(self):
+        """Clear all subtitle bubbles"""
+        for chunk_id, widget in self.items:
+            self.container_layout.removeWidget(widget)
+            widget.deleteLater()
+        self.items.clear()
+        self.transcript_data.clear()
+    
+    def _save_transcript(self):
+        """Save transcript to file"""
+        if not self.transcript_data:
+            return
+        
+        os.makedirs("transcripts", exist_ok=True)
+        filename = f"transcripts/transcript_{time.strftime('%Y%m%d_%H%M%S')}.txt"
+        
+        sorted_ids = sorted(self.transcript_data.keys())
+        try:
+            with open(filename, "w", encoding="utf-8") as f:
+                f.write(f"Transcript - {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write("=" * 50 + "\n\n")
+                for cid in sorted_ids:
+                    data = self.transcript_data[cid]
+                    f.write(f"[{data['timestamp']}] #{cid}\n")
+                    f.write(f"Original: {data['original']}\n")
+                    f.write(f"Translation: {data['translated']}\n")
+                    f.write("-" * 40 + "\n")
+            
+            original_text = self.save_btn.text()
+            self.save_btn.setText("✓")
+            QTimer.singleShot(2000, lambda: self.save_btn.setText(original_text))
+            
+        except Exception as e:
+            self.save_btn.setText("✗")
+            QTimer.singleShot(2000, lambda: self.save_btn.setText("💾"))
+            print(f"[Overlay] Save error: {e}")
+    
+    # Dragging
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.is_moving = True
+            self.oldPos = event.globalPosition().toPoint()
+    
+    def mouseMoveEvent(self, event):
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        if self.is_moving and self.oldPos:
+            delta = event.globalPosition().toPoint() - self.oldPos
+            self.move(self.x() + delta.x(), self.y() + delta.y())
+            self.oldPos = event.globalPosition().toPoint()
+    
+    def mouseReleaseEvent(self, event):
+        self.is_moving = False
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+
+
+# For backward compatibility
+OverlayWindow = EnhancedOverlayWindow

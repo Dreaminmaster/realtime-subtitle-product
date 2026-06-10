@@ -114,6 +114,9 @@ class Dashboard(QWidget):
         self.init_device_manager_tab()
         self.init_transcription_tab()
         self.init_translation_tab()
+        self.init_model_tab()
+        self.init_style_tab()
+        self.init_diagnostics_tab()
         
         # Footer Actions
         footer = QHBoxLayout()
@@ -716,6 +719,376 @@ class Dashboard(QWidget):
         tab.setLayout(layout)
         self.tabs.addTab(tab, "🈵 Translation")
 
+    def init_model_tab(self):
+        """Model Management tab - download/delete/switch ASR models"""
+        tab = QWidget()
+        layout = QVBoxLayout()
+        layout.setSpacing(10)
+        
+        header = QLabel("📦 Model Management")
+        header.setStyleSheet("font-size: 16px; font-weight: bold; color: #fab387;")
+        layout.addWidget(header)
+        
+        # Backend filter
+        filter_layout = QHBoxLayout()
+        filter_layout.addWidget(QLabel("Backend:"))
+        self.model_backend_combo = QComboBox()
+        self.model_backend_combo.addItems(["whisper", "mlx"])
+        self.model_backend_combo.currentTextChanged.connect(self._refresh_model_list)
+        filter_layout.addWidget(self.model_backend_combo)
+        filter_layout.addStretch()
+        
+        self.refresh_model_btn = QPushButton("🔄 Refresh")
+        self.refresh_model_btn.clicked.connect(self._refresh_model_list)
+        filter_layout.addWidget(self.refresh_model_btn)
+        layout.addLayout(filter_layout)
+        
+        # Model list
+        self.model_list_widget = QWidget()
+        self.model_list_layout = QVBoxLayout()
+        self.model_list_layout.setSpacing(5)
+        self.model_list_widget.setLayout(self.model_list_layout)
+        
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(self.model_list_widget)
+        scroll.setStyleSheet("QScrollArea { border: 1px solid #45475a; border-radius: 6px; }")
+        layout.addWidget(scroll)
+        
+        # Status
+        self.model_mgmt_status = QLabel("")
+        self.model_mgmt_status.setWordWrap(True)
+        self.model_mgmt_status.setStyleSheet("color: #a6adc8; font-size: 12px;")
+        layout.addWidget(self.model_mgmt_status)
+        
+        # Clear all button
+        clear_layout = QHBoxLayout()
+        clear_layout.addStretch()
+        self.clear_models_btn = QPushButton("🗑 Delete All Models")
+        self.clear_models_btn.setStyleSheet(
+            "QPushButton { background: #f38ba8; color: #1e1e2e; padding: 5px 10px; border-radius: 4px; } "
+            "QPushButton:hover { background: #eba0ac; }"
+        )
+        self.clear_models_btn.clicked.connect(self._clear_all_models)
+        clear_layout.addWidget(self.clear_models_btn)
+        layout.addLayout(clear_layout)
+        
+        tab.setLayout(layout)
+        self.tabs.addTab(tab, "📦 Models")
+        
+        self._refresh_model_list()
+    
+    def _refresh_model_list(self):
+        """Refresh model list display"""
+        from model_manager import model_manager
+        
+        backend = self.model_backend_combo.currentText()
+        models = model_manager.get_models(backend)
+        disk = model_manager.get_disk_usage()
+        
+        # Clear existing
+        while self.model_list_layout.count():
+            child = self.model_list_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+        
+        for m in models:
+            card = self._create_model_card(m, backend)
+            self.model_list_layout.addWidget(card)
+        
+        self.model_list_layout.addStretch()
+        
+        self.model_mgmt_status.setText(
+            f"Total disk usage: {disk['total_mb']} MB across {disk['model_count']} models"
+        )
+    
+    def _create_model_card(self, model_info, backend):
+        """Create a card widget for a single model"""
+        card = QFrame()
+        card.setStyleSheet(
+            "QFrame { background: #313244; border: 1px solid #45475a; "
+            "border-radius: 6px; padding: 8px; margin: 2px; }"
+        )
+        
+        layout = QHBoxLayout()
+        layout.setSpacing(8)
+        card.setLayout(layout)
+        
+        # Model info
+        info_layout = QVBoxLayout()
+        info_layout.setSpacing(2)
+        
+        name_label = QLabel(f"{model_info['name']}")
+        name_label.setStyleSheet("font-weight: bold; color: #cdd6f4; font-size: 13px;")
+        info_layout.addWidget(name_label)
+        
+        detail = f"{model_info['speed']} | {model_info['accuracy']} | {model_info['size_mb']} MB"
+        detail_label = QLabel(detail)
+        detail_label.setStyleSheet("color: #6c7086; font-size: 11px;")
+        info_layout.addWidget(detail_label)
+        
+        best_for = QLabel(model_info['best_for'])
+        best_for.setStyleSheet("color: #a6adc8; font-size: 10px; font-style: italic;")
+        info_layout.addWidget(best_for)
+        
+        layout.addLayout(info_layout, 1)
+        
+        # Action button
+        downloaded = model_info['downloaded']
+        if downloaded:
+            btn = QPushButton("✓ Downloaded")
+            btn.setStyleSheet(
+                "QPushButton { background: #a6e3a1; color: #1e1e2e; padding: 4px 8px; "
+                "border-radius: 4px; font-size: 11px; } "
+                "QPushButton:hover { background: #f38ba8; }"
+            )
+            btn.clicked.connect(
+                lambda checked, mid=model_info['id'], be=backend: self._delete_model(mid, be)
+            )
+        else:
+            btn = QPushButton("Download")
+            btn.setStyleSheet(
+                "QPushButton { background: #89b4fa; color: #1e1e2e; padding: 4px 8px; "
+                "border-radius: 4px; font-size: 11px; } "
+                "QPushButton:hover { background: #b4befe; }"
+            )
+            btn.clicked.connect(
+                lambda checked, mid=model_info['id'], be=backend: self._download_model(mid, be)
+            )
+        
+        if model_info.get('recommended'):
+            rec_label = QLabel("⭐")
+            rec_label.setToolTip("Recommended")
+            layout.addWidget(rec_label)
+        
+        layout.addWidget(btn)
+        
+        return card
+    
+    def _download_model(self, model_id, backend):
+        """Download a model"""
+        from model_manager import model_manager
+        
+        self.model_mgmt_status.setText(f"Downloading {model_id}...")
+        self.model_mgmt_status.setStyleSheet("color: #fab387; font-size: 12px;")
+        
+        def on_done(success, error):
+            if success:
+                self.model_mgmt_status.setText(f"✅ Downloaded {model_id}")
+                self.model_mgmt_status.setStyleSheet("color: #a6e3a1; font-size: 12px;")
+            else:
+                self.model_mgmt_status.setText(f"❌ Failed: {error}")
+                self.model_mgmt_status.setStyleSheet("color: #f38ba8; font-size: 12px;")
+            self._refresh_model_list()
+        
+        model_manager.download_model(model_id, backend, done_callback=on_done)
+    
+    def _delete_model(self, model_id, backend):
+        """Delete a model with confirmation"""
+        from PyQt6.QtWidgets import QMessageBox
+        
+        reply = QMessageBox.question(
+            self, "Delete Model",
+            f"Delete model '{model_id}'?\nThis will free up disk space.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        
+        from model_manager import model_manager
+        success = model_manager.delete_model(model_id, backend)
+        
+        if success:
+            self.model_mgmt_status.setText(f"✅ Deleted {model_id}")
+            self.model_mgmt_status.setStyleSheet("color: #a6e3a1; font-size: 12px;")
+        else:
+            self.model_mgmt_status.setText(f"❌ Failed to delete {model_id}")
+            self.model_mgmt_status.setStyleSheet("color: #f38ba8; font-size: 12px;")
+        
+        self._refresh_model_list()
+    
+    def _clear_all_models(self):
+        """Delete all downloaded models"""
+        from PyQt6.QtWidgets import QMessageBox
+        from model_manager import model_manager
+        
+        reply = QMessageBox.question(
+            self, "Delete All Models",
+            "Are you sure you want to delete ALL downloaded models?\n\n"
+            "You will need to download them again to use the app.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        
+        success = model_manager.clear_all_models()
+        if success:
+            self.model_mgmt_status.setText("✅ All models deleted")
+        else:
+            self.model_mgmt_status.setText("❌ Error deleting models")
+        
+        self._refresh_model_list()
+
+    def init_style_tab(self):
+        """Subtitle style customization tab"""
+        tab = QWidget()
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; }")
+        
+        content = QWidget()
+        layout = QFormLayout()
+        layout.setSpacing(10)
+        content.setLayout(layout)
+        
+        header = QLabel("🎨 Subtitle Style")
+        header.setStyleSheet("font-size: 16px; font-weight: bold; color: #fab387;")
+        layout.addRow(header)
+        
+        # Font size
+        self.original_font_size = QSpinBox()
+        self.original_font_size.setRange(8, 48)
+        self.original_font_size.setValue(18)
+        self.original_font_size.setSuffix(" px")
+        layout.addRow("Original Font Size:", self.original_font_size)
+        
+        self.translation_font_size = QSpinBox()
+        self.translation_font_size.setRange(8, 48)
+        self.translation_font_size.setValue(16)
+        self.translation_font_size.setSuffix(" px")
+        layout.addRow("Translation Font Size:", self.translation_font_size)
+        
+        # Colors
+        self.original_color = QComboBox()
+        self.original_color.addItems(["#ffffff", "#cdd6f4", "#a6e3a1", "#fab387", "#f9e2af", "#89b4fa"])
+        self.original_color.setCurrentText("#ffffff")
+        layout.addRow("Original Text Color:", self.original_color)
+        
+        self.translation_color = QComboBox()
+        self.translation_color.addItems(["#89b4fa", "#a6e3a1", "#fab387", "#f9e2af", "#ffffff", "#cdd6f4"])
+        self.translation_color.setCurrentText("#89b4fa")
+        layout.addRow("Translation Color:", self.translation_color)
+        
+        # Window opacity
+        self.window_opacity = QDoubleSpinBox()
+        self.window_opacity.setRange(0.3, 1.0)
+        self.window_opacity.setSingleStep(0.05)
+        self.window_opacity.setValue(0.85)
+        layout.addRow("Window Opacity:", self.window_opacity)
+        
+        # Window width
+        self.window_width = QSpinBox()
+        self.window_width.setRange(200, 1200)
+        self.window_width.setValue(400)
+        self.window_width.setSuffix(" px")
+        layout.addRow("Window Width:", self.window_width)
+        
+        # Display mode
+        self.display_mode = QComboBox()
+        self.display_mode.addItems(["bilingual", "original_only", "translation_only"])
+        layout.addRow("Display Mode:", self.display_mode)
+        
+        # Apply button
+        apply_btn = QPushButton("Apply Style")
+        apply_btn.setStyleSheet(
+            "QPushButton { background: #89b4fa; color: #1e1e2e; padding: 10px; "
+            "border-radius: 6px; font-weight: bold; }"
+        )
+        apply_btn.clicked.connect(self._apply_style)
+        layout.addRow(apply_btn)
+        
+        scroll.setWidget(content)
+        
+        tab_layout = QVBoxLayout()
+        tab_layout.addWidget(scroll)
+        tab.setLayout(tab_layout)
+        
+        self.tabs.addTab(tab, "🎨 Style")
+    
+    def _apply_style(self):
+        """Apply subtitle style to overlay window"""
+        if hasattr(self, 'overlay_window') and self.overlay_window:
+            style = {
+                "original_font_size": self.original_font_size.value(),
+                "translation_font_size": self.translation_font_size.value(),
+                "original_color": self.original_color.currentText(),
+                "translation_color": self.translation_color.currentText(),
+                "window_opacity": self.window_opacity.value(),
+                "window_width": self.window_width.value(),
+                "display_mode": self.display_mode.currentText(),
+            }
+            self.overlay_window.set_style(style)
+            self.status_label.setText("✅ Style applied")
+            self.status_label.setStyleSheet("font-size: 18px; color: #a6e3a1;")
+    
+    def init_diagnostics_tab(self):
+        """System diagnostics tab"""
+        tab = QWidget()
+        layout = QVBoxLayout()
+        layout.setSpacing(10)
+        
+        header = QLabel("🔍 System Diagnostics")
+        header.setStyleSheet("font-size: 16px; font-weight: bold; color: #fab387;")
+        layout.addWidget(header)
+        
+        # Run diagnostics button
+        self.run_diag_btn = QPushButton("▶ Run Diagnostics")
+        self.run_diag_btn.setStyleSheet(
+            "QPushButton { background: #89b4fa; color: #1e1e2e; padding: 10px; "
+            "border-radius: 6px; font-weight: bold; }"
+        )
+        self.run_diag_btn.clicked.connect(self._run_diagnostics)
+        layout.addWidget(self.run_diag_btn)
+        
+        # Results area
+        self.diag_results = QTextEdit()
+        self.diag_results.setReadOnly(True)
+        self.diag_results.setStyleSheet(
+            "QTextEdit { background: #11111b; color: #cdd6f4; border: 1px solid #45475a; "
+            "border-radius: 6px; padding: 10px; font-family: monospace; font-size: 12px; }"
+        )
+        layout.addWidget(self.diag_results)
+        
+        # Log viewer
+        log_layout = QHBoxLayout()
+        log_layout.addWidget(QLabel("Recent Logs:"))
+        self.view_logs_btn = QPushButton("📄 View")
+        self.view_logs_btn.clicked.connect(self._view_logs)
+        log_layout.addWidget(self.view_logs_btn)
+        log_layout.addStretch()
+        layout.addLayout(log_layout)
+        
+        tab.setLayout(layout)
+        self.tabs.addTab(tab, "🔍 Diagnostics")
+    
+    def _run_diagnostics(self):
+        """Run and display system diagnostics"""
+        from diagnostics import diagnostics
+        
+        self.run_diag_btn.setEnabled(False)
+        self.run_diag_btn.setText("Running...")
+        
+        report = diagnostics.get_status_text()
+        self.diag_results.setText(report)
+        
+        self.run_diag_btn.setEnabled(True)
+        self.run_diag_btn.setText("▶ Run Diagnostics")
+    
+    def _view_logs(self):
+        """View recent log entries"""
+        from diagnostics import logger
+        
+        logs = logger.get_logs(50)
+        if logs:
+            text = "Recent Logs:\n" + "=" * 40 + "\n"
+            for line in logs[-30:]:
+                text += line
+            self.diag_results.setText(text)
+        else:
+            self.diag_results.setText("No logs available yet.")
+
     def populate_devices(self):
         self.device_combo.clear()
         self.device_combo.addItem("Auto (Default)", "auto")
@@ -739,9 +1112,6 @@ class Dashboard(QWidget):
         import configparser
         import os
         
-        # Update config object logic would go here, 
-        # For now, we write directly to config.ini similarly to settings_window.py
-        
         cp = configparser.ConfigParser()
         config_path = os.path.join(os.path.dirname(__file__), "config.ini")
         cp.read(config_path)
@@ -750,6 +1120,7 @@ class Dashboard(QWidget):
         if not cp.has_section("api"): cp.add_section("api")
         if not cp.has_section("translation"): cp.add_section("translation")
         if not cp.has_section("transcription"): cp.add_section("transcription")
+        if not cp.has_section("display"): cp.add_section("display")
         
         # Audio
         idx = self.device_combo.currentData()
@@ -775,7 +1146,8 @@ class Dashboard(QWidget):
         with open(config_path, 'w') as f:
             cp.write(f)
             
-        self.status_label.setText("Saved! Please restart.")
+        self.status_label.setText("✅ Settings saved! Restart to apply.")
+        self.status_label.setStyleSheet("font-size: 18px; color: #a6e3a1;")
 
     def on_start(self):
         # 1. Update UI to Loading State
@@ -790,11 +1162,7 @@ class Dashboard(QWidget):
         self.startup_worker.finished.connect(self.on_pipeline_ready)
         self.startup_worker.start()
 
-    def on_pipeline_ready(self, _, pipeline):
-        # Create Window on Main Thread
-        from main import OverlayWindow
-        from config import config
-        
+    def on_pipeline_ready(self, window, pipeline):
         if not pipeline:
              self.status_label.setText("Initialization Failed Check Console")
              self.start_btn.setEnabled(True)
@@ -802,19 +1170,14 @@ class Dashboard(QWidget):
              return
 
         self.pipeline = pipeline
-        self.overlay_window = OverlayWindow(
-            display_duration=config.display_duration,
-            window_width=config.window_width
-        )
-        self.overlay_window.show()
-
-        # Connect Signals
-        self.pipeline.signals.update_text.connect(self.overlay_window.update_text)
+        self.overlay_window = window
+        
+        # Window is already shown by start_overlay_session
+        # Connect additional signals
         if hasattr(self.overlay_window, 'stop_requested'):
              self.overlay_window.stop_requested.connect(self.on_stop)
-
-        # Start Pipeline Thread
-        self.pipeline.start()
+        if hasattr(self.overlay_window, 'style_changed'):
+             self.overlay_window.style_changed.connect(self._on_style_changed)
 
         self.status_label.setText("Running...")
         self.status_label.setStyleSheet("font-size: 18px; color: #a6e3a1;")
@@ -823,6 +1186,27 @@ class Dashboard(QWidget):
         self.stop_btn.show()
         
         self.showMinimized()
+    
+    def _on_style_changed(self, style):
+        """Sync style changes back to the style tab"""
+        if hasattr(self, 'original_font_size'):
+            self.original_font_size.blockSignals(True)
+            self.original_font_size.setValue(style.get('original_font_size', 18))
+            self.original_font_size.blockSignals(False)
+        if hasattr(self, 'translation_font_size'):
+            self.translation_font_size.blockSignals(True)
+            self.translation_font_size.setValue(style.get('translation_font_size', 16))
+            self.translation_font_size.blockSignals(False)
+        if hasattr(self, 'window_opacity'):
+            self.window_opacity.blockSignals(True)
+            self.window_opacity.setValue(style.get('window_opacity', 0.85))
+            self.window_opacity.blockSignals(False)
+        if hasattr(self, 'display_mode'):
+            self.display_mode.blockSignals(True)
+            idx = self.display_mode.findText(style.get('display_mode', 'bilingual'))
+            if idx >= 0:
+                self.display_mode.setCurrentIndex(idx)
+            self.display_mode.blockSignals(False)
 
     def on_stop(self):
         if hasattr(self, 'pipeline') and self.pipeline:
@@ -845,9 +1229,14 @@ class StartupWorker(QThread):
 
     def run(self):
         try:
-            from main import Pipeline
-            pipeline = Pipeline()
-            self.finished.emit(None, pipeline)
+            # Import the Pipeline class from main module
+            import main as main_module
+            # Use the Pipeline class defined in main.py via start_overlay_session
+            # Actually, we create the pipeline directly
+            from main import start_overlay_session
+            # start_overlay_session returns (window, pipeline)
+            win, pipeline = start_overlay_session()
+            self.finished.emit(win, pipeline)
         except Exception as e:
             print(f"Startup Error: {e}")
             import traceback

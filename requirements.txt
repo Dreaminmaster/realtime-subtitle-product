@@ -1,9 +1,13 @@
-PyQt6
-faster-whisper
-sounddevice
-numpy
-openai
+PyQt6>=6.5
+faster-whisper>=1.0
+sounddevice>=0.4
+numpy>=1.24
+openai>=1.0
+httpx>=0.25
+huggingface-hub>=0.20
 pyobjc-framework-CoreAudio; sys_platform == 'darwin'
-funasr
-modelscope
-watchdog
+pyobjc-framework-AVFoundation; sys_platform == 'darwin'
+funasr>=1.0
+modelscope>=1.10
+# Optional: for mlx backend (Apple Silicon only)
+# mlx-whisper>=0.3; sys_platform == 'darwin'
