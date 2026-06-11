@@ -245,10 +245,20 @@ if [ -n "$DEVICE" ]; then
         end tell
     " 2>/dev/null || true
     sleep 2
-    hdiutil detach "${DEVICE}" -force 2>/dev/null
+    hdiutil detach "${DEVICE}" -force 2>/dev/null || true
+    sleep 1
 fi
 
-hdiutil convert "${DIST_DIR}/tmp.dmg" -format UDZO -o "${DIST_DIR}/${DMG_NAME}" 2>&1
+# Remove old DMG first
+rm -f "${DIST_DIR}/${DMG_NAME}"
+
+hdiutil convert "${DIST_DIR}/tmp.dmg" -format UDZO -o "${DIST_DIR}/${DMG_NAME}" 2>&1 || {
+    echo "  convert failed, trying fallback..."
+    hdiutil create -volname "${APP_NAME}" \
+        -srcfolder "${TMP_DMG_DIR}" \
+        -ov -format UDZO \
+        "${DIST_DIR}/${DMG_NAME}" 2>&1
+}
 rm -f "${DIST_DIR}/tmp.dmg"
 
 # ---- Step 6: Verify ----
