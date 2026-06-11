@@ -71,6 +71,12 @@ class Config:
         self.display_duration = self._getfloat("display", "display_duration", 3.0)
         self.window_width = self._getint("display", "window_width", 800)
         self.window_height = self._getint("display", "window_height", 120)
+        
+        # Normalize: ensure no field is None (avoids NoneType subscript crashes)
+        self.api_key = self.api_key or ""
+        self.api_base_url = self.api_base_url or ""
+        self.model = self.model or ""
+        self.translation_mode = self.translation_mode or "off"
     
     def _get(self, section, key, fallback=""):
         try:
@@ -106,13 +112,23 @@ class Config:
             print(f"[Config] Error detecting audio devices: {e}")
             return None
     
+    def _safe_mask(self, value):
+        """Safely mask a secret value — handles None/empty gracefully."""
+        if not value:
+            return "(not set)"
+        value = str(value)
+        if len(value) <= 12:
+            return "***"
+        return f"{value[:8]}...{value[-4:]}"
+    
     def print_config(self):
-        """Print current configuration for debugging"""
+        """Print current configuration for debugging — never crashes."""
         print("[Config] Current settings:")
-        print(f"  API Base URL: {self.api_base_url or '(default OpenAI)'}")
-        print(f"  API Key: {self.api_key[:8]}...{self.api_key[-4:] if len(self.api_key) > 12 else '***'}")
-        print(f"  Model: {self.model}")
+        print(f"  API Base URL: {self.api_base_url or '(not set)'}")
+        print(f"  API Key: {self._safe_mask(self.api_key)}")
+        print(f"  Model: {self.model or '(not set)'}")
         print(f"  Target Language: {self.target_lang}")
+        print(f"  Translation Mode: {self.translation_mode}")
         print(f"  ASR Backend: {self.asr_backend}")
         print(f"  Whisper Model: {self.whisper_model}")
         print(f"  FunASR Model: {self.funasr_model}")
