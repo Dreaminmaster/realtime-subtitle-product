@@ -174,6 +174,7 @@ def create_pipeline():
     
     class WorkerSignals(QObject):
         update_text = pyqtSignal(int, str, str)
+        audio_status = pyqtSignal(str, float)  # (status_text, volume_level 0.0-1.0)
     
     class Pipeline(QObject):
         def __init__(self, signals_obj):
@@ -260,6 +261,11 @@ def create_pipeline():
                     if not self.running:
                         break
                     
+                    # Emit audio status — current volume level
+                    rms_now = np.sqrt(np.mean(audio_chunk**2))
+                    status = "🎤 Listening" if rms_now > self.audio.silence_threshold else "🔇 Silent"
+                    self.signals.audio_status.emit(status, min(float(rms_now) * 50, 1.0))
+                    
                     buffer = np.concatenate([buffer, audio_chunk])
                     now = time.time()
                     buffer_duration = len(buffer) / self.audio.sample_rate
@@ -323,8 +329,12 @@ def create_pipeline():
         def _run_translation(self, text, chunk_id):
             try:
                 translated = self.translation_engine.translate(text)
-                self.signals.update_text.emit(chunk_id, text, translated)
+                # Don't emit empty translation (off mode / original_only) — leave original alone
+                if translated:
+                    self.signals.update_text.emit(chunk_id, text, translated)
             except Exception:
+                log.exception(f"Translation error for chunk {chunk_id}")
+                # Still emit so user sees original text
                 self.signals.update_text.emit(chunk_id, text, "[Translation Failed]")
     
     signals = WorkerSignals()
@@ -350,6 +360,7 @@ def create_and_show_overlay(pipeline, signals):
     
     # Connect signals
     signals.update_text.connect(window.update_text)
+    signals.audio_status.connect(window.update_audio_status)
     window.stop_requested.connect(pipeline.stop)
     
     _overlay_window = window

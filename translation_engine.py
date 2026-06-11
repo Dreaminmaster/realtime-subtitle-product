@@ -82,7 +82,9 @@ class OnlineAPITranslator(BaseTranslator):
         self.previous_text = ""
         self.previous_translation = ""
         
-        # URLs to try in order
+        # URLs to try in order — auto-fix missing scheme
+        if base_url and not base_url.startswith(("http://", "https://")):
+            base_url = "http://" + base_url
         self.base_url = base_url
         self.api_key = api_key
         
@@ -140,8 +142,6 @@ class OnlineAPITranslator(BaseTranslator):
                 timeout=10.0
             )
             result = response.choices[0].message.content.strip()
-            
-            # Strip thinking tags
             result = re.sub(r'<think>.*?</think>', '', result, flags=re.DOTALL).strip()
             
             self.previous_text = text
@@ -149,8 +149,30 @@ class OnlineAPITranslator(BaseTranslator):
             return result
             
         except Exception as e:
-            print(f"[OnlineTranslator] Error: {e}")
-            return "[Translation Failed]"
+            import logging
+            log = logging.getLogger("RealtimeSubtitle")
+            err_str = str(e)
+            log.error(f"Translation error: {err_str}")
+            
+            # Map to user-friendly messages
+            if "Connection refused" in err_str or "Connection error" in err_str:
+                return f"[Translation Failed: connection refused — is the server running?]"
+            elif "Invalid URL" in err_str or "No address" in err_str:
+                return f"[Translation Failed: invalid base URL — must start with http:// or https://]"
+            elif "Name or service not known" in err_str or "getaddrinfo" in err_str:
+                return f"[Translation Failed: cannot reach server — check the base URL]"
+            elif "timeout" in err_str.lower():
+                return "[Translation Failed: request timed out — server may be overloaded]"
+            elif "401" in err_str or "Unauthorized" in err_str:
+                return "[Translation Failed: invalid API key]"
+            elif "403" in err_str or "Forbidden" in err_str:
+                return "[Translation Failed: access denied — check API key and permissions]"
+            elif "404" in err_str or "model" in err_str.lower() and "not found" in err_str.lower():
+                return f"[Translation Failed: model not found — \"{self.model}\"]"
+            elif "429" in err_str:
+                return "[Translation Failed: rate limited — wait and retry]"
+            else:
+                return f"[Translation Failed: {err_str[:80]}]"
 
 
 class LocalLLMTranslator(OnlineAPITranslator):
@@ -245,6 +267,8 @@ class TranslationEngine:
     def translate(self, text: str) -> str:
         if self._translator is None:
             self.set_mode("online")
+        if self._current_mode == "off":
+            return ""  # original_only mode — skip translation entirely
         return self._translator.translate(text)
     
     def check_health(self) -> dict:

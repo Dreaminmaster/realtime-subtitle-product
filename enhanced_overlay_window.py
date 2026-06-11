@@ -276,6 +276,15 @@ class EnhancedOverlayWindow(QWidget):
         self.font_minus_btn.clicked.connect(self._decrease_font)
         control_bar.addWidget(self.font_minus_btn)
         
+        # Clear button
+        self.clear_btn = QPushButton("🗑")
+        self.clear_btn.setToolTip("Clear all subtitles")
+        self.clear_btn.setFixedSize(28, 28)
+        self.clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.clear_btn.setStyleSheet(self._control_btn_style())
+        self.clear_btn.clicked.connect(self.clear_all)
+        control_bar.addWidget(self.clear_btn)
+        
         control_bar.addStretch()
         
         # Save button
@@ -306,14 +315,14 @@ class EnhancedOverlayWindow(QWidget):
         
         main_layout.addLayout(control_bar)
         
-        # Initial size and position
+        # Initial size and position — bottom-centered like standard subtitles
         w = self.subtitle_style.get("window_width", 400)
-        h = 350
+        h = 250
         self.resize(w, h)
         
         screen = QApplication.primaryScreen().availableGeometry()
-        x = screen.x() + screen.width() - w - 20
-        y = screen.y() + 100
+        x = screen.x() + (screen.width() - w) // 2
+        y = screen.y() + screen.height() - h - 60
         self.move(x, y)
     
     def _control_btn_style(self):
@@ -461,6 +470,11 @@ class EnhancedOverlayWindow(QWidget):
             widget.deleteLater()
         self.items.clear()
         self.transcript_data.clear()
+    
+    def update_audio_status(self, status_text, volume_level):
+        """Update audio monitoring indicator"""
+        if hasattr(self, 'save_btn'):
+            self.save_btn.setToolTip(f"{status_text} | vol: {volume_level:.2f}")
     
     def _save_transcript(self):
         """Save transcript to file"""

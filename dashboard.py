@@ -24,10 +24,12 @@ QTabWidget::pane {
 QTabBar::tab {
     background: #313244;
     color: #a6adc8;
-    padding: 10px 20px;
+    padding: 8px 12px;
+    font-size: 12px;
     border-top-left-radius: 8px;
     border-top-right-radius: 8px;
     margin-right: 2px;
+    min-width: 60px;
 }
 QTabBar::tab:selected {
     background: #89b4fa;
@@ -90,7 +92,7 @@ class Dashboard(QWidget):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Real-Time Translator - Control Center")
+        self.setWindowTitle("Realtime Subtitle — Control Center")
         self.setMinimumSize(600, 500)
         self.setStyleSheet(STYLESHEET)
         
@@ -101,7 +103,7 @@ class Dashboard(QWidget):
         self.setLayout(self.layout)
         
         # Header
-        header = QLabel("🎙️ Real-Time Translator")
+        header = QLabel("🎙️ Realtime Subtitle")
         header.setStyleSheet("font-size: 24px; font-weight: bold; color: #89b4fa;")
         self.layout.addWidget(header)
         
@@ -141,7 +143,7 @@ class Dashboard(QWidget):
         
         btn_layout = QHBoxLayout()
         
-        self.start_btn = QPushButton("▶ Launch Translator")
+        self.start_btn = QPushButton("▶ Launch")
         self.start_btn.setFixedSize(200, 60)
         self.start_btn.setStyleSheet("font-size: 16px; background-color: #89b4fa; border-radius: 10px;")
         self.start_btn.clicked.connect(self.on_start)
@@ -160,7 +162,6 @@ class Dashboard(QWidget):
         info.setStyleSheet("color: #6c7086; font-style: italic;")
         layout.addWidget(info)
         
-        tab.setLayout(layout)
         self.tabs.addTab(tab, "🏠 Home")
 
     def init_audio_tab(self):
@@ -693,6 +694,7 @@ class Dashboard(QWidget):
         
         self.base_url = QLineEdit(config.api_base_url or "")
         self.base_url.setPlaceholderText("https://api.openai.com/v1")
+        self.base_url.setToolTip("Must start with http:// or https://. Example: http://localhost:1234/v1")
         layout.addRow("Base URL:", self.base_url)
         
         # Model selection with refresh button
@@ -700,11 +702,12 @@ class Dashboard(QWidget):
         self.model = QComboBox()
         self.model.setEditable(True)
         self.model.addItem(config.model)
+        self.model.setToolTip("Model name. Use 'Fetch' to pull from server.")
         model_layout.addWidget(self.model)
         
-        self.refresh_models_btn = QPushButton("🔄")
-        self.refresh_models_btn.setFixedWidth(40)
-        self.refresh_models_btn.setToolTip("Refresh model list from API")
+        self.refresh_models_btn = QPushButton("Fetch")
+        self.refresh_models_btn.setFixedWidth(50)
+        self.refresh_models_btn.setToolTip("Fetch models from API server")
         self.refresh_models_btn.clicked.connect(self.refresh_model_list)
         model_layout.addWidget(self.refresh_models_btn)
         
@@ -716,8 +719,70 @@ class Dashboard(QWidget):
         self.target_lang.setCurrentText(config.target_lang)
         layout.addRow("Target Language:", self.target_lang)
         
+        # Test Translation button
+        test_layout = QHBoxLayout()
+        self.test_trans_btn = QPushButton("🔗 Test Connection")
+        self.test_trans_btn.setStyleSheet(
+            "QPushButton { background: #45475a; color: #cdd6f4; padding: 8px 16px; "
+            "border-radius: 4px; font-weight: bold; } "
+            "QPushButton:hover { background: #585b70; }"
+        )
+        self.test_trans_btn.clicked.connect(self._test_translation)
+        test_layout.addWidget(self.test_trans_btn)
+        test_layout.addStretch()
+        layout.addRow(test_layout)
+        
+        # Test result label
+        self.trans_test_result = QLabel("")
+        self.trans_test_result.setWordWrap(True)
+        self.trans_test_result.setStyleSheet("color: #6c7086; font-size: 12px; padding-top: 5px;")
+        layout.addRow(self.trans_test_result)
+        
         tab.setLayout(layout)
         self.tabs.addTab(tab, "🈵 Translation")
+    
+    def _test_translation(self):
+        """Test translation backend with current settings"""
+        from translation_engine import translation_engine
+        import logging
+        log = logging.getLogger("RealtimeSubtitle")
+        
+        # Get values
+        api_key = self.api_key.text().strip()
+        base_url = self.base_url.text().strip()
+        model = self.model.currentText().strip()
+        target_lang = self.target_lang.currentText()
+        
+        # Auto-fix base URL
+        if base_url and not base_url.startswith(("http://", "https://")):
+            base_url = "http://" + base_url
+            self.base_url.setText(base_url)
+        
+        self.trans_test_result.setText("Testing...")
+        self.trans_test_result.setStyleSheet("color: #fab387; font-size: 12px;")
+        self.test_trans_btn.setEnabled(False)
+        
+        def _do_test():
+            try:
+                translation_engine.set_mode("online", base_url=base_url, api_key=api_key, model=model)
+                # Simple health check: list models
+                health = translation_engine.check_health()
+                if health.get("available"):
+                    self.trans_test_result.setText("✅ Connection OK — server responded")
+                    self.trans_test_result.setStyleSheet("color: #a6e3a1; font-size: 12px;")
+                else:
+                    err = health.get("error", "unknown")
+                    self.trans_test_result.setText(f"❌ Failed: {err}")
+                    self.trans_test_result.setStyleSheet("color: #f38ba8; font-size: 12px;")
+            except Exception as e:
+                log.error(f"Translation test failed: {e}")
+                self.trans_test_result.setText(f"❌ Failed: {str(e)[:160]}")
+                self.trans_test_result.setStyleSheet("color: #f38ba8; font-size: 12px;")
+            finally:
+                self.test_trans_btn.setEnabled(True)
+        
+        import threading
+        threading.Thread(target=_do_test, daemon=True).start()
 
     def init_model_tab(self):
         """Model Management tab - download/delete/switch ASR models"""

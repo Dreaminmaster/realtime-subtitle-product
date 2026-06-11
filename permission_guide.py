@@ -92,11 +92,11 @@ def create_permission_guide(parent=None):
             layout.addWidget(title)
             
             subtitle = QLabel(
-                "Realtime Subtitle needs the following permissions to work properly. "
+                "Realtime Subtitle needs the following permissions to work properly.\n"
                 "You can change these later in System Settings."
             )
             subtitle.setWordWrap(True)
-            subtitle.setStyleSheet("color: #6c7086; font-size: 13px; margin-bottom: 10px;")
+            subtitle.setStyleSheet("color: #cdd6f4; font-size: 13px; margin-bottom: 10px;")
             layout.addWidget(subtitle)
             
             # Microphone card
@@ -173,12 +173,12 @@ def create_permission_guide(parent=None):
             card_layout.addWidget(title_label)
             
             reason_label = QLabel(reason)
-            reason_label.setStyleSheet("color: #fab387; font-size: 12px;")
+            reason_label.setStyleSheet("color: #f9e2af; font-size: 12px;")
             reason_label.setWordWrap(True)
             card_layout.addWidget(reason_label)
             
             desc_label = QLabel(description)
-            desc_label.setStyleSheet("color: #a6adc8; font-size: 12px;")
+            desc_label.setStyleSheet("color: #bac2de; font-size: 12px;")
             desc_label.setWordWrap(True)
             card_layout.addWidget(desc_label)
             
