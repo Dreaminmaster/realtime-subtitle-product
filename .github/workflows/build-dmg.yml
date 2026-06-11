@@ -1,0 +1,39 @@
+name: Build DMG
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version, for example 1.0.0"
+        required: true
+        default: "1.0.0"
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Show environment
+        run: |
+          sw_vers
+          python3 --version
+          pwd
+          ls -la
+      - name: Make build script executable
+        run: chmod +x build_dmg.sh
+      - name: Build DMG
+        run: bash build_dmg.sh "${{ github.event.inputs.version }}"
+      - name: List generated files
+        run: |
+          find . -name "*.dmg" -print
+          ls -la
+          ls -la dist || true
+          ls -la release || true
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: RealtimeSubtitle-DMG
+          path: |
+            *.dmg
+            dist/*.dmg
+            release/*.dmg
+          if-no-files-found: error
