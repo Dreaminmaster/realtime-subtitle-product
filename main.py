@@ -219,11 +219,11 @@ def create_pipeline():
             
             from translation_engine import translation_engine
             self.translation_engine = translation_engine
-            trans_mode = getattr(config, 'translation_mode', 'online')
+            trans_mode = getattr(config, 'translation_mode', 'off')
             self.translation_engine.set_mode(
                 trans_mode,
                 base_url=config.api_base_url,
-                api_key=config.api_key,
+                api_key=config.api_key or "",
                 model=config.model
             )
             log.info(f"Pipeline: translation engine ({trans_mode}) initialized")

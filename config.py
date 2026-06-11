@@ -19,13 +19,17 @@ class Config:
         
         # API settings (env vars take precedence)
         self.api_base_url = os.getenv("OPENAI_BASE_URL") or self._get("api", "base_url") or None
-        self.api_key = os.getenv("OPENAI_API_KEY") or self._get("api", "api_key", "dummy-key-for-local")
+        self.api_key = os.getenv("OPENAI_API_KEY") or self._get("api", "api_key") or None
         
         # Translation settings
         self.model = self._get("translation", "model", "gpt-3.5-turbo")
-        self.model = self._get("translation", "model", "gpt-3.5-turbo")
         self.target_lang = self._get("translation", "target_lang", "Chinese")
         self.translation_threads = self._getint("translation", "threads", 4)
+        # Default to 'off' if no valid API key configured — don't call OpenAI with dummies
+        if not self.api_key or self.api_key in ("dummy-key-for-local", "dummy-key", "not-needed", ""):
+            self.translation_mode = "off"
+        else:
+            self.translation_mode = self._get("translation", "mode", "online")
         
         # Transcription settings
         self.asr_backend = self._get("transcription", "backend", "whisper").lower()

@@ -139,29 +139,32 @@ class Dashboard(QWidget):
         
         self.status_label = QLabel("Ready")
         self.status_label.setStyleSheet("font-size: 18px; color: #a6e3a1;")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.status_label)
         
-        btn_layout = QHBoxLayout()
+        layout.addSpacing(10)
         
         self.start_btn = QPushButton("▶ Launch")
-        self.start_btn.setFixedSize(200, 60)
+        self.start_btn.setFixedSize(220, 60)
         self.start_btn.setStyleSheet("font-size: 16px; background-color: #89b4fa; border-radius: 10px;")
         self.start_btn.clicked.connect(self.on_start)
+        layout.addWidget(self.start_btn, 0, Qt.AlignmentFlag.AlignCenter)
         
-        self.stop_btn = QPushButton("⏹ Stop Translator")
-        self.stop_btn.setFixedSize(200, 60)
+        self.stop_btn = QPushButton("⏹ Stop")
+        self.stop_btn.setFixedSize(220, 60)
         self.stop_btn.setStyleSheet("font-size: 16px; background-color: #f38ba8; border-radius: 10px;")
         self.stop_btn.clicked.connect(self.on_stop)
         self.stop_btn.hide()
+        layout.addWidget(self.stop_btn, 0, Qt.AlignmentFlag.AlignCenter)
         
-        layout.addLayout(btn_layout)
-        layout.addWidget(self.start_btn)
-        layout.addWidget(self.stop_btn)
+        layout.addSpacing(10)
         
-        info = QLabel("The translator will open as an overlay window.\nYou can minimize this dashboard.")
+        info = QLabel("Overlay will appear as a floating subtitle window.\nYou can minimize this dashboard.")
         info.setStyleSheet("color: #6c7086; font-style: italic;")
+        info.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(info)
         
+        tab.setLayout(layout)
         self.tabs.addTab(tab, "🏠 Home")
 
     def init_audio_tab(self):
@@ -1304,6 +1307,14 @@ class Dashboard(QWidget):
             self.display_mode.blockSignals(False)
 
     def on_stop(self):
+        import logging
+        log = logging.getLogger("RealtimeSubtitle")
+        
+        # Debounce: disable button immediately
+        self.stop_btn.setEnabled(False)
+        self.stop_btn.setText("Stopping...")
+        log.info("Stop requested")
+        
         if hasattr(self, 'pipeline') and self.pipeline:
             self.pipeline.stop()
             self.pipeline = None
@@ -1311,12 +1322,15 @@ class Dashboard(QWidget):
         if hasattr(self, 'overlay_window') and self.overlay_window:
             self.overlay_window.close()
             self.overlay_window = None
-            
+        
+        log.info("Translator stopped")
+        
         self.status_label.setText("Stopped")
+        self.status_label.setStyleSheet("font-size: 18px; color: #6c7086;")
         self.stop_btn.hide()
         self.start_btn.show()
         self.start_btn.setEnabled(True)
-        self.start_btn.setText("▶ Launch Translator")
+        self.start_btn.setText("▶ Launch")
         self.showNormal()
 
 class StartupWorker(QThread):
