@@ -61,16 +61,22 @@ jobs:
           fi
           echo "  ✅ main.py"
           
-          # Bundled Python
+          # Bundled Python (portable base)
+          PORTABLE_PY="${APP}/Contents/Resources/python/bin/python3"
+          if [ ! -f "$PORTABLE_PY" ]; then
+            echo "❌ Portable Python MISSING at $PORTABLE_PY"; exit 1
+          fi
+          "$PORTABLE_PY" --version && echo "  ✅ portable python --version" || { echo "❌ Portable Python broken"; exit 1; }
+
+          # App venv
           VENV_PY="${APP}/Contents/Resources/venv/bin/python3"
           if [ ! -f "$VENV_PY" ]; then
-            echo "❌ Bundled Python MISSING at $VENV_PY"
+            echo "❌ Bundled venv Python MISSING at $VENV_PY"
             ls -la "${APP}/Contents/Resources/"
             exit 1
           fi
           echo "  ✅ venv/bin/python3 exists"
-          
-          "$VENV_PY" --version && echo "  ✅ Python --version" || { echo "❌ Python broken"; exit 1; }
+          "$VENV_PY" --version && echo "  ✅ venv Python --version" || { echo "❌ venv Python broken"; exit 1; }
           "$VENV_PY" -c "import PyQt6, numpy, sounddevice; print('  ✅ PyQt6, numpy, sounddevice OK')" || { echo "❌ Import check failed"; exit 1; }
           
           DMG=$(ls dist/*.dmg 2>/dev/null | head -1)
@@ -93,7 +99,7 @@ jobs:
 
             # Realtime Subtitle v${{ github.event.inputs.version }}
 
-            macOS 实时字幕翻译工具 — 基于 Vanyoo/realtime-subtitle 的产品化改造。
+            macOS 实时字幕翻译工具 — 无需用户额外安装 Python。App 已内置 portable Python 运行环境。
 
             ## 📥 安装
 
@@ -101,8 +107,6 @@ jobs:
             2. 双击打开 DMG
             3. 拖动 `RealtimeSubtitle.app` 到 `Applications` 文件夹
             4. 首次打开：**右键 → Open**（App 未签名）
-
-            macOS 14+ · Apple Silicon / Intel · Python 3.12 已内置
 
             ## ✨ 核心特性
 
