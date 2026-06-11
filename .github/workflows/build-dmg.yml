@@ -6,43 +6,53 @@ on:
         description: "Version, for example 1.0.0"
         required: true
         default: "1.0.0"
+
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Show environment
         run: |
           sw_vers
           python3 --version
           pwd
           ls -la
+
       - name: Make build script executable
         run: chmod +x build_dmg.sh
+
       - name: Build DMG
         run: bash build_dmg.sh "${{ github.event.inputs.version }}"
+
       - name: List generated files
         run: |
           find . -name "*.dmg" -print
           ls -la
           ls -la dist || true
           ls -la release || true
+          ls -la dist/*.dmg 2>/dev/null || echo "checking dist..."
+          find dist -maxdepth 1 -type f 2>/dev/null || true
+
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
         with:
           name: RealtimeSubtitle-DMG
-          path: |
-            *.dmg
-            dist/*.dmg
-            release/*.dmg
+          path: dist/*.dmg
           if-no-files-found: error
+
       - name: Create Release and Upload DMG
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ github.event.inputs.version }}
           name: Realtime Subtitle v${{ github.event.inputs.version }}
           body: |
+
             # Realtime Subtitle v${{ github.event.inputs.version }}
 
             macOS 实时字幕翻译工具 — 基于 Vanyoo/realtime-subtitle 的产品化改造。
@@ -70,6 +80,5 @@ jobs:
             此 App 未进行 Apple 代码签名。首次打开时，请右键点击 App → 选择 **Open**。
           draft: false
           prerelease: false
-          files: |
-            dist/*.dmg
-            *.dmg
+          files: dist/*.dmg
+          fail_on_unmatched_files: true
