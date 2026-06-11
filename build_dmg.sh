@@ -35,6 +35,8 @@ echo ""
 
 # ---- Clean ----
 rm -rf "${BUILD_DIR}" "${DIST_DIR}"
+# Detach any leftover mounts from previous runs
+hdiutil detach "/Volumes/${APP_NAME}" 2>/dev/null || true
 mkdir -p "${MACOS_DIR}" "${RESOURCES}" "${DIST_DIR}"
 
 # ---- Step 1: Download & unpack portable Python ----
