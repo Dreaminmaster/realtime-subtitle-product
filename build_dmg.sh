@@ -32,11 +32,11 @@ mkdir -p "${MACOS_DIR}" "${RESOURCES}" "${DIST_DIR}"
 
 # ---- Step 1: Create venv inside the app bundle ----
 echo "[1/6] Creating Python venv inside .app bundle..."
-python3 -m venv "${VENV_DIR}" 2>&1 || {
+python3 -m venv --copies "${VENV_DIR}" 2>&1 || {
     echo "ERROR: python3 not found. Please install Python 3.10+ from python.org"
     exit 1
 }
-echo "  venv created at: ${VENV_DIR}"
+echo "  venv created at: ${VENV_DIR} (self-contained copy mode)"
 
 # ---- Step 2: Install dependencies into the venv ----
 echo "[2/6] Installing Python dependencies into venv..."
@@ -90,7 +90,8 @@ cat > "${MACOS_DIR}/realtime-subtitle" << 'LAUNCHER'
 #!/bin/bash
 # =============================================================================
 # Realtime Subtitle Launcher
-# Runs the app using its bundled Python venv (fully self-contained).
+# Runs the app using its bundled Python venv. Self-healing: if the venv
+# is broken (e.g. moved from another Mac), it auto-rebuilds.
 # =============================================================================
 
 # Resolve real script location (follows symlinks)
@@ -101,16 +102,38 @@ while [ -h "$0" ]; do
 done
 APP_DIR="$(cd -P "$(dirname "$0")/../.." && pwd)"
 RESOURCES="${APP_DIR}/Contents/Resources"
-VENV_PYTHON="${RESOURCES}/venv/bin/python3"
+VENV_DIR="${RESOURCES}/venv"
+VENV_PYTHON="${VENV_DIR}/bin/python3"
 
 cd "$RESOURCES"
 
-# If bundled venv not available, fall back to system Python
-if [ ! -f "$VENV_PYTHON" ]; then
-    echo "ERROR: Bundled Python venv not found at $VENV_PYTHON"
-    echo "Please re-download the app or install Python 3.10+ from python.org"
-    osascript -e 'display dialog "Python environment is missing.\n\nPlease re-download the app from GitHub Releases." buttons {"OK"} default button 1 with icon stop'
-    exit 1
+# Check if venv python actually works (not a dead symlink or wrong arch)
+venv_ok=false
+if [ -f "$VENV_PYTHON" ] && [ -x "$VENV_PYTHON" ]; then
+    if "$VENV_PYTHON" -c 'print("venv ok")' 2>/dev/null; then
+        venv_ok=true
+    fi
+fi
+
+# Auto-rebuild venv if broken
+if [ "$venv_ok" = false ]; then
+    echo "Realtime Subtitle: Python environment needs setup..."
+    
+    # Check for system Python
+    if ! command -v python3 &>/dev/null; then
+        osascript -e 'display dialog "Python 3 is required.\n\nDownload from python.org/downloads" buttons {"OK"} default button 1 with icon stop'
+        exit 1
+    fi
+    
+    echo "  Rebuilding Python environment..."
+    rm -rf "$VENV_DIR"
+    python3 -m venv --copies "$VENV_DIR" 2>/dev/null || python3 -m venv "$VENV_DIR" 2>/dev/null
+    
+    if [ -f "${RESOURCES}/requirements.txt" ]; then
+        "$VENV_DIR/bin/python3" -m pip install --no-cache-dir --quiet -r requirements.txt 2>/dev/null
+    fi
+    
+    echo "  Setup complete."
 fi
 
 # Run the app with all arguments
@@ -162,54 +185,35 @@ PLIST
 
 # ---- Step 5.5: Create DMG background image ----
 echo "[5.5/7] Creating DMG background..."
-# Create a simple background image with AppleScript/Python
 "${VENV_DIR}/bin/python3" -c "
 import subprocess, os
 
 bg_dir = '${RESOURCES}'
 dmg_bg = os.path.join(bg_dir, 'dmg_background.png')
 
-# Use Python to create a simple background with instructions
 try:
     from PIL import Image, ImageDraw, ImageFont
 except ImportError:
-    # Try installing Pillow
-    subprocess.check_call(['${VENV_DIR}/bin/python3', '-m', 'pip', 'install', '--no-cache-dir', 'Pillow'], 
+    subprocess.check_call(['${VENV_DIR}/bin/python3', '-m', 'pip', 'install', '--no-cache-dir', 'Pillow'],
                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     from PIL import Image, ImageDraw, ImageFont
 
-# Create a 600x400 background
-img = Image.new('RGB', (600, 400), color=(30, 30, 46))  # Catppuccin base
+# Create a clean 600x400 background
+img = Image.new('RGB', (600, 400), color=(40, 40, 52))
 draw = ImageDraw.Draw(img)
 
-# Draw arrow + text
+# Only draw an arrow and 'Drag to Applications' text in the center
+# Let Finder display the App icon and name — don't duplicate them
 try:
-    font_big = ImageFont.truetype('/System/Library/Fonts/Helvetica.ttc', 32)
-    font_small = ImageFont.truetype('/System/Library/Fonts/Helvetica.ttc', 18)
-    font_arrow = ImageFont.truetype('/System/Library/Fonts/Helvetica.ttc', 48)
+    font = ImageFont.truetype('/System/Library/Fonts/Helvetica.ttc', 24)
 except Exception:
-    font_big = ImageFont.load_default()
-    font_small = ImageFont.load_default()
-    font_arrow = ImageFont.load_default()
+    font = ImageFont.load_default()
 
-# App icon area (left side) — label
-draw.text((90, 120), '🎙️', fill=(255,255,255), font=font_arrow)
-draw.text((80, 185), 'Realtime', fill=(137, 180, 250), font=font_small)
-draw.text((80, 208), 'Subtitle', fill=(137, 180, 250), font=font_small)
+# Arrow from left to right (centered)
+arrow_y = 180
+draw.text((190, arrow_y), '→', fill=(166, 227, 161), font=font)
+draw.text((220, arrow_y), 'Drag to Applications', fill=(205, 214, 244), font=font)
 
-# Arrow in the middle
-draw.text((300, 150), '→', fill=(166, 227, 161), font=font_arrow)
-draw.text((250, 185), 'Drag to', fill=(166, 227, 161), font=font_small)
-draw.text((250, 208), 'Applications', fill=(166, 227, 161), font=font_small)
-
-# Applications folder area (right side) — folder icon
-draw.text((450, 130), '📁', fill=(255,255,255), font=font_arrow)
-draw.text((410, 185), 'Applications', fill=(205, 214, 244), font=font_small)
-
-# Bottom text
-draw.text((150, 330), 'Drag RealtimeSubtitle.app into Applications', fill=(108, 112, 134), font=font_small)
-
-# Corner rounding
 img.save(dmg_bg, 'PNG')
 print(f'  Background image created: {dmg_bg}')
 " 2>&1
