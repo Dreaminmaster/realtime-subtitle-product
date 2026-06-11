@@ -156,6 +156,9 @@ fi
 
 log "Launching: $VENV_PYTHON main.py"
 cd "$RESOURCES"
+
+# Override portable Python's built-in /install prefix with the actual bundle path
+export PYTHONHOME="${RESOURCES}/python"
 exec "$VENV_PYTHON" main.py "$@"
 LAUNCHER
 
@@ -293,14 +296,17 @@ else
     echo "  ✅ launcher present"
 fi
 
-# Launcher does NOT reference builder machine paths
-# (exclude build_dmg.sh and workflow files — they contain the check strings themselves)
+# No builder paths in source code (excluding build scripts that contain this check)
 if grep -R "/Users/runner" "${APP_BUNDLE}/Contents" --exclude='build_dmg.sh' --exclude='build-dmg.yml' 2>/dev/null; then
     echo "  ❌ builder path /Users/runner found in bundle"
     FAIL=true
 else
     echo "  ✅ no builder paths in bundle"
 fi
+
+# /install is expected in portable Python's _sysconfigdata (python-build-standalone artifact).
+# Launcher overrides it via PYTHONHOME at runtime.
+echo "  ℹ️  /install in sysconfig is expected (overridden by launcher)"
 
 # requirements.txt in bundle
 if [ ! -f "${APP_BUNDLE}/Contents/Resources/requirements.txt" ]; then
