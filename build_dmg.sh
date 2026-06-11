@@ -113,9 +113,17 @@ if [ ! -x "$BUNDLED_PYTHON" ]; then
 fi
 log "Bundled Python: $($BUNDLED_PYTHON --version 2>&1)"
 
-# ---- First-launch: create venv in user directory ----
+# ---- First-launch or repair: create/verify venv in user directory ----
 VENV_PYTHON="${VENV_DIR}/bin/python3"
-if [ ! -x "$VENV_PYTHON" ]; then
+SETUP_MARKER="${APP_SUPPORT}/.setup_complete"
+
+if [ ! -x "$VENV_PYTHON" ] || [ ! -f "$SETUP_MARKER" ]; then
+    # Venv exists but setup was incomplete (e.g. pip failed previously)
+    if [ -d "$VENV_DIR" ]; then
+        log "WARNING: Broken/incomplete venv detected, removing..."
+        rm -rf "$VENV_DIR"
+    fi
+    rm -f "$SETUP_MARKER"
     log "=== First launch setup ==="
     echo "============================================"
     echo "  Realtime Subtitle — First Launch Setup"
@@ -130,6 +138,7 @@ if [ ! -x "$VENV_PYTHON" ]; then
     "$BUNDLED_PYTHON" -m venv --copies "$VENV_DIR" 2>&1 | tee -a "$LOG_FILE"
     if [ ${PIPESTATUS[0]} -ne 0 ]; then
         log "ERROR: venv creation failed"
+        rm -rf "$VENV_DIR"
         alert "Failed to create Python environment.\n\nCheck log:\n$LOG_FILE"
         exit 1
     fi
@@ -141,6 +150,7 @@ if [ ! -x "$VENV_PYTHON" ]; then
     "$VENV_PYTHON" -m pip install --no-cache-dir --quiet --upgrade pip >> "$LOG_FILE" 2>&1 || true
     
     REQ_FILE="${RESOURCES}/requirements-core.txt"
+    SETUP_READY=false
     if [ -f "$REQ_FILE" ]; then
         log "Installing from requirements-core.txt"
         "$VENV_PYTHON" -m pip install --no-cache-dir -r "$REQ_FILE" >> "$LOG_FILE" 2>&1
@@ -153,12 +163,31 @@ if [ ! -x "$VENV_PYTHON" ]; then
             PIP_EXIT=$?
         fi
 
-        if [ $PIP_EXIT -ne 0 ]; then
+        if [ $PIP_EXIT -eq 0 ]; then
+            # Verify core imports actually work
+            log "Verifying core imports..."
+            if "$VENV_PYTHON" -c "import PyQt6, numpy, sounddevice, httpx, openai, faster_whisper" 2>&1 >> "$LOG_FILE"; then
+                SETUP_READY=true
+                log "Core imports verified"
+            else
+                log "ERROR: core imports verification failed"
+            fi
+        else
             log "ERROR: pip install failed (exit $PIP_EXIT)"
-            alert "Failed to install dependencies.\n\nPlease check log:\n$LOG_FILE\n\nThis may be a network issue — try again later."
+        fi
+
+        if [ "$SETUP_READY" = true ]; then
+            echo "  ✓ Dependencies installed"
+            touch "${APP_SUPPORT}/.setup_complete"
+        else
+            echo "  ✗ Setup failed"
+            echo ""
+            log "ERROR: Setup incomplete. Removing broken venv."
+            rm -rf "$VENV_DIR"
+            rm -f "${APP_SUPPORT}/.setup_complete"
+            alert "Dependency installation failed.\n\nThis may be a network issue.\n\nPlease check your internet connection and try again.\n\nLog: $LOG_FILE"
             exit 1
         fi
-        echo "  ✓ Dependencies installed"
     else
         log "ERROR: requirements-core.txt not found in app bundle"
         alert "App bundle is incomplete.\n\nrequirements-core.txt is missing.\nPlease re-download from GitHub Releases."
@@ -171,6 +200,13 @@ if [ ! -x "$VENV_PYTHON" ]; then
     echo "============================================"
     echo ""
     log "=== Setup complete ==="
+fi
+
+# Final pre-launch check: PyQt6 must be importable
+if ! "$VENV_PYTHON" -c "import PyQt6" 2>/dev/null; then
+    log "ERROR: PyQt6 not importable — setup may be incomplete"
+    alert "PyQt6 is not installed.\n\nPlease run Repair Environment from Diagnostics,\nor delete:\n  $APP_SUPPORT\nand re-launch."
+    exit 1
 fi
 
 log "Launching: $VENV_PYTHON main.py"
