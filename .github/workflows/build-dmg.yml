@@ -74,8 +74,8 @@ jobs:
           fi
           echo "  ✅ no pre-built venv"
 
-          # NO builder machine paths
-          if grep -R "/Users/runner" "${APP}/Contents" 2>/dev/null; then
+          # NO builder machine paths (exclude this workflow file itself)
+          if grep -R "/Users/runner" "${APP}/Contents" --exclude='build-dmg.yml' --exclude='build_dmg.sh' 2>/dev/null; then
             echo "❌ Builder path /Users/runner found in bundle"; exit 1
           fi
           echo "  ✅ no builder paths"

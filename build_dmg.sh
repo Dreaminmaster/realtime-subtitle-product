@@ -294,7 +294,8 @@ else
 fi
 
 # Launcher does NOT reference builder machine paths
-if grep -R "/Users/runner" "${APP_BUNDLE}/Contents" 2>/dev/null; then
+# (exclude build_dmg.sh and workflow files — they contain the check strings themselves)
+if grep -R "/Users/runner" "${APP_BUNDLE}/Contents" --exclude='build_dmg.sh' --exclude='build-dmg.yml' 2>/dev/null; then
     echo "  ❌ builder path /Users/runner found in bundle"
     FAIL=true
 else
