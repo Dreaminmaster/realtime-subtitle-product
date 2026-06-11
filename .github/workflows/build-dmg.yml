@@ -30,6 +30,53 @@ jobs:
       - name: Build DMG
         run: bash build_dmg.sh "${{ github.event.inputs.version }}"
 
+      - name: Format and syntax checks
+        run: |
+          echo "=== Checking source format ==="
+          
+          # Python syntax
+          python3 -m py_compile main.py && echo "  ✅ main.py syntax"
+          python3 -m py_compile dashboard.py && echo "  ✅ dashboard.py syntax"
+          
+          # Shell syntax
+          bash -n build_dmg.sh && echo "  ✅ build_dmg.sh syntax"
+          
+          # requirements-core.txt format: must be multiline, one dep per line
+          echo "  checking requirements-core.txt..."
+          python3 - <<'PYEOF'
+          from pathlib import Path
+          req = Path("requirements-core.txt").read_text()
+          lines = req.splitlines()
+          print(f"    {len(lines)} lines")
+          assert "\n" in req, "requirements-core.txt must be multi-line"
+          for i, line in enumerate(lines, 1):
+              line = line.strip()
+              if not line or line.startswith("#"):
+                  continue
+              pkg = line.split(";")[0].strip()
+              assert " " not in pkg, f"line {i} collided: '{pkg}' — multiple packages?"
+          print("  ✅ requirements-core.txt format OK")
+          PYEOF
+          
+          # requirements.txt format
+          echo "  checking requirements.txt..."
+          python3 - <<'PYEOF'
+          from pathlib import Path
+          req = Path("requirements.txt").read_text()
+          lines = req.splitlines()
+          print(f"    {len(lines)} lines")
+          assert "\n" in req, "requirements.txt must be multi-line"
+          for i, line in enumerate(lines, 1):
+              line = line.strip()
+              if not line or line.startswith("#"):
+                  continue
+              pkg = line.split(";")[0].strip()
+              assert " " not in pkg, f"line {i} collided: '{pkg}' — multiple packages?"
+          print("  ✅ requirements.txt format OK")
+          PYEOF
+          
+          echo "=== Format checks complete ==="
+
       - name: List generated files
         run: |
           find . -name "*.dmg" -print
