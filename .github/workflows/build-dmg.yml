@@ -27,55 +27,81 @@ jobs:
       - name: Make build script executable
         run: chmod +x build_dmg.sh
 
+      - name: Hard source format checks (FAIL-FAST before build)
+        run: |
+          echo "=== Source format checks (BLOCKING) ==="
+          ERRORS=0
+          
+          # --- Minimum line counts ---
+          declare -A MIN_LINES=(
+            ["main.py"]=100
+            ["dashboard.py"]=100
+            ["build_dmg.sh"]=100
+            ["requirements-core.txt"]=8
+            ["requirements.txt"]=8
+          )
+          for f in "${!MIN_LINES[@]}"; do
+            L=$(wc -l < "$f")
+            MIN=${MIN_LINES[$f]}
+            if [ "$L" -lt "$MIN" ]; then
+              echo "  ❌ $f: expected ≥$MIN lines, got $L — FILE MAY BE COLLAPSED"
+              echo "     Raw preview: $(head -c 200 "$f")"
+              ERRORS=1
+            else
+              echo "  ✅ $f: $L lines"
+            fi
+          done
+          
+          # --- py_compile ---
+          python3 -m py_compile main.py && echo "  ✅ main.py syntax" || { echo "  ❌ main.py syntax"; ERRORS=1; }
+          python3 -m py_compile dashboard.py && echo "  ✅ dashboard.py syntax" || { echo "  ❌ dashboard.py syntax"; ERRORS=1; }
+          
+          # --- bash -n ---
+          bash -n build_dmg.sh && echo "  ✅ build_dmg.sh syntax" || { echo "  ❌ build_dmg.sh syntax"; ERRORS=1; }
+          
+          # --- requirements format: one package per line, no collapsing ---
+          python3 - <<'PYEOF'
+          import sys
+          from pathlib import Path
+          errs = 0
+          for fname in ["requirements-core.txt", "requirements.txt"]:
+              text = Path(fname).read_text()
+              lines = text.splitlines()
+              if "\n" not in text or len(lines) < 5:
+                  print(f"  ❌ {fname}: appears collapsed ({len(lines)} lines)")
+                  errs += 1
+                  continue
+              for i, line in enumerate(lines, 1):
+                  line = line.strip()
+                  if not line or line.startswith("#"):
+                      continue
+                  pkg = line.split(";")[0].strip()
+                  if " " in pkg:
+                      print(f"  ❌ {fname} line {i}: multiple packages collapsed: '{pkg}'")
+                      errs += 1
+              print(f"  ✅ {fname}: {len(lines)} lines, format OK")
+          if errs:
+              sys.exit(1)
+          PYEOF
+          
+          # --- workflow YAML check ---
+          WF=".github/workflows/build-dmg.yml"
+          L=$(wc -l < "$WF")
+          if [ "$L" -lt 30 ]; then
+            echo "  ❌ $WF: expected ≥30 lines, got $L — FILE MAY BE COLLAPSED"; ERRORS=1
+          else
+            echo "  ✅ $WF: $L lines"
+          fi
+          
+          if [ "$ERRORS" -ne 0 ]; then
+            echo ""
+            echo "=== FORMAT CHECKS FAILED — BUILD ABORTED ==="
+            exit 1
+          fi
+          echo "=== Format checks all passed ==="
+
       - name: Build DMG
         run: bash build_dmg.sh "${{ github.event.inputs.version }}"
-
-      - name: Format and syntax checks
-        run: |
-          echo "=== Checking source format ==="
-          
-          # Python syntax
-          python3 -m py_compile main.py && echo "  ✅ main.py syntax"
-          python3 -m py_compile dashboard.py && echo "  ✅ dashboard.py syntax"
-          
-          # Shell syntax
-          bash -n build_dmg.sh && echo "  ✅ build_dmg.sh syntax"
-          
-          # requirements-core.txt format: must be multiline, one dep per line
-          echo "  checking requirements-core.txt..."
-          python3 - <<'PYEOF'
-          from pathlib import Path
-          req = Path("requirements-core.txt").read_text()
-          lines = req.splitlines()
-          print(f"    {len(lines)} lines")
-          assert "\n" in req, "requirements-core.txt must be multi-line"
-          for i, line in enumerate(lines, 1):
-              line = line.strip()
-              if not line or line.startswith("#"):
-                  continue
-              pkg = line.split(";")[0].strip()
-              assert " " not in pkg, f"line {i} collided: '{pkg}' — multiple packages?"
-          print("  ✅ requirements-core.txt format OK")
-          PYEOF
-          
-          # requirements.txt format
-          echo "  checking requirements.txt..."
-          python3 - <<'PYEOF'
-          from pathlib import Path
-          req = Path("requirements.txt").read_text()
-          lines = req.splitlines()
-          print(f"    {len(lines)} lines")
-          assert "\n" in req, "requirements.txt must be multi-line"
-          for i, line in enumerate(lines, 1):
-              line = line.strip()
-              if not line or line.startswith("#"):
-                  continue
-              pkg = line.split(";")[0].strip()
-              assert " " not in pkg, f"line {i} collided: '{pkg}' — multiple packages?"
-          print("  ✅ requirements.txt format OK")
-          PYEOF
-          
-          echo "=== Format checks complete ==="
 
       - name: List generated files
         run: |
