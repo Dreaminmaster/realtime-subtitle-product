@@ -127,25 +127,42 @@ if [ ! -x "$VENV_PYTHON" ]; then
     
     echo "→ Creating Python environment..."
     log "Creating venv at $VENV_DIR"
-    "$BUNDLED_PYTHON" -m venv --copies "$VENV_DIR" 2>&1 | tee -a "$LOG_FILE" || {
+    "$BUNDLED_PYTHON" -m venv --copies "$VENV_DIR" 2>&1 | tee -a "$LOG_FILE"
+    if [ ${PIPESTATUS[0]} -ne 0 ]; then
         log "ERROR: venv creation failed"
         alert "Failed to create Python environment.\n\nCheck log:\n$LOG_FILE"
         exit 1
-    }
+    fi
     echo "  ✓ venv created"
     
-    echo "→ Installing dependencies (this may take 2-3 minutes)..."
+    echo "→ Installing dependencies (this may take a few minutes)..."
+    echo "→ DO NOT close this window."
     log "Upgrading pip..."
-    "$VENV_PYTHON" -m pip install --no-cache-dir --quiet --upgrade pip 2>&1 >> "$LOG_FILE" || true
+    "$VENV_PYTHON" -m pip install --no-cache-dir --quiet --upgrade pip >> "$LOG_FILE" 2>&1 || true
     
-    if [ -f "${RESOURCES}/requirements.txt" ]; then
-        log "Installing from requirements.txt"
-        "$VENV_PYTHON" -m pip install --no-cache-dir -r "${RESOURCES}/requirements.txt" 2>&1 | tee -a "$LOG_FILE" || {
-            log "ERROR: pip install failed"
-            alert "Failed to install dependencies.\n\nCheck log:\n$LOG_FILE"
+    REQ_FILE="${RESOURCES}/requirements-core.txt"
+    if [ -f "$REQ_FILE" ]; then
+        log "Installing from requirements-core.txt"
+        "$VENV_PYTHON" -m pip install --no-cache-dir -r "$REQ_FILE" >> "$LOG_FILE" 2>&1
+        PIP_EXIT=$?
+        
+        if [ $PIP_EXIT -ne 0 ]; then
+            # Retry once for transient network errors
+            log "WARNING: pip install failed (exit $PIP_EXIT), retrying once..."
+            "$VENV_PYTHON" -m pip install --no-cache-dir -r "$REQ_FILE" 2>&1 | tee -a "$LOG_FILE"
+            PIP_EXIT=$?
+        fi
+
+        if [ $PIP_EXIT -ne 0 ]; then
+            log "ERROR: pip install failed (exit $PIP_EXIT)"
+            alert "Failed to install dependencies.\n\nPlease check log:\n$LOG_FILE\n\nThis may be a network issue — try again later."
             exit 1
-        }
+        fi
         echo "  ✓ Dependencies installed"
+    else
+        log "ERROR: requirements-core.txt not found in app bundle"
+        alert "App bundle is incomplete.\n\nrequirements-core.txt is missing.\nPlease re-download from GitHub Releases."
+        exit 1
     fi
     
     echo ""

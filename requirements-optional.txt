@@ -1,0 +1,8 @@
+funasr>=1.0
+modelscope>=1.10
+# Heavy optional deps — install manually when needed:
+# transformers
+# librosa
+# scipy
+# numba
+# oss2
