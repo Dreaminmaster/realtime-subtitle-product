@@ -2,9 +2,9 @@
 # =============================================================================
 # DMG Packaging Script for Realtime Subtitle
 #
-# Creates a self-contained .app bundle with a portable Python runtime.
-# The Python 3.12 framework is downloaded from python.org and bundled inside
-# the .app — no system Python, Homebrew, or FlyEnv needed.
+# Packs portable Python + source code into .app, NO pre-built venv.
+# Venv is created on the USER's machine on first launch, so it never
+# contains GitHub runner paths.
 #
 # Usage:  bash build_dmg.sh [version]
 # =============================================================================
@@ -23,7 +23,7 @@ PYTHON_DIR="${RESOURCES}/python"
 PYTHON_BIN="${PYTHON_DIR}/bin/python3"
 DIST_DIR="${SCRIPT_DIR}/dist"
 
-# Use Python 3.12 — stable, well-tested, available as portable build
+# Portable Python source
 PYTHON_STANDALONE_TAG="20260602"
 PYTHON_FILENAME="cpython-3.12.13%2B20260602-aarch64-apple-darwin-install_only.tar.gz"
 PYTHON_URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PYTHON_STANDALONE_TAG}/${PYTHON_FILENAME}"
@@ -37,8 +37,8 @@ echo ""
 rm -rf "${BUILD_DIR}" "${DIST_DIR}"
 mkdir -p "${MACOS_DIR}" "${RESOURCES}" "${DIST_DIR}"
 
-# ---- Step 1: Download portable Python ----
-echo "[1/7] Setting up portable Python..."
+# ---- Step 1: Download & unpack portable Python ----
+echo "[1/6] Setting up portable Python..."
 if [ ! -f "${SCRIPT_DIR}/.python_cache/cpython-3.12.tar.gz" ]; then
     mkdir -p "${SCRIPT_DIR}/.python_cache"
     echo "  Downloading portable Python 3.12..."
@@ -49,26 +49,8 @@ mkdir -p "${PYTHON_DIR}"
 tar xzf "${SCRIPT_DIR}/.python_cache/cpython-3.12.tar.gz" -C "${PYTHON_DIR}" --strip-components=1 2>&1
 echo "  Python: $(${PYTHON_BIN} --version 2>&1)"
 
-# ---- Step 2: Create venv from portable Python ----
-echo "[2/7] Creating venv..."
-"${PYTHON_BIN}" -m venv --copies "${RESOURCES}/venv" 2>&1
-VENV_PYTHON="${RESOURCES}/venv/bin/python3"
-
-# ---- Step 3: Install dependencies ----
-echo "[3/7] Installing Python dependencies..."
-"${VENV_PYTHON}" -m pip install --no-cache-dir --quiet --upgrade pip 2>/dev/null || true
-
-echo "  From requirements.txt:"
-cat "${SCRIPT_DIR}/requirements.txt"
-
-"${VENV_PYTHON}" -m pip install --no-cache-dir -r "${SCRIPT_DIR}/requirements.txt" 2>&1
-
-# Verify key imports
-echo "  Verifying imports..."
-"${VENV_PYTHON}" -c "import PyQt6, numpy, sounddevice; print('  ✓ PyQt6, numpy, sounddevice OK')" 2>&1
-
-# ---- Step 4: Copy project files ----
-echo "[4/7] Copying project files..."
+# ---- Step 2: Copy project source ----
+echo "[2/6] Copying source files..."
 rsync -av --exclude='.git' \
       --exclude='__pycache__' \
       --exclude='*.pyc' \
@@ -81,14 +63,21 @@ rsync -av --exclude='.git' \
       --exclude='python' \
       --exclude='venv' \
       "${SCRIPT_DIR}/" "${RESOURCES}/" 2>/dev/null
-echo "  Files copied."
+echo "  Done."
 
-# ---- Step 5: Create launcher ----
-echo "[5/7] Creating launcher..."
+# ---- Step 3: Create launcher (Plan A — user-local venv) ----
+echo "[3/6] Creating launcher..."
 cat > "${MACOS_DIR}/realtime-subtitle" << 'LAUNCHER'
 #!/bin/bash
-# Realtime Subtitle Launcher — uses bundled Python venv only.
+# =============================================================================
+# Realtime Subtitle Launcher
+# Uses bundled portable Python. Creates venv in user's Application Support
+# on first launch — NEVER pre-built on the build machine.
+# =============================================================================
 
+set -e
+
+# Resolve app directory
 while [ -h "$0" ]; do
     DIR="$(cd -P "$(dirname "$0")" && pwd)"
     SCRIPT="$(readlink "$0")"
@@ -96,21 +85,84 @@ while [ -h "$0" ]; do
 done
 APP_DIR="$(cd -P "$(dirname "$0")/../.." && pwd)"
 RESOURCES="${APP_DIR}/Contents/Resources"
-VENV_PYTHON="${RESOURCES}/venv/bin/python3"
+BUNDLED_PYTHON="${RESOURCES}/python/bin/python3"
 
-if [ ! -f "$VENV_PYTHON" ]; then
-    osascript -e 'display dialog "App bundle is incomplete.\n\nBundled Python environment is missing.\nPlease re-download from GitHub Releases." buttons {"OK"} default button 1 with icon stop'
+# User runtime directories
+APP_SUPPORT="${HOME}/Library/Application Support/RealtimeSubtitle"
+VENV_DIR="${APP_SUPPORT}/venv"
+LOG_DIR="${HOME}/Library/Logs/RealtimeSubtitle"
+LOG_FILE="${LOG_DIR}/launcher.log"
+
+mkdir -p "$LOG_DIR"
+exec 2>>"$LOG_FILE"
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG_FILE"; }
+alert() { osascript -e "display dialog \"$1\" buttons {\"OK\"} default button 1 with icon stop"; }
+
+log "=== Launcher started ==="
+log "APP_DIR: $APP_DIR"
+log "BUNDLED_PYTHON: $BUNDLED_PYTHON"
+
+# Check bundled Python
+if [ ! -x "$BUNDLED_PYTHON" ]; then
+    log "ERROR: Bundled Python not found at $BUNDLED_PYTHON"
+    alert "App bundle is incomplete.\n\nBundled Python is missing.\nPlease re-download from GitHub Releases."
     exit 1
 fi
+log "Bundled Python: $($BUNDLED_PYTHON --version 2>&1)"
 
+# ---- First-launch: create venv in user directory ----
+VENV_PYTHON="${VENV_DIR}/bin/python3"
+if [ ! -x "$VENV_PYTHON" ]; then
+    log "=== First launch setup ==="
+    echo "============================================"
+    echo "  Realtime Subtitle — First Launch Setup"
+    echo "  Log: $LOG_FILE"
+    echo "============================================"
+    echo ""
+    
+    mkdir -p "$APP_SUPPORT"
+    
+    echo "→ Creating Python environment..."
+    log "Creating venv at $VENV_DIR"
+    "$BUNDLED_PYTHON" -m venv --copies "$VENV_DIR" 2>&1 | tee -a "$LOG_FILE" || {
+        log "ERROR: venv creation failed"
+        alert "Failed to create Python environment.\n\nCheck log:\n$LOG_FILE"
+        exit 1
+    }
+    echo "  ✓ venv created"
+    
+    echo "→ Installing dependencies (this may take 2-3 minutes)..."
+    log "Upgrading pip..."
+    "$VENV_PYTHON" -m pip install --no-cache-dir --quiet --upgrade pip 2>&1 >> "$LOG_FILE" || true
+    
+    if [ -f "${RESOURCES}/requirements.txt" ]; then
+        log "Installing from requirements.txt"
+        "$VENV_PYTHON" -m pip install --no-cache-dir -r "${RESOURCES}/requirements.txt" 2>&1 | tee -a "$LOG_FILE" || {
+            log "ERROR: pip install failed"
+            alert "Failed to install dependencies.\n\nCheck log:\n$LOG_FILE"
+            exit 1
+        }
+        echo "  ✓ Dependencies installed"
+    fi
+    
+    echo ""
+    echo "============================================"
+    echo "  Setup complete! Starting app..."
+    echo "============================================"
+    echo ""
+    log "=== Setup complete ==="
+fi
+
+log "Launching: $VENV_PYTHON main.py"
 cd "$RESOURCES"
 exec "$VENV_PYTHON" main.py "$@"
 LAUNCHER
 
 chmod +x "${MACOS_DIR}/realtime-subtitle"
 
-# ---- Step 6: Info.plist ----
-echo "[6/7] Creating Info.plist..."
+# ---- Step 4: Info.plist ----
+echo "[4/6] Creating Info.plist..."
 cat > "${CONTENTS}/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -140,8 +192,8 @@ cat > "${CONTENTS}/Info.plist" << PLIST
 </plist>
 PLIST
 
-# ---- Step 7: DMG ----
-echo "[7/7] Building DMG..."
+# ---- Step 5: DMG ----
+echo "[5/6] Building DMG..."
 TMP_DMG_DIR="${BUILD_DIR}/dmg_layout"
 rm -rf "${TMP_DMG_DIR}"
 mkdir -p "${TMP_DMG_DIR}"
@@ -162,7 +214,7 @@ img.save('${TMP_DMG_DIR}/.background/background.png', 'PNG')
 " 2>/dev/null || echo "  (no PIL, skipping bg)"
 
 APP_SIZE_KB=$(du -sk "${TMP_DMG_DIR}" | cut -f1)
-DMG_SIZE_MB=$(( (APP_SIZE_KB + 100000) / 1024 + 200 ))
+DMG_SIZE_MB=$(( (APP_SIZE_KB + 50000) / 1024 + 200 ))
 
 hdiutil create -volname "${APP_NAME}" \
     -srcfolder "${TMP_DMG_DIR}" \
@@ -199,29 +251,52 @@ fi
 hdiutil convert "${DIST_DIR}/tmp.dmg" -format UDZO -o "${DIST_DIR}/${DMG_NAME}" 2>&1
 rm -f "${DIST_DIR}/tmp.dmg"
 
-# ---- Verify ----
+# ---- Step 6: Verify ----
 echo ""
-echo "=============================="
-echo "  VERIFICATION"
-echo "=============================="
+echo "[6/6] Verifying..."
 FAIL=false
 
+# DMG exists
 if [ ! -f "${DIST_DIR}/${DMG_NAME}" ]; then
-    echo "  ❌ DMG missing"
-    FAIL=true
+    echo "  ❌ DMG missing"; FAIL=true
 fi
 
-if [ ! -f "${APP_BUNDLE}/Contents/Resources/venv/bin/python3" ]; then
-    echo "  ❌ venv/bin/python3 missing"
+# Portable Python exists in bundle
+if [ ! -x "${APP_BUNDLE}/Contents/Resources/python/bin/python3" ]; then
+    echo "  ❌ portable python missing"; FAIL=true
+else
+    echo "  ✅ portable python: $(${APP_BUNDLE}/Contents/Resources/python/bin/python3 --version 2>&1)"
+fi
+
+# NO pre-built venv in bundle (that would carry builder paths!)
+if [ -d "${APP_BUNDLE}/Contents/Resources/venv" ]; then
+    echo "  ❌ pre-built venv found — REMOVE IT (would break on user machine)"
     FAIL=true
 else
-    echo "  ✅ venv/bin/python3 exists"
-    ${VENV_PYTHON} --version 2>&1 && echo "  ✅ Python works" || FAIL=true
-    ${VENV_PYTHON} -c "import PyQt6, numpy, sounddevice; print('  ✅ PyQt6, numpy, sounddevice OK')" 2>&1 || FAIL=true
+    echo "  ✅ no pre-built venv"
 fi
 
-SIZE=$(du -h "${DIST_DIR}/${DMG_NAME}" 2>/dev/null | cut -f1)
-echo "  DMG size: ${SIZE}"
+# Launcher exists
+if [ ! -f "${APP_BUNDLE}/Contents/MacOS/realtime-subtitle" ]; then
+    echo "  ❌ launcher missing"; FAIL=true
+else
+    echo "  ✅ launcher present"
+fi
+
+# Launcher does NOT reference builder machine paths
+if grep -R "/Users/runner" "${APP_BUNDLE}/Contents" 2>/dev/null; then
+    echo "  ❌ builder path /Users/runner found in bundle"
+    FAIL=true
+else
+    echo "  ✅ no builder paths in bundle"
+fi
+
+# requirements.txt in bundle
+if [ ! -f "${APP_BUNDLE}/Contents/Resources/requirements.txt" ]; then
+    echo "  ❌ requirements.txt missing"; FAIL=true
+else
+    echo "  ✅ requirements.txt ($(wc -l < ${APP_BUNDLE}/Contents/Resources/requirements.txt) lines)"
+fi
 
 if [ "$FAIL" = true ]; then
     echo ""
@@ -229,8 +304,12 @@ if [ "$FAIL" = true ]; then
     exit 1
 fi
 
+SIZE=$(du -h "${DIST_DIR}/${DMG_NAME}" | cut -f1)
 echo ""
 echo "=============================="
 echo "  ✅ DMG READY"
-echo "  ${DIST_DIR}/${DMG_NAME}"
+echo "  ${DIST_DIR}/${DMG_NAME}  (${SIZE})"
 echo "=============================="
+echo ""
+echo "  Bundle contents: portable Python + source code only"
+echo "  Venv created on user machine at first launch"

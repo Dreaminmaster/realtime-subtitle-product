@@ -38,7 +38,7 @@ jobs:
           ls -la dist/*.dmg 2>/dev/null || true
           find dist -maxdepth 1 -type f 2>/dev/null || true
 
-      - name: Verify app bundle and bundled Python
+      - name: Verify app bundle (no pre-built venv, no builder paths)
         run: |
           echo "=== Verifying .app bundle ==="
           APP="build/RealtimeSubtitle.app"
@@ -48,37 +48,43 @@ jobs:
             echo "❌ Launcher MISSING"; exit 1
           fi
           echo "  ✅ Launcher"
-          
+
           # requirements.txt
           if [ ! -f "${APP}/Contents/Resources/requirements.txt" ]; then
             echo "❌ requirements.txt MISSING"; exit 1
           fi
           echo "  ✅ requirements.txt ($(wc -l < ${APP}/Contents/Resources/requirements.txt) lines)"
-          
+
           # main.py
           if [ ! -f "${APP}/Contents/Resources/main.py" ]; then
             echo "❌ main.py MISSING"; exit 1
           fi
           echo "  ✅ main.py"
-          
-          # Bundled Python (portable base)
+
+          # Portable Python
           PORTABLE_PY="${APP}/Contents/Resources/python/bin/python3"
-          if [ ! -f "$PORTABLE_PY" ]; then
+          if [ ! -x "$PORTABLE_PY" ]; then
             echo "❌ Portable Python MISSING at $PORTABLE_PY"; exit 1
           fi
           "$PORTABLE_PY" --version && echo "  ✅ portable python --version" || { echo "❌ Portable Python broken"; exit 1; }
 
-          # App venv
-          VENV_PY="${APP}/Contents/Resources/venv/bin/python3"
-          if [ ! -f "$VENV_PY" ]; then
-            echo "❌ Bundled venv Python MISSING at $VENV_PY"
-            ls -la "${APP}/Contents/Resources/"
-            exit 1
+          # NO pre-built venv — must FAIL if present
+          if [ -d "${APP}/Contents/Resources/venv" ]; then
+            echo "❌ Pre-built venv FOUND — would break on user machine"; exit 1
           fi
-          echo "  ✅ venv/bin/python3 exists"
-          "$VENV_PY" --version && echo "  ✅ venv Python --version" || { echo "❌ venv Python broken"; exit 1; }
-          "$VENV_PY" -c "import PyQt6, numpy, sounddevice; print('  ✅ PyQt6, numpy, sounddevice OK')" || { echo "❌ Import check failed"; exit 1; }
-          
+          echo "  ✅ no pre-built venv"
+
+          # NO builder machine paths
+          if grep -R "/Users/runner" "${APP}/Contents" 2>/dev/null; then
+            echo "❌ Builder path /Users/runner found in bundle"; exit 1
+          fi
+          echo "  ✅ no builder paths"
+
+          if grep -R "/install/lib/python" "${APP}/Contents" 2>/dev/null; then
+            echo "❌ Stale /install prefix found in bundle"; exit 1
+          fi
+          echo "  ✅ no /install prefix"
+
           DMG=$(ls dist/*.dmg 2>/dev/null | head -1)
           [ -n "$DMG" ] && echo "  ✅ DMG: $DMG ($(du -h "$DMG" | cut -f1))"
           echo "=== All checks passed ==="

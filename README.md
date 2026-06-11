@@ -66,16 +66,39 @@ python3 main.py --diagnostics
 
 从 [GitHub Releases](https://github.com/Dreaminmaster/realtime-subtitle-product/releases) 下载最新 DMG。
 
+无需用户额外安装 Python。App 自带 portable Python 3.12。
+
 ### 安装步骤
 
 1. 下载 `RealtimeSubtitle-x.x.x.dmg`
 2. 双击打开 DMG
 3. 拖动 `RealtimeSubtitle.app` 到 `Applications` 文件夹
-4. 首次打开：**右键 → Open**（因为 App 未签名）
+4. 首次打开：**右键 → Open**（App 未签名）
+5. 首次启动会自动在尾部创建 Python 环境并安装依赖（约 1-2 分钟）
 
 > ⚠️ 未签名的 App 会被 macOS Gatekeeper 拦截。
 > 右键点击 App → 选择 "Open" → 确认打开。
-> 后续发布可做 Apple notarization。
+
+### 卸载
+
+```bash
+# 删除 App 本体
+rm -rf /Applications/RealtimeSubtitle.app
+
+# 清理用户运行环境
+rm -rf "$HOME/Library/Application Support/RealtimeSubtitle"
+rm -rf "$HOME/Library/Logs/RealtimeSubtitle"
+rm -rf "$HOME/Library/Caches/RealtimeSubtitle"
+```
+
+如果模型下载到了 Hugging Face 缓存目录（通过 dashboard 的模型管理下载）：
+
+```bash
+# 注意：这会删除所有 Hugging Face 缓存，不仅限本项目
+# 建议先查看大小再决定
+du -sh "$HOME/.cache/huggingface"
+rm -rf "$HOME/.cache/huggingface"
+```
 
 ---
 
