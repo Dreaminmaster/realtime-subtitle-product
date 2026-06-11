@@ -24,9 +24,9 @@ PYTHON_BIN="${PYTHON_DIR}/bin/python3"
 DIST_DIR="${SCRIPT_DIR}/dist"
 
 # Use Python 3.12 — stable, well-tested, available as portable build
-PYTHON_VERSION="3.12.12"
-PYTHON_TAR="python-${PYTHON_VERSION}-macos11.tar.gz"
-PYTHON_URL="https://github.com/indygreg/python-build-standalone/releases/download/20250825/cpython-${PYTHON_VERSION}+20250825-aarch64-apple-darwin-install_only.tar.gz"
+PYTHON_STANDALONE_TAG="20260602"
+PYTHON_FILENAME="cpython-3.12.13%2B20260602-aarch64-apple-darwin-install_only.tar.gz"
+PYTHON_URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PYTHON_STANDALONE_TAG}/${PYTHON_FILENAME}"
 
 echo "============================================"
 echo "  Building ${APP_NAME} v${VERSION}"
@@ -39,14 +39,14 @@ mkdir -p "${MACOS_DIR}" "${RESOURCES}" "${DIST_DIR}"
 
 # ---- Step 1: Download portable Python ----
 echo "[1/7] Setting up portable Python..."
-if [ ! -f "${SCRIPT_DIR}/.python_cache/${PYTHON_TAR}" ]; then
+if [ ! -f "${SCRIPT_DIR}/.python_cache/cpython-3.12.tar.gz" ]; then
     mkdir -p "${SCRIPT_DIR}/.python_cache"
-    echo "  Downloading Python ${PYTHON_VERSION} (portable build)..."
-    curl -L --retry 3 -o "${SCRIPT_DIR}/.python_cache/${PYTHON_TAR}" "${PYTHON_URL}" 2>&1
+    echo "  Downloading portable Python 3.12..."
+    curl -L --retry 3 -o "${SCRIPT_DIR}/.python_cache/cpython-3.12.tar.gz" "${PYTHON_URL}" 2>&1
 fi
 
 mkdir -p "${PYTHON_DIR}"
-tar xzf "${SCRIPT_DIR}/.python_cache/${PYTHON_TAR}" -C "${PYTHON_DIR}" --strip-components=1 2>&1
+tar xzf "${SCRIPT_DIR}/.python_cache/cpython-3.12.tar.gz" -C "${PYTHON_DIR}" --strip-components=1 2>&1
 echo "  Python: $(${PYTHON_BIN} --version 2>&1)"
 
 # ---- Step 2: Create venv from portable Python ----
