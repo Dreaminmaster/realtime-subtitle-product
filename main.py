@@ -265,6 +265,9 @@ def create_pipeline():
                     rms_now = np.sqrt(np.mean(audio_chunk**2))
                     status = "🎤 Listening" if rms_now > self.audio.silence_threshold else "🔇 Silent"
                     self.signals.audio_status.emit(status, min(float(rms_now) * 50, 1.0))
+                    vol_level = min(float(rms_now) * 50, 1.0)
+                    if rms_now > self.audio.silence_threshold:
+                        pass  # debug: log.debug(f"Audio: level={vol_level:.3f}")
                     
                     buffer = np.concatenate([buffer, audio_chunk])
                     now = time.time()
@@ -287,6 +290,7 @@ def create_pipeline():
                         cid = chunk_id
                         prompt = self.last_final_text
                         overall_rms = np.sqrt(np.mean(fb**2))
+                        log.debug(f"Chunk {cid}: finalizing, dur={buffer_duration:.1f}s, rms={overall_rms:.4f}, silent={is_silence}")
                         if overall_rms >= self.audio.silence_threshold:
                             transcribe_executor.submit(self._process_final, fb, cid, prompt, translate_executor)
                         buffer = np.array([], dtype=np.float32)
@@ -318,11 +322,24 @@ def create_pipeline():
             try:
                 text = self.transcriber.transcribe(audio_data, prompt=prompt)
                 if text:
+                    log.info(f"ASR [{chunk_id}]: \"{text}\"")
+                else:
+                    log.debug(f"ASR [{chunk_id}]: (empty)")
+                if text:
                     if len(text.split()) > 2:
                         self.last_final_text = text
-                    self.signals.update_text.emit(chunk_id, text, "(translating...)")
-                    if translate_executor:
-                        translate_executor.submit(self._run_translation, text, chunk_id)
+                    
+                    # Check if translation is active
+                    trans_active = self.translation_engine.current_mode != "off"
+                    
+                    if trans_active:
+                        # Show original + "translating..." placeholder
+                        self.signals.update_text.emit(chunk_id, text, "(translating...)")
+                        if translate_executor:
+                            translate_executor.submit(self._run_translation, text, chunk_id)
+                    else:
+                        # Translation off — just show original
+                        self.signals.update_text.emit(chunk_id, text, "")
             except Exception:
                 log.exception("Final chunk error")
         
