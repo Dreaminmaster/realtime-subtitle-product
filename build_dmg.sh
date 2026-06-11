@@ -223,12 +223,27 @@ mkdir -p "${TMP_DMG_DIR}"
 # Copy .app to layout
 cp -R "${APP_BUNDLE}" "${TMP_DMG_DIR}/"
 
+# Clean up massive cache files from the DMG bundle to save space
+echo "  Cleaning caches..."
+rm -rf "${TMP_DMG_DIR}/${APP_NAME}.app/Contents/Resources/venv/lib/python3"*/site-packages/pip/_vendor 2>/dev/null || true
+rm -rf "${TMP_DMG_DIR}/${APP_NAME}.app/Contents/Resources/venv/lib/python3"*/site-packages/setuptools 2>/dev/null || true
+find "${TMP_DMG_DIR}" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+find "${TMP_DMG_DIR}" -name '*.pyc' -delete 2>/dev/null || true
+
+# Remove the background image from inside the .app (it's for DMG only)
+rm -f "${TMP_DMG_DIR}/${APP_NAME}.app/Contents/Resources/dmg_background.png" 2>/dev/null || true
+
 # Create Applications symlink
 ln -s /Applications "${TMP_DMG_DIR}/Applications"
 
 # Copy background to hidden folder
 mkdir -p "${TMP_DMG_DIR}/.background"
-cp "${RESOURCES}/dmg_background.png" "${TMP_DMG_DIR}/.background/background.png"
+mv "${RESOURCES}/dmg_background.png" "${TMP_DMG_DIR}/.background/background.png" 2>/dev/null || true
+
+# Estimate required DMG size (app size + buffer)
+APP_SIZE_KB=$(du -sk "${TMP_DMG_DIR}" | cut -f1)
+DMG_SIZE_MB=$(( (APP_SIZE_KB + 100000) / 1024 + 200 ))  # 200MB buffer
+echo "  App size: $((APP_SIZE_KB / 1024)) MB, DMG size: ${DMG_SIZE_MB} MB"
 
 # ---- Step 7: Create and beautify DMG ----
 echo "[7/7] Creating and styling DMG..."
@@ -238,7 +253,7 @@ rm -f "${DIST_DIR}/${DMG_NAME}"
 hdiutil create -volname "${APP_NAME}" \
     -srcfolder "${TMP_DMG_DIR}" \
     -ov -format UDRW \
-    -size 800m \
+    -size ${DMG_SIZE_MB}m \
     "${DIST_DIR}/tmp_${DMG_NAME}" 2>&1
 
 # Mount the writable DMG
