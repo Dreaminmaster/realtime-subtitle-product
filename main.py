@@ -14,10 +14,23 @@ import os
 import sys
 import signal
 import argparse
+import logging
 
 # Fix library conflicts
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
+# Setup app-level logging
+LOG_DIR = os.path.join(os.path.expanduser("~"), "Library", "Logs", "RealtimeSubtitle")
+os.makedirs(LOG_DIR, exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(asctime)s] [%(levelname)s] %(message)s',
+    handlers=[
+        logging.FileHandler(os.path.join(LOG_DIR, "app.log")),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+log = logging.getLogger("RealtimeSubtitle")
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Realtime Subtitle")
@@ -61,8 +74,6 @@ def run_diagnostics():
         whisper_models = model_manager.get_models('whisper')
         downloaded = [m for m in whisper_models if m.get('downloaded')]
         print(f"  Whisper models: {len(whisper_models)} available, {len(downloaded)} downloaded")
-        for m in downloaded:
-            print(f"    - {m['name']}: {m['installed_size_mb']} MB")
         disk = model_manager.get_disk_usage()
         print(f"  Total disk: {disk['total_mb']} MB across {disk['model_count']} models")
     except Exception as e:
@@ -72,11 +83,12 @@ def run_diagnostics():
     print(f"  Python: {sys.version}")
     print(f"  Executable: {sys.executable}")
     print(f"  Platform: {sys.platform}")
-    print(f"  Prefix: {sys.prefix}")
 
 
 def main():
     args = parse_args()
+    
+    log.info(f"App started with args: {args}")
     
     # Handle diagnostics mode — no GUI imports needed
     if args.diagnostics:
@@ -88,9 +100,9 @@ def main():
         from PyQt6.QtWidgets import QApplication
         from PyQt6.QtCore import QTimer
     except ImportError:
+        log.error("PyQt6 is required for GUI mode. Install with: pip install PyQt6>=6.5")
         print("ERROR: PyQt6 is required for GUI mode.")
         print("Install it with: pip install PyQt6>=6.5")
-        print("")
         print("Or run diagnostics without GUI:")
         print("  python3 main.py --diagnostics")
         sys.exit(1)
@@ -99,33 +111,43 @@ def main():
     if not app:
         app = QApplication(sys.argv)
     
-    # Set up signal handler
+    # Global exception hook
+    def exception_hook(exctype, value, traceback_obj):
+        import traceback
+        tb = ''.join(traceback.format_exception(exctype, value, traceback_obj))
+        log.critical(f"Unhandled exception: {tb}")
+        from PyQt6.QtWidgets import QMessageBox
+        if QApplication.instance():
+            QMessageBox.critical(None, "Realtime Subtitle — Crash",
+                               f"Unexpected error:\n\n{str(value)[:500]}")
+        sys.exit(1)
+    sys.excepthook = exception_hook
+    
     signal.signal(signal.SIGINT, lambda sig, frame: os._exit(0))
     
     # First-launch permission guide (GUI)
     if not args.no_permission_check:
         try:
-            from permission_guide import PermissionGuide
-            if PermissionGuide.should_show():
-                guide = PermissionGuide()
+            from permission_guide import create_permission_guide
+            guide = create_permission_guide()
+            if guide:
                 guide.exec()
         except Exception as e:
-            print(f"[Main] Permission guide error: {e}")
+            log.warning(f"Permission guide error: {e}")
     
-    # Start diagnostics logging
-    from diagnostics import logger, diagnostics
+    from diagnostics import diagnostics
     diagnostics._check_platform()
     
     # Launch dashboard or overlay
     if args.overlay_only:
-        from main import start_overlay_session
-        win, pipe = start_overlay_session()
+        # Overlay-only: everything on main thread
+        from PyQt6.QtCore import QTimer as Timer
+        Timer.singleShot(100, _launch_overlay_session)
     else:
         from dashboard import Dashboard
         dash = Dashboard()
         dash.show()
     
-    # Event loop with signal handling
     timer = QTimer()
     timer.start(200)
     timer.timeout.connect(lambda: None)
@@ -136,29 +158,33 @@ def main():
         pass
 
 
-# Backward-compatible overlay session starter
-def start_overlay_session():
-    """Start overlay and pipeline (imported by dashboard and main)"""
-    from PyQt6.QtCore import QObject, pyqtSignal
-    from enhanced_overlay_window import EnhancedOverlayWindow
+# ---- Non-UI pipeline helpers (safe to call from any thread) ----
+
+def create_pipeline():
+    """Create pipeline components WITHOUT creating any UI widgets.
+    Returns (pipeline, config_dict) or raises on error."""
     from config import config
-    import threading
     import time
     import numpy as np
     from concurrent.futures import ThreadPoolExecutor
+    import threading
+    from PyQt6.QtCore import QObject, pyqtSignal
+    
+    log.info("Creating pipeline (non-UI)...")
     
     class WorkerSignals(QObject):
         update_text = pyqtSignal(int, str, str)
     
     class Pipeline(QObject):
-        def __init__(self):
+        def __init__(self, signals_obj):
             super().__init__()
-            self.signals = WorkerSignals()
+            self.signals = signals_obj
             self.running = True
             
             from audio_capture import AudioCapture
             from transcriber import Transcriber
             
+            log.info("Pipeline: initializing audio capture...")
             config.print_config()
             
             self.audio = AudioCapture(
@@ -173,13 +199,14 @@ def start_overlay_session():
                 streaming_step_size=config.streaming_step_size,
                 streaming_overlap=config.streaming_overlap
             )
+            log.info("Pipeline: audio capture initialized")
             
-            # Determine model size
             if config.asr_backend == "funasr":
                 model_size = config.funasr_model
             else:
                 model_size = config.whisper_model
             
+            log.info(f"Pipeline: initializing transcriber ({config.asr_backend}/{model_size})...")
             self.transcriber = Transcriber(
                 backend=config.asr_backend,
                 model_size=model_size,
@@ -187,12 +214,10 @@ def start_overlay_session():
                 compute_type=config.whisper_compute_type,
                 language=config.source_language
             )
+            log.info("Pipeline: transcriber initialized")
             
-            # Initialize translation engine
             from translation_engine import translation_engine
             self.translation_engine = translation_engine
-            
-            # Set translation mode from config
             trans_mode = getattr(config, 'translation_mode', 'online')
             self.translation_engine.set_mode(
                 trans_mode,
@@ -200,29 +225,26 @@ def start_overlay_session():
                 api_key=config.api_key,
                 model=config.model
             )
+            log.info(f"Pipeline: translation engine ({trans_mode}) initialized")
             
-            # Warmup
+            log.info("Pipeline: warming up transcriber...")
             self.transcriber.warmup()
+            log.info("Pipeline: warmup complete")
         
         def start(self):
-            self.thread = threading.Thread(target=self.processing_loop, daemon=True)
+            self.thread = threading.Thread(target=self.processing_loop, daemon=True, name="PipelineLoop")
             self.thread.start()
         
         def stop(self):
+            log.info("Pipeline: stopping...")
             self.running = False
             self.audio.stop()
-            if self.thread.is_alive():
-                self.thread.join(timeout=2)
+            if hasattr(self, 'thread') and self.thread.is_alive():
+                self.thread.join(timeout=3)
+            log.info("Pipeline: stopped")
         
         def processing_loop(self):
-            logger.info("Pipeline processing loop started")
-            
-            is_mlx = (config.asr_backend == "mlx")
-            
-            if config.asr_backend == "funasr":
-                model_size = config.funasr_model
-            else:
-                model_size = config.whisper_model
+            log.info("Pipeline: processing loop started")
             
             transcribe_executor = ThreadPoolExecutor(max_workers=1)
             translate_executor = ThreadPoolExecutor(max_workers=config.translation_threads)
@@ -232,9 +254,8 @@ def start_overlay_session():
             last_update_time = time.time()
             self.last_final_text = ""
             
-            audio_gen = self.audio.generator()
-            
             try:
+                audio_gen = self.audio.generator()
                 for audio_chunk in audio_gen:
                     if not self.running:
                         break
@@ -243,10 +264,8 @@ def start_overlay_session():
                     now = time.time()
                     buffer_duration = len(buffer) / self.audio.sample_rate
                     
-                    # Silence detection
                     is_silence = False
                     min_silence_dur = config.silence_duration
-                    
                     if buffer_duration > min_silence_dur:
                         tail = buffer[-int(self.audio.sample_rate * min_silence_dur):]
                         rms = np.sqrt(np.mean(tail**2))
@@ -254,53 +273,34 @@ def start_overlay_session():
                             is_silence = True
                     
                     standard_cut = (is_silence and buffer_duration > 2.0)
-                    soft_limit_cut = False
-                    if buffer_duration > 6.0:
-                        short_tail = int(self.audio.sample_rate * 0.4)
-                        if len(buffer) > short_tail:
-                            t_rms = np.sqrt(np.mean(buffer[-short_tail:]**2))
-                            if t_rms < self.audio.silence_threshold:
-                                soft_limit_cut = True
+                    soft_cut = (buffer_duration > 6.0 and is_silence)
+                    hard_cut = (buffer_duration > self.audio.max_phrase_duration)
                     
-                    hard_limit_cut = (buffer_duration > self.audio.max_phrase_duration)
-                    should_finalize = standard_cut or soft_limit_cut or hard_limit_cut
-                    
-                    if should_finalize and buffer_duration > 0.5:
-                        final_buffer = buffer.copy()
+                    if (standard_cut or soft_cut or hard_cut) and buffer_duration > 0.5:
+                        fb = buffer.copy()
                         cid = chunk_id
                         prompt = self.last_final_text
-                        
-                        overall_rms = np.sqrt(np.mean(final_buffer**2))
+                        overall_rms = np.sqrt(np.mean(fb**2))
                         if overall_rms >= self.audio.silence_threshold:
-                            transcribe_executor.submit(
-                                self._process_final_chunk,
-                                final_buffer, cid, prompt, translate_executor
-                            )
-                        
+                            transcribe_executor.submit(self._process_final, fb, cid, prompt, translate_executor)
                         buffer = np.array([], dtype=np.float32)
                         chunk_id += 1
                         last_update_time = now
-                    
                     elif now - last_update_time > config.update_interval and buffer_duration > 0.5:
-                        partial_buffer = buffer.copy()
+                        pb = buffer.copy()
                         prompt = self.last_final_text
-                        
-                        rms = np.sqrt(np.mean(partial_buffer**2))
+                        rms = np.sqrt(np.mean(pb**2))
                         if rms > self.audio.silence_threshold:
-                            transcribe_executor.submit(
-                                self._process_partial_chunk,
-                                partial_buffer, chunk_id, prompt
-                            )
-                        
+                            transcribe_executor.submit(self._process_partial, pb, chunk_id, prompt)
                         last_update_time = now
-                        
             except Exception as e:
-                logger.error(f"Pipeline error: {e}")
+                log.exception("Pipeline loop error")
             finally:
                 transcribe_executor.shutdown(wait=False)
                 translate_executor.shutdown(wait=False)
+                log.info("Pipeline loop ended")
         
-        def _process_partial_chunk(self, audio_data, chunk_id, prompt=""):
+        def _process_partial(self, audio_data, chunk_id, prompt=""):
             try:
                 text = self.transcriber.transcribe(audio_data, prompt=prompt)
                 if text:
@@ -308,36 +308,72 @@ def start_overlay_session():
             except Exception:
                 pass
         
-        def _process_final_chunk(self, audio_data, chunk_id, prompt="", translate_executor=None):
+        def _process_final(self, audio_data, chunk_id, prompt="", translate_executor=None):
             try:
                 text = self.transcriber.transcribe(audio_data, prompt=prompt)
                 if text:
                     if len(text.split()) > 2:
                         self.last_final_text = text
-                    
                     self.signals.update_text.emit(chunk_id, text, "(translating...)")
-                    
                     if translate_executor:
                         translate_executor.submit(self._run_translation, text, chunk_id)
-            except Exception as e:
-                logger.error(f"Final chunk error: {e}")
+            except Exception:
+                log.exception("Final chunk error")
         
         def _run_translation(self, text, chunk_id):
             try:
                 translated = self.translation_engine.translate(text)
                 self.signals.update_text.emit(chunk_id, text, translated)
-            except Exception as e:
+            except Exception:
                 self.signals.update_text.emit(chunk_id, text, "[Translation Failed]")
     
-    # Create overlay window
+    signals = WorkerSignals()
+    pipeline = Pipeline(signals)
+    return pipeline, signals
+
+
+# ---- Overlay launcher (MUST be called on main thread!) ----
+
+_overlay_window = None
+_overlay_pipeline = None
+
+def create_and_show_overlay(pipeline, signals):
+    """Create and show the overlay window (MUST be called from main thread)."""
+    global _overlay_window, _overlay_pipeline
+    
+    from enhanced_overlay_window import EnhancedOverlayWindow
+    
+    log.info("Creating overlay window on main thread...")
     window = EnhancedOverlayWindow()
     window.show()
+    log.info("Overlay window shown")
     
-    pipeline = Pipeline()
-    pipeline.signals.update_text.connect(window.update_text)
+    # Connect signals
+    signals.update_text.connect(window.update_text)
+    window.stop_requested.connect(pipeline.stop)
+    
+    _overlay_window = window
+    _overlay_pipeline = pipeline
+    
+    log.info("Starting pipeline...")
     pipeline.start()
+    log.info("Translator launched successfully")
     
-    return window, pipeline
+    return window
+
+
+def _launch_overlay_session():
+    """Called on main thread via QTimer for --overlay-only mode."""
+    try:
+        log.info("Launching overlay session...")
+        pipeline, signals = create_pipeline()
+        create_and_show_overlay(pipeline, signals)
+    except Exception:
+        log.exception("Failed to launch overlay session")
+        from PyQt6.QtWidgets import QMessageBox
+        import traceback
+        QMessageBox.critical(None, "Launch Failed",
+                           f"Failed to launch translator:\n\n{traceback.format_exc()[:500]}")
 
 
 if __name__ == "__main__":

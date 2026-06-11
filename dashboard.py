@@ -1150,42 +1150,72 @@ class Dashboard(QWidget):
         self.status_label.setStyleSheet("font-size: 18px; color: #a6e3a1;")
 
     def on_start(self):
-        # 1. Update UI to Loading State
+        import logging
+        log = logging.getLogger("RealtimeSubtitle")
+        log.info("Launch Translator clicked")
+        
+        # Update UI to Loading State
         self.status_label.setText("Initializing Pipeline... (This may take a moment)")
-        self.status_label.setStyleSheet("font-size: 18px; color: #fab387;") # Orange for loading
+        self.status_label.setStyleSheet("font-size: 18px; color: #fab387;")
         self.start_btn.setEnabled(False)
         self.start_btn.setText("Loading...")
         
-        # 2. Start Worker Thread
-        from PyQt6.QtCore import QThread, pyqtSignal
+        # Start worker thread for NON-UI preparation
         self.startup_worker = StartupWorker()
-        self.startup_worker.finished.connect(self.on_pipeline_ready)
+        self.startup_worker.ready.connect(self._on_startup_ready)
+        self.startup_worker.failed.connect(self._on_startup_failed)
+        log.info("StartupWorker started")
         self.startup_worker.start()
 
-    def on_pipeline_ready(self, window, pipeline):
-        if not pipeline:
-             self.status_label.setText("Initialization Failed Check Console")
-             self.start_btn.setEnabled(True)
-             self.start_btn.setText("▶ Launch Translator")
-             return
+    def _on_startup_ready(self, result):
+        """Called on MAIN THREAD when startup preparation is done.
+        Creates overlay window HERE — never in background thread."""
+        import logging
+        log = logging.getLogger("RealtimeSubtitle")
+        log.info("StartupWorker finished, creating overlay on main thread")
+        
+        pipeline, signals = result
+        
+        try:
+            # Create overlay ON MAIN THREAD
+            from main import create_and_show_overlay
+            log.info("Creating overlay on main thread...")
+            self.overlay_window = create_and_show_overlay(pipeline, signals)
+            log.info("Overlay shown")
+            
+            self.pipeline = pipeline
+            
+            # Connect signals
+            if hasattr(self.overlay_window, 'stop_requested'):
+                self.overlay_window.stop_requested.connect(self.on_stop)
+            if hasattr(self.overlay_window, 'style_changed'):
+                self.overlay_window.style_changed.connect(self._on_style_changed)
+            
+            self.status_label.setText("Running...")
+            self.status_label.setStyleSheet("font-size: 18px; color: #a6e3a1;")
+            self.start_btn.hide()
+            self.stop_btn.show()
+            self.showMinimized()
+            
+            log.info("Translator launched successfully")
+        except Exception:
+            log.exception("Failed to create overlay")
+            self._on_startup_failed(f"Failed to create overlay:\n{__import__('traceback').format_exc()}")
 
-        self.pipeline = pipeline
-        self.overlay_window = window
+    def _on_startup_failed(self, error):
+        """Called on MAIN THREAD when startup fails."""
+        import logging
+        log = logging.getLogger("RealtimeSubtitle")
+        log.error(f"Startup failed: {error}")
         
-        # Window is already shown by start_overlay_session
-        # Connect additional signals
-        if hasattr(self.overlay_window, 'stop_requested'):
-             self.overlay_window.stop_requested.connect(self.on_stop)
-        if hasattr(self.overlay_window, 'style_changed'):
-             self.overlay_window.style_changed.connect(self._on_style_changed)
-
-        self.status_label.setText("Running...")
-        self.status_label.setStyleSheet("font-size: 18px; color: #a6e3a1;")
+        self.status_label.setText("Initialization Failed")
+        self.status_label.setStyleSheet("font-size: 18px; color: #f38ba8;")
+        self.start_btn.setEnabled(True)
+        self.start_btn.setText("▶ Launch Translator")
         
-        self.start_btn.hide()
-        self.stop_btn.show()
-        
-        self.showMinimized()
+        from PyQt6.QtWidgets import QMessageBox
+        QMessageBox.critical(self, "Launch Failed",
+                           f"Failed to launch translator:\n\n{str(error)[:500]}")
     
     def _on_style_changed(self, style):
         """Sync style changes back to the style tab"""
@@ -1225,23 +1255,25 @@ class Dashboard(QWidget):
         self.showNormal()
 
 class StartupWorker(QThread):
-    finished = pyqtSignal(object, object) # window(None), pipeline
+    ready = pyqtSignal(object)    # emits (pipeline, signals) tuple
+    failed = pyqtSignal(str)     # emits error message
 
     def run(self):
+        """NON-UI preparation only. NEVER create windows or widgets here."""
+        import logging
+        log = logging.getLogger("RealtimeSubtitle")
+        log.info("StartupWorker: beginning non-UI preparation")
+        
         try:
-            # Import the Pipeline class from main module
-            import main as main_module
-            # Use the Pipeline class defined in main.py via start_overlay_session
-            # Actually, we create the pipeline directly
-            from main import start_overlay_session
-            # start_overlay_session returns (window, pipeline)
-            win, pipeline = start_overlay_session()
-            self.finished.emit(win, pipeline)
+            from main import create_pipeline
+            pipeline, signals = create_pipeline()
+            log.info("StartupWorker: pipeline created")
+            self.ready.emit((pipeline, signals))
         except Exception as e:
-            print(f"Startup Error: {e}")
             import traceback
-            traceback.print_exc()
-            self.finished.emit(None, None)
+            tb = traceback.format_exc()
+            log.error(f"StartupWorker: failed\n{tb}")
+            self.failed.emit(tb)
 
 if __name__ == "__main__":
     def exception_hook(exctype, value, traceback_obj):
