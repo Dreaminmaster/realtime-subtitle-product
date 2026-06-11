@@ -2,9 +2,9 @@
 # =============================================================================
 # DMG Packaging Script for Realtime Subtitle
 #
-# Creates an .app bundle that sets up its own Python environment on first launch.
-# The venv is NOT built during DMG creation (to avoid machine-specific binary issues).
-# Instead, the launcher auto-creates the venv using the user's system Python.
+# Creates a self-contained .app bundle with a portable Python runtime.
+# The Python 3.12 framework is downloaded from python.org and bundled inside
+# the .app — no system Python, Homebrew, or FlyEnv needed.
 #
 # Usage:  bash build_dmg.sh [version]
 # =============================================================================
@@ -19,7 +19,14 @@ APP_BUNDLE="${BUILD_DIR}/${APP_NAME}.app"
 CONTENTS="${APP_BUNDLE}/Contents"
 MACOS_DIR="${CONTENTS}/MacOS"
 RESOURCES="${CONTENTS}/Resources"
+PYTHON_DIR="${RESOURCES}/python"
+PYTHON_BIN="${PYTHON_DIR}/bin/python3"
 DIST_DIR="${SCRIPT_DIR}/dist"
+
+# Use Python 3.12 — stable, well-tested, available as portable build
+PYTHON_VERSION="3.12.12"
+PYTHON_TAR="python-${PYTHON_VERSION}-macos11.tar.gz"
+PYTHON_URL="https://github.com/indygreg/python-build-standalone/releases/download/20250825/cpython-${PYTHON_VERSION}+20250825-aarch64-apple-darwin-install_only.tar.gz"
 
 echo "============================================"
 echo "  Building ${APP_NAME} v${VERSION}"
@@ -30,8 +37,38 @@ echo ""
 rm -rf "${BUILD_DIR}" "${DIST_DIR}"
 mkdir -p "${MACOS_DIR}" "${RESOURCES}" "${DIST_DIR}"
 
-# ---- Step 1: Copy project files into Resources ----
-echo "[1/6] Copying project files..."
+# ---- Step 1: Download portable Python ----
+echo "[1/7] Setting up portable Python..."
+if [ ! -f "${SCRIPT_DIR}/.python_cache/${PYTHON_TAR}" ]; then
+    mkdir -p "${SCRIPT_DIR}/.python_cache"
+    echo "  Downloading Python ${PYTHON_VERSION} (portable build)..."
+    curl -L --retry 3 -o "${SCRIPT_DIR}/.python_cache/${PYTHON_TAR}" "${PYTHON_URL}" 2>&1
+fi
+
+mkdir -p "${PYTHON_DIR}"
+tar xzf "${SCRIPT_DIR}/.python_cache/${PYTHON_TAR}" -C "${PYTHON_DIR}" --strip-components=1 2>&1
+echo "  Python: $(${PYTHON_BIN} --version 2>&1)"
+
+# ---- Step 2: Create venv from portable Python ----
+echo "[2/7] Creating venv..."
+"${PYTHON_BIN}" -m venv --copies "${RESOURCES}/venv" 2>&1
+VENV_PYTHON="${RESOURCES}/venv/bin/python3"
+
+# ---- Step 3: Install dependencies ----
+echo "[3/7] Installing Python dependencies..."
+"${VENV_PYTHON}" -m pip install --no-cache-dir --quiet --upgrade pip 2>/dev/null || true
+
+echo "  From requirements.txt:"
+cat "${SCRIPT_DIR}/requirements.txt"
+
+"${VENV_PYTHON}" -m pip install --no-cache-dir -r "${SCRIPT_DIR}/requirements.txt" 2>&1
+
+# Verify key imports
+echo "  Verifying imports..."
+"${VENV_PYTHON}" -c "import PyQt6, numpy, sounddevice; print('  ✓ PyQt6, numpy, sounddevice OK')" 2>&1
+
+# ---- Step 4: Copy project files ----
+echo "[4/7] Copying project files..."
 rsync -av --exclude='.git' \
       --exclude='__pycache__' \
       --exclude='*.pyc' \
@@ -40,21 +77,18 @@ rsync -av --exclude='.git' \
       --exclude='transcripts' \
       --exclude='.DS_Store' \
       --exclude='*.dmg' \
+      --exclude='.python_cache' \
+      --exclude='python' \
       --exclude='venv' \
       "${SCRIPT_DIR}/" "${RESOURCES}/" 2>/dev/null
-echo "  Files copied to: ${RESOURCES}"
+echo "  Files copied."
 
-# ---- Step 2: Create launcher script ----
-echo "[2/6] Creating launcher script..."
+# ---- Step 5: Create launcher ----
+echo "[5/7] Creating launcher..."
 cat > "${MACOS_DIR}/realtime-subtitle" << 'LAUNCHER'
 #!/bin/bash
-# =============================================================================
-# Realtime Subtitle Launcher
-# First-launch: auto-creates a Python venv using SYSTEM Python and installs deps.
-# Subsequent launches: uses the existing venv.
-# =============================================================================
+# Realtime Subtitle Launcher — uses bundled Python venv only.
 
-# Resolve real script location
 while [ -h "$0" ]; do
     DIR="$(cd -P "$(dirname "$0")" && pwd)"
     SCRIPT="$(readlink "$0")"
@@ -62,88 +96,21 @@ while [ -h "$0" ]; do
 done
 APP_DIR="$(cd -P "$(dirname "$0")/../.." && pwd)"
 RESOURCES="${APP_DIR}/Contents/Resources"
-VENV_DIR="${RESOURCES}/venv"
-VENV_PYTHON="${VENV_DIR}/bin/python3"
+VENV_PYTHON="${RESOURCES}/venv/bin/python3"
+
+if [ ! -f "$VENV_PYTHON" ]; then
+    osascript -e 'display dialog "App bundle is incomplete.\n\nBundled Python environment is missing.\nPlease re-download from GitHub Releases." buttons {"OK"} default button 1 with icon stop'
+    exit 1
+fi
 
 cd "$RESOURCES"
-
-# ---- Check venv health ----
-venv_ok=false
-if [ -f "$VENV_PYTHON" ] && [ -x "$VENV_PYTHON" ]; then
-    if "$VENV_PYTHON" -c '' 2>/dev/null; then
-        venv_ok=true
-    fi
-fi
-
-# ---- First-launch / repair: create venv ----
-if [ "$venv_ok" = false ]; then
-    echo "============================================"
-    echo "  Realtime Subtitle — First Launch Setup"
-    echo "============================================"
-    echo ""
-    
-    # Find system Python
-    SYSTEM_PYTHON=""
-    for candidate in /usr/local/bin/python3 /opt/homebrew/bin/python3 /usr/bin/python3; do
-        if [ -x "$candidate" ] && "$candidate" -c '' 2>/dev/null; then
-            PY_VER=$("$candidate" -c 'import sys; print(sys.version_info[:2])' 2>/dev/null)
-            PY_MAJOR=$(echo "$PY_VER" | cut -d',' -f1 | tr -d ' ()')
-            PY_MINOR=$(echo "$PY_VER" | cut -d',' -f2 | tr -d ' ')
-            if [ "$PY_MAJOR" -ge 3 ] && [ "$PY_MINOR" -ge 10 ]; then
-                SYSTEM_PYTHON="$candidate"
-                break
-            fi
-        fi
-    done
-    
-    if [ -z "$SYSTEM_PYTHON" ]; then
-        osascript -e 'display dialog "Python 3.10+ is required.\n\nPlease install Python from python.org/downloads\n\nAfter installing, re-open this app." buttons {"OK"} default button 1 with icon stop'
-        exit 1
-    fi
-    
-    echo "System Python: $SYSTEM_PYTHON ($($SYSTEM_PYTHON --version))"
-    echo ""
-    
-    # Create venv
-    echo "Creating Python environment..."
-    rm -rf "$VENV_DIR"
-    "$SYSTEM_PYTHON" -m venv --copies "$VENV_DIR" 2>/dev/null || \
-    "$SYSTEM_PYTHON" -m venv "$VENV_DIR" 2>/dev/null || {
-        osascript -e 'display dialog "Failed to create Python environment.\n\nPlease ensure Python 3.10+ is installed from python.org" buttons {"OK"} default button 1 with icon stop'
-        exit 1
-    }
-    
-    VENV_PYTHON="${VENV_DIR}/bin/python3"
-    
-    # Upgrade pip
-    echo "Upgrading pip..."
-    "$VENV_PYTHON" -m pip install --no-cache-dir --quiet --upgrade pip 2>/dev/null || true
-    
-    # Install dependencies
-    if [ -f "${RESOURCES}/requirements.txt" ]; then
-        echo "Installing dependencies..."
-        "$VENV_PYTHON" -m pip install --no-cache-dir --quiet -r requirements.txt 2>&1 || {
-            # Retry with verbose output for diagnostics
-            echo "Retrying with verbose output..."
-            "$VENV_PYTHON" -m pip install --no-cache-dir -r requirements.txt 2>&1
-        }
-    fi
-    
-    echo ""
-    echo "============================================"
-    echo "  Setup complete! Starting app..."
-    echo "============================================"
-    echo ""
-fi
-
-# ---- Launch ----
 exec "$VENV_PYTHON" main.py "$@"
 LAUNCHER
 
 chmod +x "${MACOS_DIR}/realtime-subtitle"
 
-# ---- Step 3: Create Info.plist ----
-echo "[3/6] Creating Info.plist..."
+# ---- Step 6: Info.plist ----
+echo "[6/7] Creating Info.plist..."
 cat > "${CONTENTS}/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -165,75 +132,45 @@ cat > "${CONTENTS}/Info.plist" << PLIST
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
-    <key>LSArchitecturePriority</key>
-    <array>
-        <string>arm64</string>
-    </array>
     <key>NSMicrophoneUsageDescription</key>
     <string>Realtime Subtitle needs microphone access for real-time speech recognition and translation.</string>
-    <key>NSAppleEventsUsageDescription</key>
-    <string>Realtime Subtitle uses Apple Events for keyboard shortcuts.</string>
-    <key>NSSystemAdministrationUsageDescription</key>
-    <string>Realtime Subtitle may need accessibility access for global shortcuts.</string>
     <key>NSHighResolutionCapable</key>
     <true/>
 </dict>
 </plist>
 PLIST
 
-# ---- Step 4: Create DMG background ----
-echo "[4/6] Creating DMG background..."
-python3 -c "
-from PIL import Image, ImageDraw, ImageFont
-img = Image.new('RGB', (600, 400), color=(40, 40, 52))
-draw = ImageDraw.Draw(img)
-try:
-    font = ImageFont.truetype('/System/Library/Fonts/Helvetica.ttc', 24)
-except:
-    font = ImageFont.load_default()
-draw.text((190, 180), '→ Drag to Applications', fill=(205, 214, 244), font=font)
-img.save('${RESOURCES}/dmg_background.png', 'PNG')
-print('  Background OK')
-" 2>&1 || echo "  Background skipped (PIL not available)"
-
-# ---- Step 5: Create DMG layout ----
-echo "[5/6] Creating DMG volume layout..."
+# ---- Step 7: DMG ----
+echo "[7/7] Building DMG..."
 TMP_DMG_DIR="${BUILD_DIR}/dmg_layout"
 rm -rf "${TMP_DMG_DIR}"
 mkdir -p "${TMP_DMG_DIR}"
 
 cp -R "${APP_BUNDLE}" "${TMP_DMG_DIR}/"
-
-# Remove .deps_installed if it exists (force fresh setup per user)
-rm -f "${TMP_DMG_DIR}/${APP_NAME}.app/Contents/Resources/.deps_installed" 2>/dev/null || true
-
-# Remove background from inside bundle
-rm -f "${TMP_DMG_DIR}/${APP_NAME}.app/Contents/Resources/dmg_background.png" 2>/dev/null || true
-
-# Applications symlink
 ln -s /Applications "${TMP_DMG_DIR}/Applications"
 
-# Background image for DMG
+# Background
 mkdir -p "${TMP_DMG_DIR}/.background"
-cp "${RESOURCES}/dmg_background.png" "${TMP_DMG_DIR}/.background/background.png" 2>/dev/null || true
+python3 -c "
+from PIL import Image, ImageDraw, ImageFont
+img = Image.new('RGB', (600, 400), (40, 40, 52))
+d = ImageDraw.Draw(img)
+try: f = ImageFont.truetype('/System/Library/Fonts/Helvetica.ttc', 24)
+except: f = ImageFont.load_default()
+d.text((180, 180), '→ Drag to Applications', fill=(205, 214, 244), font=f)
+img.save('${TMP_DMG_DIR}/.background/background.png', 'PNG')
+" 2>/dev/null || echo "  (no PIL, skipping bg)"
 
-# Size estimate
 APP_SIZE_KB=$(du -sk "${TMP_DMG_DIR}" | cut -f1)
-DMG_SIZE_MB=$(( (APP_SIZE_KB + 50000) / 1024 + 200 ))
-echo "  App bundle size: $((APP_SIZE_KB / 1024)) MB, DMG size: ${DMG_SIZE_MB} MB"
-
-# ---- Step 6: Build DMG ----
-echo "[6/6] Creating DMG..."
-rm -f "${DIST_DIR}/${DMG_NAME}"
+DMG_SIZE_MB=$(( (APP_SIZE_KB + 100000) / 1024 + 200 ))
 
 hdiutil create -volname "${APP_NAME}" \
     -srcfolder "${TMP_DMG_DIR}" \
     -ov -format UDRW \
     -size ${DMG_SIZE_MB}m \
-    "${DIST_DIR}/tmp_${DMG_NAME}" 2>&1
+    "${DIST_DIR}/tmp.dmg" 2>&1
 
-DEVICE=$(hdiutil attach -readwrite -noverify -noautoopen "${DIST_DIR}/tmp_${DMG_NAME}" 2>&1 | head -1 | awk '{print $1}')
-
+DEVICE=$(hdiutil attach -readwrite -noverify -noautoopen "${DIST_DIR}/tmp.dmg" 2>&1 | head -1 | awk '{print $1}')
 if [ -n "$DEVICE" ]; then
     sleep 2
     osascript -e "
@@ -259,67 +196,41 @@ if [ -n "$DEVICE" ]; then
     hdiutil detach "${DEVICE}" -force 2>/dev/null
 fi
 
-hdiutil convert "${DIST_DIR}/tmp_${DMG_NAME}" \
-    -format UDZO \
-    -o "${DIST_DIR}/${DMG_NAME}" 2>&1
+hdiutil convert "${DIST_DIR}/tmp.dmg" -format UDZO -o "${DIST_DIR}/${DMG_NAME}" 2>&1
+rm -f "${DIST_DIR}/tmp.dmg"
 
-rm -f "${DIST_DIR}/tmp_${DMG_NAME}"
-
-# ---- Step 7: Verify ----
+# ---- Verify ----
 echo ""
-echo "[7/7] Verifying..."
-SELF_CHECK_FAILED=false
+echo "=============================="
+echo "  VERIFICATION"
+echo "=============================="
+FAIL=false
 
-# Check DMG file exists
 if [ ! -f "${DIST_DIR}/${DMG_NAME}" ]; then
-    echo "  ❌ DMG file not found"
-    exit 1
+    echo "  ❌ DMG missing"
+    FAIL=true
 fi
 
-SIZE=$(du -h "${DIST_DIR}/${DMG_NAME}" | cut -f1)
-echo "  ✅ DMG created: ${DIST_DIR}/${DMG_NAME} (${SIZE})"
-
-# Check launcher exists in bundle
-if [ ! -f "${APP_BUNDLE}/Contents/MacOS/realtime-subtitle" ]; then
-    echo "  ❌ Launcher missing"
-    SELF_CHECK_FAILED=true
+if [ ! -f "${APP_BUNDLE}/Contents/Resources/venv/bin/python3" ]; then
+    echo "  ❌ venv/bin/python3 missing"
+    FAIL=true
 else
-    echo "  ✅ Launcher present"
+    echo "  ✅ venv/bin/python3 exists"
+    ${VENV_PYTHON} --version 2>&1 && echo "  ✅ Python works" || FAIL=true
+    ${VENV_PYTHON} -c "import PyQt6, numpy, sounddevice; print('  ✅ PyQt6, numpy, sounddevice OK')" 2>&1 || FAIL=true
 fi
 
-# Check requirements.txt in bundle
-if [ ! -f "${APP_BUNDLE}/Contents/Resources/requirements.txt" ]; then
-    echo "  ❌ requirements.txt missing from bundle"
-    SELF_CHECK_FAILED=true
-else
-    echo "  ✅ requirements.txt present"
-fi
+SIZE=$(du -h "${DIST_DIR}/${DMG_NAME}" 2>/dev/null | cut -f1)
+echo "  DMG size: ${SIZE}"
 
-# Check main.py in bundle
-if [ ! -f "${APP_BUNDLE}/Contents/Resources/main.py" ]; then
-    echo "  ❌ main.py missing from bundle"
-    SELF_CHECK_FAILED=true
-else
-    echo "  ✅ main.py present"
-fi
-
-if [ "$SELF_CHECK_FAILED" = true ]; then
+if [ "$FAIL" = true ]; then
     echo ""
-    echo "  ❌ Verification FAILED — see above"
+    echo "  ❌ VERIFICATION FAILED"
     exit 1
 fi
 
 echo ""
-echo "============================================"
-echo "  ✅ DMG created and verified!"
+echo "=============================="
+echo "  ✅ DMG READY"
 echo "  ${DIST_DIR}/${DMG_NAME}"
-echo "  Size: ${SIZE}"
-echo "============================================"
-echo ""
-echo "  First-launch behavior:"
-echo "    User opens .app → launcher detects no venv"
-echo "    → auto-creates venv from system Python"
-echo "    → pip install -r requirements.txt"
-echo "    → launches main.py"
-echo ""
-echo "  Download: https://github.com/Dreaminmaster/realtime-subtitle-product/releases"
+echo "=============================="

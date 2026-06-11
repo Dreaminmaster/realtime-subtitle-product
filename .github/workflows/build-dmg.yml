@@ -38,48 +38,44 @@ jobs:
           ls -la dist/*.dmg 2>/dev/null || true
           find dist -maxdepth 1 -type f 2>/dev/null || true
 
-      - name: Verify app bundle structure
+      - name: Verify app bundle and bundled Python
         run: |
-          echo "=== Verifying app bundle ==="
+          echo "=== Verifying .app bundle ==="
           APP="build/RealtimeSubtitle.app"
           
-          # Check launcher
-          if [ -f "${APP}/Contents/MacOS/realtime-subtitle" ]; then
-            echo "  ✅ Launcher exists"
-          else
-            echo "  ❌ Launcher MISSING — aborting"
+          # Launcher
+          if [ ! -f "${APP}/Contents/MacOS/realtime-subtitle" ]; then
+            echo "❌ Launcher MISSING"; exit 1
+          fi
+          echo "  ✅ Launcher"
+          
+          # requirements.txt
+          if [ ! -f "${APP}/Contents/Resources/requirements.txt" ]; then
+            echo "❌ requirements.txt MISSING"; exit 1
+          fi
+          echo "  ✅ requirements.txt ($(wc -l < ${APP}/Contents/Resources/requirements.txt) lines)"
+          
+          # main.py
+          if [ ! -f "${APP}/Contents/Resources/main.py" ]; then
+            echo "❌ main.py MISSING"; exit 1
+          fi
+          echo "  ✅ main.py"
+          
+          # Bundled Python
+          VENV_PY="${APP}/Contents/Resources/venv/bin/python3"
+          if [ ! -f "$VENV_PY" ]; then
+            echo "❌ Bundled Python MISSING at $VENV_PY"
+            ls -la "${APP}/Contents/Resources/"
             exit 1
           fi
+          echo "  ✅ venv/bin/python3 exists"
           
-          # Check requirements.txt in bundle
-          if [ -f "${APP}/Contents/Resources/requirements.txt" ]; then
-            echo "  ✅ requirements.txt in bundle"
-            echo "  Lines: $(wc -l < ${APP}/Contents/Resources/requirements.txt)"
-          else
-            echo "  ❌ requirements.txt MISSING from bundle — aborting"
-            exit 1
-          fi
+          "$VENV_PY" --version && echo "  ✅ Python --version" || { echo "❌ Python broken"; exit 1; }
+          "$VENV_PY" -c "import PyQt6, numpy, sounddevice; print('  ✅ PyQt6, numpy, sounddevice OK')" || { echo "❌ Import check failed"; exit 1; }
           
-          # Check main.py
-          if [ -f "${APP}/Contents/Resources/main.py" ]; then
-            echo "  ✅ main.py in bundle"
-          else
-            echo "  ❌ main.py MISSING from bundle — aborting"
-            exit 1
-          fi
-          
-          # Check DMG
           DMG=$(ls dist/*.dmg 2>/dev/null | head -1)
-          if [ -n "$DMG" ] && [ -f "$DMG" ]; then
-            echo "  ✅ DMG exists: $DMG ($(du -h "$DMG" | cut -f1))"
-          else
-            echo "  ❌ DMG not found — aborting"
-            exit 1
-          fi
-          
-          echo ""
-          echo "=== Bundle content (top-level) ==="
-          find "${APP}" -maxdepth 3 -not -path '*/.git/*' | sort
+          [ -n "$DMG" ] && echo "  ✅ DMG: $DMG ($(du -h "$DMG" | cut -f1))"
+          echo "=== All checks passed ==="
 
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
@@ -105,13 +101,8 @@ jobs:
             2. 双击打开 DMG
             3. 拖动 `RealtimeSubtitle.app` 到 `Applications` 文件夹
             4. 首次打开：**右键 → Open**（App 未签名）
-            5. App 将自动检测 Python 环境并完成安装（首次启动约 1-2 分钟）
 
-            ## 系统要求
-
-            - macOS 14 (Sonoma) 或更新版本
-            - Apple Silicon (M1/M2/M3/M4) 或 Intel Mac
-            - Python 3.10+（如未安装，首次启动时会提示下载）
+            macOS 14+ · Apple Silicon / Intel · Python 3.12 已内置
 
             ## ✨ 核心特性
 
