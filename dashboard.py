@@ -82,38 +82,64 @@ class Dashboard(QWidget):
     start_requested = pyqtSignal()
     stop_requested = pyqtSignal()
 
+    FORCE_QUIT = "force_quit"
+    RETRY = "retry"
+    CANCEL = "cancel"
+    
     def _show_stop_timeout_dialog(self):
-        """Show timeout dialog with Wait Again / Force Quit / Cancel options."""
+        """Show timeout dialog, returns FORCE_QUIT / RETRY / CANCEL."""
         reply = QMessageBox.critical(
             self, "Stop Timeout",
             "Realtime Subtitle could not stop cleanly.\n"
             "The speech worker is still running.\n\n"
-            "• Wait Again — give more time to finish\n"
-            "• Force Quit — kill the app immediately\n"
-            "• Cancel — keep running",
+            "• Retry — give more time to finish\n"
+            "• Force Quit — kill the process now\n"
+            "• Cancel — keep window open",
             QMessageBox.StandardButton.Retry | QMessageBox.StandardButton.Abort | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Retry
         )
         if reply == QMessageBox.StandardButton.Retry:
-            self.on_stop()
+            return self.RETRY
         elif reply == QMessageBox.StandardButton.Abort:
-            QApplication.quit()
-        # Cancel: do nothing, keep window open
+            return self.FORCE_QUIT
+        return self.CANCEL
+    
+    def _attempt_close_after_stop(self):
+        """Try stop; on timeout, offer retry/force/cancel. Returns True if cleaned up."""
+        success = self.on_stop()
+        if success:
+            return True
+        while True:
+            action = self._show_stop_timeout_dialog()
+            if action == self.CANCEL:
+                return False
+            if action == self.FORCE_QUIT:
+                import logging, signal, os
+                log = logging.getLogger("RealtimeSubtitle")
+                log.critical("Force quit requested by user")
+                logging.shutdown()
+                os.kill(os.getpid(), signal.SIGTERM)
+                return False
+            # RETRY: try again
+            success = self.on_stop()
+            if success:
+                return True
     
     def closeEvent(self, event):
         """Close window only after clean stop."""
+        import logging
+        log = logging.getLogger("RealtimeSubtitle")
         if not hasattr(self, 'pipeline') or self.pipeline is None:
             event.accept()
             QApplication.quit()
             return
         self.status_label.setText("Stopping...")
-        success = self.on_stop()
-        if success:
+        if self._attempt_close_after_stop():
+            log.info("Clean stop before close — quitting")
             event.accept()
             QApplication.quit()
         else:
             event.ignore()
-            self._show_stop_timeout_dialog()
 
     def __init__(self):
         super().__init__()
