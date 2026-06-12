@@ -82,13 +82,38 @@ class Dashboard(QWidget):
     start_requested = pyqtSignal()
     stop_requested = pyqtSignal()
 
+    def _show_stop_timeout_dialog(self):
+        """Show timeout dialog with Wait Again / Force Quit / Cancel options."""
+        reply = QMessageBox.critical(
+            self, "Stop Timeout",
+            "Realtime Subtitle could not stop cleanly.\n"
+            "The speech worker is still running.\n\n"
+            "• Wait Again — give more time to finish\n"
+            "• Force Quit — kill the app immediately\n"
+            "• Cancel — keep running",
+            QMessageBox.StandardButton.Retry | QMessageBox.StandardButton.Abort | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Retry
+        )
+        if reply == QMessageBox.StandardButton.Retry:
+            self.on_stop()
+        elif reply == QMessageBox.StandardButton.Abort:
+            QApplication.quit()
+        # Cancel: do nothing, keep window open
+    
     def closeEvent(self, event):
-        """Ensure total program quit when dashboard is closed"""
+        """Close window only after clean stop."""
+        if not hasattr(self, 'pipeline') or self.pipeline is None:
+            event.accept()
+            QApplication.quit()
+            return
         self.status_label.setText("Stopping...")
-        self.on_stop()
-        # Force application exit
-        QApplication.quit()
-        event.accept()
+        success = self.on_stop()
+        if success:
+            event.accept()
+            QApplication.quit()
+        else:
+            event.ignore()
+            self._show_stop_timeout_dialog()
 
     def __init__(self):
         super().__init__()
@@ -1316,13 +1341,13 @@ class Dashboard(QWidget):
         
         if hasattr(self, 'pipeline') and self.pipeline:
             ok = self.pipeline.stop()
-            if not ok and hasattr(self.pipeline, 'thread') and self.pipeline.thread.is_alive():
+            if not ok:
                 log.error("Pipeline stop timed out")
                 self.status_label.setText("Stop timed out — Retry or Force Quit")
                 self.status_label.setStyleSheet("font-size: 18px; color: #f38ba8;")
                 self.stop_btn.setEnabled(True)
                 self.stop_btn.setText("Retry Stop")
-                return
+                return False
             self.pipeline = None
             
         if hasattr(self, 'overlay_window') and self.overlay_window:
@@ -1338,6 +1363,7 @@ class Dashboard(QWidget):
         self.start_btn.setEnabled(True)
         self.start_btn.setText("▶ Launch")
         self.showNormal()
+        return True
 
 class StartupWorker(QThread):
     ready = pyqtSignal(object)    # emits (pipeline, signals) tuple
