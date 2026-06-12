@@ -337,7 +337,8 @@ class Dashboard(QWidget):
         layout.addStretch()
         
         tab.setLayout(layout)
-        self.tabs.addTab(tab, "🔧 Device Manager")
+        self.tabs.addTab(tab, "🔧 Devices")
+        self.tabs.setTabToolTip(self.tabs.count() - 1, "Devices — multi-output setup")
         
         # Initial population
         self.refresh_audio_devices()
@@ -675,7 +676,8 @@ class Dashboard(QWidget):
         self._on_backend_changed(config.asr_backend)
         
         tab.setLayout(layout)
-        self.tabs.addTab(tab, "📝 Transcription")
+        self.tabs.addTab(tab, "📝 Transcript")
+        self.tabs.setTabToolTip(self.tabs.count() - 1, "Transcript — ASR backend & model")
     
     def _on_backend_changed(self, backend):
         """Show/hide model selectors based on backend and warn about device compatibility"""
@@ -793,7 +795,8 @@ class Dashboard(QWidget):
         layout.addRow(self.trans_test_result)
         
         tab.setLayout(layout)
-        self.tabs.addTab(tab, "🈵 Translation")
+        self.tabs.addTab(tab, "🈵 Translate")
+        self.tabs.setTabToolTip(self.tabs.count() - 1, "Translate — API, model, test connection")
     
     def _test_translation(self):
         """Test translation backend with current settings"""
@@ -1180,7 +1183,8 @@ class Dashboard(QWidget):
         layout.addLayout(log_layout)
         
         tab.setLayout(layout)
-        self.tabs.addTab(tab, "🔍 Diagnostics")
+        self.tabs.addTab(tab, "🔍 Diag")
+        self.tabs.setTabToolTip(self.tabs.count() - 1, "Diagnostics — check system, view logs")
     
     def _run_diagnostics(self):
         """Run and display system diagnostics"""

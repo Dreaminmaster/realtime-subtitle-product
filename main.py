@@ -468,8 +468,12 @@ def create_pipeline():
                             
                             last_partial_time = now
                     
-            except Exception:
+            except Exception as exc:
                 log.exception("Pipeline loop error")
+                try:
+                    self.signals.pipeline_failed.emit(str(exc))
+                except Exception:
+                    log.critical("pipeline_failed signal broken")
             finally:
                 log.info("Pipeline loop ending — draining ASR queue...")
                 
