@@ -256,12 +256,60 @@ def create_pipeline():
         def processing_loop(self):
             log.info("Pipeline: processing loop started (state-machine mode)")
             
-            transcribe_executor = ThreadPoolExecutor(max_workers=1)
             translate_executor = ThreadPoolExecutor(max_workers=config.translation_threads)
+            
+            # ---- Priority ASR queue: FINAL(0) > PARTIAL(1) ----
+            import queue as pyqueue
+            asr_queue = pyqueue.PriorityQueue()
+            asr_running = threading.Event()
+            asr_stop = threading.Event()
+            
+            def asr_worker_loop():
+                while not asr_stop.is_set():
+                    try:
+                        prio, seq, task = asr_queue.get(timeout=0.5)
+                    except pyqueue.Empty:
+                        continue
+                    if task is None:
+                        continue
+                    
+                    asr_running.set()
+                    t0 = time.time()
+                    task_type = task["type"]
+                    uid = task["uid"]
+                    gen = task["gen"]
+                    audio = task["audio"]
+                    prompt = task.get("prompt", "")
+                    
+                    if task_type == "final":
+                        qwait = (t0 - task["created_at"]) * 1000
+                        log.info(f"Utterance[{uid}] FINAL started queue_wait_ms={qwait:.0f}")
+                        self._process_final_v3(audio, uid, gen, prompt, translate_executor)
+                        inference_ms = (time.time() - t0) * 1000
+                        total_ms = (time.time() - task["created_at"]) * 1000
+                        log.info(f"Utterance[{uid}] FINAL completed inference_ms={inference_ms:.0f} total_ms={total_ms:.0f}")
+                    else:
+                        log.debug(f"Utterance[{uid}] PARTIAL started")
+                        self._process_partial_v3(audio, uid, gen, prompt)
+                    
+                    asr_running.clear()
+                log.info("ASR worker stopped")
+            
+            asr_thread = threading.Thread(target=asr_worker_loop, daemon=True, name="ASRWorker")
+            asr_thread.start()
+            
+            # Task counter for ordering within same priority
+            self._asr_seq = 0
+            
+            # ASR lifecycle state (never reset by recording state)
+            self._finalizing_uids = set()
+            self._finalized_uids = set()
+            # Per-utterance pending partial: only one per uid
+            self._pending_partial_by_uid = {}  # uid -> {"gen": int, "seq": int}
+            self._seq_counter = 0
             
             STATE_IDLE = 0
             STATE_RECORDING = 1
-            
             state = STATE_IDLE
             buffer = np.array([], dtype=np.float32)
             pre_roll = np.array([], dtype=np.float32)
@@ -270,13 +318,6 @@ def create_pipeline():
             utterance_generation = 0
             last_partial_time = 0.0
             
-            # ASR task lifecycle — NEVER reset by recording state reset.
-            # These track async tasks that may outlive the recording state.
-            self._finalizing_uids = set()       # uids with final submitted (NOT yet completed)
-            self._finalized_uids = set()        # uids with final completed
-            self._partial_future = None         # current pending partial future
-            self._partial_uid = 0               # uid of current pending partial
-            
             SILENCE_DUR_SEC = config.silence_duration
             MIN_UTTERANCE_DUR = 1.0
             MAX_UTTERANCE_DUR = config.max_phrase_duration
@@ -284,13 +325,18 @@ def create_pipeline():
             PRE_ROLL_MS = 0.4
             
             def _reset_recording_state():
-                """Reset ONLY recording state. ASR lifecycle (finalizing/finalized) is separate."""
                 nonlocal buffer, pre_roll, silence_counter, state, last_partial_time
                 buffer = np.array([], dtype=np.float32)
                 pre_roll = np.array([], dtype=np.float32)
                 silence_counter = 0
                 state = STATE_IDLE
                 last_partial_time = 0.0
+            
+            def _cancel_pending_partial_for_uid(uid):
+                """Remove pending partial for uid from queue tracking."""
+                if uid in self._pending_partial_by_uid:
+                    old = self._pending_partial_by_uid.pop(uid)
+                    log.info(f"Utterance[{uid}] pending PARTIAL removed (gen={old.get('gen')})")
             
             try:
                 audio_gen = self.audio.generator()
@@ -349,50 +395,61 @@ def create_pipeline():
                             uid = utterance_id
                             gen = utterance_generation
                             
-                            # Cancel in-flight partial
-                            pf = self._partial_future
-                            if pf and not pf.done():
-                                cancelled = pf.cancel()
-                                log.info(f"Utterance[{uid}] PARTIAL cancel requested cancelled={cancelled}")
+                            # Remove pending partial for this uid
+                            _cancel_pending_partial_for_uid(uid)
                             
-                            # Mark finalizing BEFORE submitting — closes the gate for old partial
+                            # Mark finalizing
                             self._finalizing_uids.add(uid)
                             if uid in self._utt_lifecycle:
                                 old_state = self._utt_lifecycle[uid]["state"]
                                 self._utt_lifecycle[uid]["state"] = "finalizing"
                                 log.info(f"Utterance[{uid}] state {old_state} -> finalizing")
-                            buf_copy = buffer.copy()
-                            prompt = self.last_final_text
                             
                             log.info(f"Utterance[{uid}] END dur={buf_dur:.1f}s silence={silence_counter:.1f}s reason={reason}")
-                            log.info(f"Utterance[{uid}] FINAL queued")
                             
-                            transcribe_executor.submit(
-                                self._process_final_v2, buf_copy, uid, gen, prompt, translate_executor
-                            )
+                            self._seq_counter += 1
+                            task = {
+                                "type": "final",
+                                "uid": uid,
+                                "gen": gen,
+                                "audio": buffer.copy(),
+                                "prompt": self.last_final_text,
+                                "created_at": time.time(),
+                            }
+                            log.info(f"Utterance[{uid}] FINAL queued priority=0")
+                            asr_queue.put((0, self._seq_counter, task))  # priority 0 = FINAL
                             
                             utterance_id += 1
                             _reset_recording_state()
                         
-                        # Partial: busy-skip + generation tracking
+                        # Partial: throttled, replaces pending if same uid
                         elif buf_dur >= 1.0 and (now - last_partial_time) >= PARTIAL_INTERVAL:
-                            pf = self._partial_future
-                            if pf and not pf.done():
-                                log.debug(f"Utterance[{utterance_id}] PARTIAL skipped: worker busy")
-                            else:
-                                gen = utterance_generation
-                                uid = utterance_id
-                                log.debug(f"Utterance[{utterance_id}] PARTIAL requested dur={buf_dur:.1f}s gen={gen}")
-                                self._partial_uid = uid
-                                self._partial_future = transcribe_executor.submit(
-                                    self._process_partial_v2, buffer.copy(), uid, gen, self.last_final_text
-                                )
+                            gen = utterance_generation
+                            uid = utterance_id
+                            
+                            # Replace any pending partial for this uid
+                            _cancel_pending_partial_for_uid(uid)
+                            
+                            self._seq_counter += 1
+                            seq = self._seq_counter
+                            task = {
+                                "type": "partial",
+                                "uid": uid,
+                                "gen": gen,
+                                "audio": buffer.copy(),
+                                "prompt": self.last_final_text,
+                                "created_at": time.time(),
+                            }
+                            self._pending_partial_by_uid[uid] = {"gen": gen, "seq": seq}
+                            log.debug(f"Utterance[{uid}] PARTIAL queued priority=1 gen={gen} dur={buf_dur:.1f}s")
+                            asr_queue.put((1, seq, task))  # priority 1 = PARTIAL
+                            
                             last_partial_time = now
                     
             except Exception:
                 log.exception("Pipeline loop error")
             finally:
-                transcribe_executor.shutdown(wait=False)
+                asr_stop.set()
                 translate_executor.shutdown(wait=False)
                 log.info("Pipeline loop ended")
         
@@ -411,49 +468,36 @@ def create_pipeline():
                 return False
             return True
         
-        def _process_partial_v2(self, audio_data, chunk_id, gen, prompt=""):
-            """Partial with two-phase guard — before AND after ASR."""
-            t0 = time.time()
+        def _process_partial_v3(self, audio_data, chunk_id, gen, prompt=""):
+            """Partial called from ASR worker. Emit guarded by lifecycle + generation."""
+            if not self._partial_safe_to_emit_v2(chunk_id, gen):
+                log.info(f"Utterance[{chunk_id}] PARTIAL result discarded: state changed before emit gen={gen}")
+                return
             try:
-                if not self._partial_safe_to_emit_v2(chunk_id, gen):
-                    log.debug(f"Utterance[{chunk_id}] PARTIAL discarded: state changed before ASR gen={gen}")
-                    return
-                
                 text = self.transcriber.transcribe(audio_data, prompt=prompt)
-                
-                # Re-check — may have been overtaken by final during ASR
                 if not self._partial_safe_to_emit_v2(chunk_id, gen):
-                    latency = time.time() - t0
-                    log.info(f"Utterance[{chunk_id}] PARTIAL result discarded: stale gen={gen} latency={latency:.2f}s")
+                    log.info(f"Utterance[{chunk_id}] PARTIAL result discarded: stale gen={gen}")
                     return
-                
                 if text:
-                    latency = time.time() - t0
-                    log.info(f"Utterance[{chunk_id}] PARTIAL text=\"{text}\" latency={latency:.2f}s")
+                    log.info(f"Utterance[{chunk_id}] PARTIAL text=\"{text}\"")
                     self.signals.update_text.emit(chunk_id, text, "")
             except Exception:
                 log.exception(f"Utterance[{chunk_id}] PARTIAL error")
         
-        def _process_final_v2(self, audio_data, chunk_id, gen, prompt="", translate_executor=None):
-            """Final with lifecycle tracking in sets (not single uid)."""
-            t0 = time.time()
+        def _process_final_v3(self, audio_data, chunk_id, gen, prompt="", translate_executor=None):
+            """Final with lifecycle tracking. Called from ASR worker with priority."""
+            self._finalizing_uids.add(chunk_id)
             try:
-                log.info(f"Utterance[{chunk_id}] FINAL started")
-                
                 dur = len(audio_data) / self.audio.sample_rate
                 rms = float(np.sqrt(np.mean(audio_data**2)))
                 peak = float(np.max(np.abs(audio_data)))
                 
                 text = self.transcriber.transcribe(audio_data, prompt=prompt)
-                t1 = time.time()
-                latency = t1 - t0
                 
-                # Discard if already finalized (duplicate)
                 if chunk_id in self._finalized_uids:
                     log.warning(f"Utterance[{chunk_id}] FINAL duplicate discarded")
                     return
                 
-                # Move from finalizing → finalized
                 self._finalizing_uids.discard(chunk_id)
                 self._finalized_uids.add(chunk_id)
                 if chunk_id in self._utt_lifecycle:
@@ -461,36 +505,32 @@ def create_pipeline():
                     self._utt_lifecycle[chunk_id]["state"] = "finalized"
                     log.info(f"Utterance[{chunk_id}] state {old_state} -> finalized")
                 
-                # Prune old lifecycle entries
-                while len(self._utt_lifecycle) > 50:
-                    oldest = min(self._utt_lifecycle.keys())
-                    del self._utt_lifecycle[oldest]
-                while len(self._finalized_uids) > 50:
-                    self._finalized_uids.remove(min(self._finalized_uids))
-                while len(self._finalizing_uids) > 20:
-                    self._finalizing_uids.remove(min(self._finalizing_uids))
-                
                 if text:
-                    log.info(f"Utterance[{chunk_id}] FINAL text=\"{text}\" dur={dur:.1f}s rms={rms:.4f} peak={peak:.3f} latency={latency:.2f}s")
+                    log.info(f"Utterance[{chunk_id}] FINAL text=\"{text}\" dur={dur:.1f}s rms={rms:.4f} peak={peak:.3f}")
                 else:
-                    log.info(f"Utterance[{chunk_id}] FINAL (empty) dur={dur:.1f}s rms={rms:.4f} peak={peak:.3f} latency={latency:.2f}s")
+                    log.info(f"Utterance[{chunk_id}] FINAL (empty) dur={dur:.1f}s rms={rms:.4f} peak={peak:.3f}")
                 
                 if text:
                     if len(text.split()) > 2:
                         self.last_final_text = text
-                    
                     trans_active = self.translation_engine.current_mode != "off"
-                    
                     if trans_active:
                         self.signals.update_text.emit(chunk_id, text, "(translating...)")
                         if translate_executor:
                             translate_executor.submit(self._run_translation, text, chunk_id)
                     else:
                         self.signals.update_text.emit(chunk_id, text, "")
+                
+                # Prune lifecycle
+                while len(self._utt_lifecycle) > 50:
+                    del self._utt_lifecycle[min(self._utt_lifecycle.keys())]
+                while len(self._finalized_uids) > 50:
+                    self._finalized_uids.remove(min(self._finalized_uids))
+                while len(self._finalizing_uids) > 20:
+                    self._finalizing_uids.remove(min(self._finalizing_uids))
             except Exception:
                 log.exception(f"Utterance[{chunk_id}] FINAL error")
             finally:
-                # Ensure cleanup even on error
                 self._finalizing_uids.discard(chunk_id)
     
     signals = WorkerSignals()
