@@ -1331,20 +1331,25 @@ class Dashboard(QWidget):
             # Create overlay ON MAIN THREAD
             from main import create_and_show_overlay
             log.info("Creating overlay on main thread...")
-            self.overlay_window = create_and_show_overlay(pipeline, signals)
+            self.overlay_window = create_and_show_overlay(pipeline, signals, start_pipeline=False)
             log.info("Overlay shown")
             
             self.pipeline = pipeline
             
-            # Connect signals
+            # Connect overlay signals
             if hasattr(self.overlay_window, 'stop_requested'):
                 self.overlay_window.stop_requested.connect(self.on_stop)
             if hasattr(self.overlay_window, 'style_changed'):
                 self.overlay_window.style_changed.connect(self._on_style_changed)
+            
+            # Connect lifecycle signals BEFORE pipeline.start()
             if hasattr(signals, 'pipeline_failed'):
                 signals.pipeline_failed.connect(self._on_pipeline_failed)
             if hasattr(signals, 'pipeline_cleanup_finished'):
                 signals.pipeline_cleanup_finished.connect(self._on_pipeline_cleanup_finished)
+            
+            # Now safe to start
+            pipeline.start()
             
             self.status_label.setText("Running...")
             self.status_label.setStyleSheet("font-size: 18px; color: #a6e3a1;")
@@ -1386,11 +1391,17 @@ class Dashboard(QWidget):
         self.start_btn.setText("Cleaning up...")
         self.showNormal()
     
-    def _on_pipeline_cleanup_finished(self):
-        """ASR worker and executors have shut down. Safe to clean UI."""
+    def _on_pipeline_cleanup_finished(self, success, message):
+        """ASR worker and executors have shut down (or not). Safe to clean UI only if success."""
         import logging
         log = logging.getLogger("RealtimeSubtitle")
-        log.info("Pipeline cleanup finished")
+        log.info(f"Pipeline cleanup finished: success={success} {message}")
+        if not success:
+            self.status_label.setText("Cleanup failed — retry or force quit")
+            self.status_label.setStyleSheet("font-size: 18px; color: #f38ba8;")
+            self.start_btn.setEnabled(False)
+            self.start_btn.setText("Retry Stop")
+            return
         if hasattr(self, 'overlay_window') and self.overlay_window:
             self.overlay_window.close()
             self.overlay_window = None

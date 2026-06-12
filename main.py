@@ -181,7 +181,7 @@ def create_pipeline():
         update_text = pyqtSignal(int, str, str)
         audio_status = pyqtSignal(str, float)  # (status_text, volume_level 0.0-1.0)
         pipeline_failed = pyqtSignal(str)       # error message when pipeline crashes
-        pipeline_cleanup_finished = pyqtSignal() # fired after finally block completes
+        pipeline_cleanup_finished = pyqtSignal(bool, str) # (success, message)
     
     class Pipeline(QObject):
         def __init__(self, signals_obj):
@@ -519,13 +519,22 @@ def create_pipeline():
                 
                 translate_executor.shutdown(wait=False)
                 
-                self._cleanup_in_progress = False
-                if self._failed:
-                    try:
-                        self.signals.pipeline_cleanup_finished.emit()
-                    except Exception:
-                        log.critical("Failed to emit cleanup_finished")
+                self._cleanup_in_progress = True
+                cleanup_ok = not asr_thread.is_alive()
                 
+                if self._failed:
+                    if cleanup_ok:
+                        try:
+                            self.signals.pipeline_cleanup_finished.emit(True, "cleanup completed")
+                        except Exception:
+                            log.critical("Failed to emit cleanup_finished")
+                    else:
+                        try:
+                            self.signals.pipeline_cleanup_finished.emit(False, "ASR worker did not stop")
+                        except Exception:
+                            log.critical("Failed to emit cleanup_finished")
+                
+                self._cleanup_in_progress = False
                 log.info("Pipeline loop ended (ASR queue drained)")
         
         def _partial_safe_to_emit_v2(self, uid, gen):
@@ -687,8 +696,9 @@ def create_pipeline():
 _overlay_window = None
 _overlay_pipeline = None
 
-def create_and_show_overlay(pipeline, signals):
-    """Create and show the overlay window (MUST be called from main thread)."""
+def create_and_show_overlay(pipeline, signals, start_pipeline=True):
+    """Create and show the overlay window (MUST be called from main thread).
+    Set start_pipeline=False if caller needs to connect signals first."""
     global _overlay_window, _overlay_pipeline
     
     from enhanced_overlay_window import EnhancedOverlayWindow
@@ -706,9 +716,10 @@ def create_and_show_overlay(pipeline, signals):
     _overlay_window = window
     _overlay_pipeline = pipeline
     
-    log.info("Starting pipeline...")
-    pipeline.start()
-    log.info("Translator launched successfully")
+    if start_pipeline:
+        log.info("Starting pipeline...")
+        pipeline.start()
+        log.info("Translator launched successfully")
     
     return window
 
@@ -718,7 +729,7 @@ def _launch_overlay_session():
     try:
         log.info("Launching overlay session...")
         pipeline, signals = create_pipeline()
-        create_and_show_overlay(pipeline, signals)
+        create_and_show_overlay(pipeline, signals, start_pipeline=True)
     except Exception:
         log.exception("Failed to launch overlay session")
         from PyQt6.QtWidgets import QMessageBox
