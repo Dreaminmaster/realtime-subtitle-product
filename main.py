@@ -182,6 +182,7 @@ def create_pipeline():
         audio_status = pyqtSignal(str, float)  # (status_text, volume_level 0.0-1.0)
         pipeline_failed = pyqtSignal(str)       # error message when pipeline crashes
         pipeline_cleanup_finished = pyqtSignal(bool, str) # (success, message)
+        pipeline_started = pyqtSignal()          # pipeline loop started successfully
     
     class Pipeline(QObject):
         def __init__(self, signals_obj):
@@ -320,6 +321,12 @@ def create_pipeline():
             
             asr_thread = threading.Thread(target=asr_worker_loop, daemon=True, name="ASRWorker")
             asr_thread.start()
+            
+            # Signal pipeline started — everything is ready
+            try:
+                self.signals.pipeline_started.emit()
+            except Exception:
+                log.critical("pipeline_started signal broken")
             
             # Task counter for ordering within same priority
             self._asr_seq = 0
@@ -479,6 +486,7 @@ def create_pipeline():
                 except Exception:
                     log.critical("pipeline_failed signal broken")
             finally:
+                self._cleanup_in_progress = True
                 log.info("Pipeline loop ending — draining ASR queue...")
                 
                 # Force-finalize any recording in progress (carries CURRENT session_gen, still valid)

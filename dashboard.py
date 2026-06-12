@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QTabWidget, QSpinBox, QDoubleSpinBox, QGridLayout,
                              QScrollArea, QSizePolicy, QSpacerItem, QFormLayout, QApplication,
                              QMessageBox, QTextEdit, QDialog)
-from PyQt6.QtCore import Qt, QSize, pyqtSignal, QThread
+from PyQt6.QtCore import Qt, QSize, pyqtSignal, QThread, QTimer
 from PyQt6.QtGui import QFont, QIcon, QColor
 import sys
 import os
@@ -1209,13 +1209,19 @@ class Dashboard(QWidget):
         
         # Pipeline state
         if hasattr(self, 'pipeline') and self.pipeline:
-            alive = hasattr(self.pipeline, 'thread') and self.pipeline.thread.is_alive()
-            report += f"\nPipeline: {'Running' if alive else 'STOPPED'}"
-            report += f"\nWorker: {'alive' if alive else 'not running'}"
-            if self.pipeline.running:
-                report += "\nState: ACTIVE"
+            pp = self.pipeline
+            report += f"\nPipeline state: {'RUNNING' if pp.running else 'STOPPING'}"
+            if hasattr(pp, 'thread') and pp.thread:
+                report += f"\nPipelineLoop alive: {pp.thread.is_alive()}"
+            if hasattr(pp, '_failed') and pp._failed:
+                report += f"\nPipeline failed: YES"
+            if hasattr(pp, '_cleanup_in_progress') and pp._cleanup_in_progress:
+                report += f"\nCleanup in progress: YES"
+            # ASR worker status
+            if hasattr(pp, 'running') and pp.running:
+                report += "\nASR worker: (checking via PipelineLoop only)"
             else:
-                report += "\nState: STOPPING/STOPPED"
+                report += "\nASR worker: stopped (PipelineLoop not running)"
         else:
             report += "\nPipeline: NOT STARTED"
         
@@ -1347,15 +1353,21 @@ class Dashboard(QWidget):
                 signals.pipeline_failed.connect(self._on_pipeline_failed)
             if hasattr(signals, 'pipeline_cleanup_finished'):
                 signals.pipeline_cleanup_finished.connect(self._on_pipeline_cleanup_finished)
+            if hasattr(signals, 'pipeline_started'):
+                signals.pipeline_started.connect(self._on_pipeline_started)
+            
+            # Set a 10s startup timeout
+            self._startup_timeout = QTimer()
+            self._startup_timeout.setSingleShot(True)
+            self._startup_timeout.timeout.connect(self._on_startup_timeout)
+            self._startup_timeout.start(10000)
             
             # Now safe to start
+            self.status_label.setText("Starting Pipeline...")
+            self.status_label.setStyleSheet("font-size: 18px; color: #fab387;")
             pipeline.start()
             
-            self.status_label.setText("Running...")
-            self.status_label.setStyleSheet("font-size: 18px; color: #a6e3a1;")
-            self.start_btn.hide()
-            self.stop_btn.show()
-            self.showMinimized()
+            log.info("Translator launched, waiting for pipeline_started signal...")
             
             log.info("Translator launched successfully")
         except Exception:
@@ -1408,6 +1420,32 @@ class Dashboard(QWidget):
         self.pipeline = None
         self.status_label.setText("Pipeline Error — ready to retry")
         self.status_label.setStyleSheet("font-size: 18px; color: #f38ba8;")
+        self.start_btn.setEnabled(True)
+        self.start_btn.setText("Retry Launch")
+    
+    def _on_pipeline_started(self):
+        """Pipeline confirmed started — transition to Running."""
+        import logging
+        log = logging.getLogger("RealtimeSubtitle")
+        log.info("Pipeline started confirmed")
+        if hasattr(self, '_startup_timeout'):
+            self._startup_timeout.stop()
+        self.status_label.setText("Running...")
+        self.status_label.setStyleSheet("font-size: 18px; color: #a6e3a1;")
+        self.stop_btn.show()
+        self.stop_btn.setEnabled(True)
+        self.showMinimized()
+    
+    def _on_startup_timeout(self):
+        """Pipeline never confirmed start."""
+        import logging
+        log = logging.getLogger("RealtimeSubtitle")
+        log.error("Pipeline start timeout")
+        if hasattr(self, 'pipeline') and self.pipeline:
+            self.pipeline.stop()
+        self.status_label.setText("Start failed — timeout")
+        self.status_label.setStyleSheet("font-size: 18px; color: #f38ba8;")
+        self.start_btn.show()
         self.start_btn.setEnabled(True)
         self.start_btn.setText("Retry Launch")
     
