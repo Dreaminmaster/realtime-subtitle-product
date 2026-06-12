@@ -353,6 +353,7 @@ def create_pipeline():
             MAX_UTTERANCE_DUR = config.max_phrase_duration
             PARTIAL_INTERVAL = 1.2
             PRE_ROLL_MS = 0.4
+            POST_ROLL_MS = 0.6  # keep 600ms after silence detection to avoid tail chop
             
             def _reset_recording_state():
                 nonlocal buffer, pre_roll, silence_counter, state, last_partial_time
@@ -649,6 +650,8 @@ def create_pipeline():
                 
                 if text:
                     log.info(f"Utterance[{chunk_id}] FINAL text=\"{text}\" dur={dur:.1f}s rms={rms:.4f} peak={peak:.3f}")
+                else:
+                    log.warning(f"Utterance[{chunk_id}] FINAL empty: dur={dur:.1f}s rms={rms:.4f} peak={peak:.3f} samples={len(audio_data)} reason=whisper_no_text")
                 
                 if text:
                     if len(text.split()) > 2:

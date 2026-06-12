@@ -59,7 +59,7 @@ class Config:
             self.device_index = None
             
         # Max phrase duration - force processing after N seconds
-        self.max_phrase_duration = self._getfloat("audio", "max_phrase_duration", 5.0)
+        self.max_phrase_duration = self._getfloat("audio", "max_phrase_duration", 15.0)
         
         # Streaming mode settings
         self.streaming_mode = self._get("audio", "streaming_mode", "false").lower() == "true"

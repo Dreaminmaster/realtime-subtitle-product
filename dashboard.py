@@ -551,18 +551,32 @@ class Dashboard(QWidget):
 
     def refresh_model_list(self):
         """Fetch available models from the API and populate the model dropdown"""
+        import logging
+        log = logging.getLogger("RealtimeSubtitle")
+        api_key = self.api_key.text().strip()
+        base_url = self.base_url.text().strip()
+        
+        # Guard: don't call API with placeholder keys
+        if not api_key or api_key in ("sk-...", "", "dummy-key-for-local", "dummy-key"):
+            log.warning("refresh_model_list: no valid API key, skipping")
+            self.status_label.setText("⚠️ Enter API key to fetch models")
+            self.status_label.setStyleSheet("font-size: 18px; color: #fab387;")
+            return
+        
+        # Guard: don't call default OpenAI without explicit intent
+        if not base_url or base_url == "https://api.openai.com/v1":
+            log.warning("refresh_model_list: default endpoint, skipping to avoid unauthorized call")
+            self.status_label.setText("⚠️ Configure an API to fetch models")
+            self.status_label.setStyleSheet("font-size: 18px; color: #fab387;")
+            return
+        
         try:
             from openai import OpenAI
             import httpx
             
-            api_key = self.api_key.text() or "dummy-key-for-local"
-            base_url = self.base_url.text() or None
-            
-            # Update button state
             self.refresh_models_btn.setEnabled(False)
             self.refresh_models_btn.setText("...")
             
-            # Create client with SSL verification disabled
             http_client = httpx.Client(verify=False)
             client = OpenAI(api_key=api_key, base_url=base_url, http_client=http_client)
             
@@ -798,46 +812,78 @@ class Dashboard(QWidget):
         tab.setLayout(layout)
         self.tabs.addTab(tab, "🈵 Translate")
         self.tabs.setTabToolTip(self.tabs.count() - 1, "Translate — API, model, test connection")
-    
-    def _test_translation(self):
-        """Test translation backend with current settings"""
-        from translation_engine import translation_engine
-        import logging
-        log = logging.getLogger("RealtimeSubtitle")
         
-        # Get values
+        # Translation mode indicator
+        self.trans_mode_label = QLabel("Translation: Off (no API key)")
+        self.trans_mode_label.setStyleSheet("color: #6c7086; font-size: 12px; padding: 5px 0;")
+        self.trans_mode_label.setWordWrap(True)
+    
+    def update_translation_mode_label(self):
         api_key = self.api_key.text().strip()
         base_url = self.base_url.text().strip()
         model = self.model.currentText().strip()
-        target_lang = self.target_lang.currentText()
+        if not api_key or api_key in ("sk-...", ""):
+            self.trans_mode_label.setText("Translation: Off (no API key)")
+        elif not base_url or base_url == "https://api.openai.com/v1":
+            self.trans_mode_label.setText("Translation: Off (no endpoint)")
+        else:
+            self.trans_mode_label.setText(f"Translation: Online ({model})")
+    
+    def _test_translation(self):
+        """Test translation backend with current settings"""
+        import logging
+        log = logging.getLogger("RealtimeSubtitle")
         
-        # Auto-fix base URL
+        api_key = self.api_key.text().strip()
+        base_url = self.base_url.text().strip()
+        model = self.model.currentText().strip()
+        
+        # Guard: empty API key or placeholder
+        if not api_key or api_key in ("sk-...", "", "dummy-key-for-local"):
+            self.trans_test_result.setText("❌ No API key configured — enter a key to test")
+            self.trans_test_result.setStyleSheet("color: #f38ba8; font-size: 12px;")
+            return
+        
         if base_url and not base_url.startswith(("http://", "https://")):
             base_url = "http://" + base_url
             self.base_url.setText(base_url)
         
-        self.trans_test_result.setText("Testing...")
+        # Guard: placeholder URL
+        if not base_url or base_url in ("https://api.openai.com/v1",):
+            self.trans_test_result.setText("❌ No API endpoint configured")
+            self.trans_test_result.setStyleSheet("color: #f38ba8; font-size: 12px;")
+            return
+        
+        is_local = any(h in base_url for h in ("localhost", "127.0.0.1", "::1"))
+        
+        self.trans_test_result.setText(f"Testing {base_url}...")
         self.trans_test_result.setStyleSheet("color: #fab387; font-size: 12px;")
         self.test_trans_btn.setEnabled(False)
         
         def _do_test():
+            from translation_engine import translation_engine
+            
             try:
                 translation_engine.set_mode("online", base_url=base_url, api_key=api_key, model=model)
-                # Simple health check: list models
                 health = translation_engine.check_health()
                 if health.get("available"):
-                    self.trans_test_result.setText("✅ Connection OK — server responded")
+                    self.trans_test_result.setText(f"✅ Connected — {model}")
                     self.trans_test_result.setStyleSheet("color: #a6e3a1; font-size: 12px;")
                 else:
-                    err = health.get("error", "unknown")
-                    self.trans_test_result.setText(f"❌ Failed: {err}")
+                    err = health.get("error", "Unknown error")
+                    hint = ""
+                    if is_local:
+                        hint = "\nLocal endpoint may have been routed through system proxy. "
+                    self.trans_test_result.setText(f"❌ {err}{hint}") 
                     self.trans_test_result.setStyleSheet("color: #f38ba8; font-size: 12px;")
             except Exception as e:
-                log.error(f"Translation test failed: {e}")
-                self.trans_test_result.setText(f"❌ Failed: {str(e)[:160]}")
+                log.error(f"Translation test: {e}")
+                msg = str(e)[:200]
+                self.trans_test_result.setText(f"❌ {msg}")
                 self.trans_test_result.setStyleSheet("color: #f38ba8; font-size: 12px;")
             finally:
                 self.test_trans_btn.setEnabled(True)
+                self.test_trans_btn.setText("🔗 Test Connection")
         
         import threading
         threading.Thread(target=_do_test, daemon=True).start()
@@ -1302,9 +1348,18 @@ class Dashboard(QWidget):
         
         with open(config_path, 'w') as f:
             cp.write(f)
-            
+        
+        # Visual feedback
+        original_text = self.save_btn.text()
+        self.save_btn.setText("✓ Saved")
+        self.save_btn.setStyleSheet("background-color: #a6e3a1; color: #1e1e2e;")
         self.status_label.setText("✅ Settings saved! Restart to apply.")
         self.status_label.setStyleSheet("font-size: 18px; color: #a6e3a1;")
+        # Restore after 2s
+        QTimer.singleShot(2000, lambda: (
+            self.save_btn.setText(original_text),
+            self.save_btn.setStyleSheet("background-color: #a6e3a1; color: #1e1e2e;")
+        ))
 
     def on_start(self):
         import logging
@@ -1430,6 +1485,7 @@ class Dashboard(QWidget):
         log.info("Pipeline started confirmed")
         if hasattr(self, '_startup_timeout'):
             self._startup_timeout.stop()
+        self.start_btn.hide()
         self.status_label.setText("Running...")
         self.status_label.setStyleSheet("font-size: 18px; color: #a6e3a1;")
         self.stop_btn.show()

@@ -95,7 +95,19 @@ class OnlineAPITranslator(BaseTranslator):
             from openai import OpenAI
             import httpx
             
-            http_client = httpx.Client(verify=False, timeout=15.0)
+            # Detect local endpoints and bypass system proxy
+            is_local = (self.base_url and any(
+                host in self.base_url
+                for host in ("localhost", "127.0.0.1", "::1", "0.0.0.0")
+            ))
+            
+            if is_local:
+                # Local endpoint — NEVER route through system proxy
+                http_client = httpx.Client(verify=False, timeout=15.0, trust_env=False)
+            else:
+                # Remote endpoint — use system proxy settings
+                http_client = httpx.Client(verify=False, timeout=15.0)
+            
             self._client = OpenAI(
                 api_key=self.api_key or os.getenv("OPENAI_API_KEY", "dummy-key"),
                 base_url=self.base_url or os.getenv("OPENAI_BASE_URL"),
