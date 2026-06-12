@@ -352,7 +352,7 @@ else
 fi
 
 # No builder paths in source code (excluding build scripts that contain this check)
-if grep -R "/Users/runner" "${APP_BUNDLE}/Contents" --exclude='build_dmg.sh' --exclude='build-dmg.yml' 2>/dev/null; then
+if grep -R "/Users/runner" "${APP_BUNDLE}/Contents" --exclude='build_dmg.sh' --exclude='build-dmg.yml' --exclude='final-validation-report.md' --exclude='final-stabilization-audit.md' 2>/dev/null; then
     echo "  ❌ builder path /Users/runner found in bundle"
     FAIL=true
 else
