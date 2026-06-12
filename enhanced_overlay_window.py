@@ -63,16 +63,16 @@ class SubtitleBubble(QFrame):
         self.original_label.setWordWrap(True)
         layout.addWidget(self.original_label)
         
-        # Translated text
-        self.translated_label = QLabel(translated_text or "...")
-        translation_font_size = self.parent_style.get("translation_font_size", 16)
-        translation_color = self.parent_style.get("translation_color", "#89b4fa")
+        # Translated text — hidden if no translation expected (off mode)
+        show_trans = self.parent_style.get("show_translation", True)
+        self.translated_label = QLabel(translated_text if translated_text else "")
         self.translated_label.setStyleSheet(
             f"color: {translation_color}; font-size: {translation_font_size}px; "
             f"background: transparent;"
         )
         self.translated_label.setWordWrap(True)
-        self.translated_label.setVisible(self.parent_style.get("show_translation", True))
+        if not show_trans or not translated_text:
+            self.translated_label.setVisible(False)
         layout.addWidget(self.translated_label)
     
     def _get_bubble_style(self):
@@ -88,9 +88,11 @@ class SubtitleBubble(QFrame):
         self.original_label.setText(text)
     
     def update_translated(self, text):
-        self.translated_label.setText(text)
-        if text and not self.translated_label.isVisible():
+        if text:
+            self.translated_label.setText(text)
             self.translated_label.setVisible(True)
+        else:
+            self.translated_label.setVisible(False)
     
     def update_style(self, parent_style):
         """Update styling dynamically"""
@@ -240,7 +242,8 @@ class EnhancedOverlayWindow(QWidget):
         self.container_layout = QVBoxLayout()
         self.container_layout.setContentsMargins(5, 5, 5, 5)
         self.container_layout.setSpacing(0)
-        self.container_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.container_layout.setAlignment(Qt.AlignmentFlag.AlignBottom)  # Push latest to bottom
+        self.container_layout.addStretch()  # Spacer above that pushes everything down
         self.container.setLayout(self.container_layout)
         
         self.scroll_area.setWidget(self.container)
@@ -436,17 +439,21 @@ class EnhancedOverlayWindow(QWidget):
                 parent_style=self.subtitle_style
             )
             
-            # Insert in order
-            insert_idx = len(self.items)
-            for i, (cid, _) in enumerate(self.items):
-                if cid > chunk_id:
-                    insert_idx = i
-                    break
-            
+            # Insert BEFORE the stretch spacer (last item in layout)
+            # Stretch is at index layout.count() - 1
+            spacer_idx = self.container_layout.count() - 1  # the stretch
             self.items.insert(insert_idx, (chunk_id, bubble))
-            self.container_layout.insertWidget(insert_idx, bubble)
+            self.container_layout.insertWidget(spacer_idx, bubble)
         
-        # Auto scroll
+        # Cap to max_bubbles + auto-scroll
+        max_bubbles = self.subtitle_style.get("max_bubbles", 8)
+        while len(self.items) > max_bubbles:
+            old_id, old_widget = self.items.pop(0)
+            self.container_layout.removeWidget(old_widget)
+            old_widget.deleteLater()
+            if old_id in self.transcript_data:
+                del self.transcript_data[old_id]
+        
         if self.subtitle_style.get("auto_scroll", True):
             QTimer.singleShot(10, self._scroll_to_bottom)
     

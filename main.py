@@ -251,9 +251,11 @@ def create_pipeline():
             translate_executor = ThreadPoolExecutor(max_workers=config.translation_threads)
             
             buffer = np.array([], dtype=np.float32)
+            pre_roll_buffer = np.array([], dtype=np.float32)  # 500ms pre-roll for speech start
             chunk_id = 1
             last_update_time = time.time()
             self.last_final_text = ""
+            speech_active = False
             
             try:
                 audio_gen = self.audio.generator()
@@ -270,6 +272,13 @@ def create_pipeline():
                         pass  # debug: log.debug(f"Audio: level={vol_level:.3f}")
                     
                     buffer = np.concatenate([buffer, audio_chunk])
+                    
+                    # Maintain pre-roll window (last 500ms before speech)
+                    pre_roll_buffer = np.concatenate([pre_roll_buffer, audio_chunk])
+                    pre_roll_len = int(self.audio.sample_rate * 0.5)
+                    if len(pre_roll_buffer) > pre_roll_len:
+                        pre_roll_buffer = pre_roll_buffer[-pre_roll_len:]
+                    
                     now = time.time()
                     buffer_duration = len(buffer) / self.audio.sample_rate
                     
@@ -286,7 +295,9 @@ def create_pipeline():
                     hard_cut = (buffer_duration > self.audio.max_phrase_duration)
                     
                     if (standard_cut or soft_cut or hard_cut) and buffer_duration > 0.5:
-                        fb = buffer.copy()
+                        # Prepend pre-roll buffer for speech start
+                        full_buffer = np.concatenate([pre_roll_buffer, buffer]).copy()
+                        fb = full_buffer
                         cid = chunk_id
                         prompt = self.last_final_text
                         overall_rms = np.sqrt(np.mean(fb**2))
@@ -294,6 +305,7 @@ def create_pipeline():
                         if overall_rms >= self.audio.silence_threshold:
                             transcribe_executor.submit(self._process_final, fb, cid, prompt, translate_executor)
                         buffer = np.array([], dtype=np.float32)
+                        pre_roll_buffer = np.array([], dtype=np.float32)
                         chunk_id += 1
                         last_update_time = now
                     elif now - last_update_time > config.update_interval and buffer_duration > 0.5:

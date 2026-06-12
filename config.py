@@ -37,10 +37,11 @@ class Config:
         self.funasr_model = self._get("transcription", "funasr_model", "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch")
         self.whisper_device = self._get("transcription", "device", "cpu")
         self.whisper_compute_type = self._get("transcription", "compute_type", "int8")
-        self.source_language = self._get("transcription", "source_language", "auto")
+        self.source_language = self._get("transcription", "source_language", "en")
         if self.source_language == "auto":
             self.source_language = None  # Whisper uses None for auto-detect
-        self.transcription_workers = self._getint("transcription", "transcription_workers", 2)
+        else:
+            self.source_language = self.source_language  # Explicitly locked language
         
         # Audio settings
         self.sample_rate = self._getint("audio", "sample_rate", 16000)
