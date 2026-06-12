@@ -186,6 +186,10 @@ def create_pipeline():
             super().__init__()
             self.signals = signals_obj
             self.running = True
+            # Utterance lifecycle tracking — generation-guarded, pruned
+            self._utt_lifecycle = {}  # uid -> {"generation": int, "state": str}
+            self._finalizing_uids = set()
+            self._finalized_uids = set()
             
             from audio_capture import AudioCapture
             from transcriber import Transcriber
@@ -313,7 +317,8 @@ def create_pipeline():
                         
                         if is_speech:
                             utterance_generation += 1
-                            log.info(f"Utterance[{utterance_id}] START gen={utterance_generation} rms={chunk_rms:.4f} pre_roll_ms={len(pre_roll)/self.audio.sample_rate*1000:.0f}")
+                            self._utt_lifecycle[utterance_id] = {"generation": utterance_generation, "state": "recording"}
+                            log.info(f"Utterance[{utterance_id}] START gen={utterance_generation} state=recording rms={chunk_rms:.4f} pre_roll_ms={len(pre_roll)/self.audio.sample_rate*1000:.0f}")
                             buffer = pre_roll.copy()
                             pre_roll = np.array([], dtype=np.float32)
                             state = STATE_RECORDING
@@ -352,6 +357,10 @@ def create_pipeline():
                             
                             # Mark finalizing BEFORE submitting — closes the gate for old partial
                             self._finalizing_uids.add(uid)
+                            if uid in self._utt_lifecycle:
+                                old_state = self._utt_lifecycle[uid]["state"]
+                                self._utt_lifecycle[uid]["state"] = "finalizing"
+                                log.info(f"Utterance[{uid}] state {old_state} -> finalizing")
                             buf_copy = buffer.copy()
                             prompt = self.last_final_text
                             
@@ -388,12 +397,17 @@ def create_pipeline():
                 log.info("Pipeline loop ended")
         
         def _partial_safe_to_emit_v2(self, uid, gen):
-            """Check if partial may emit: not finalizing, not finalized."""
-            if uid in self._finalizing_uids:
-                log.debug(f"Utterance[{uid}] PARTIAL blocked: finalizing")
+            """Check if partial may emit: gen match, not finalizing, not finalized."""
+            entry = self._utt_lifecycle.get(uid)
+            if entry is None:
+                log.debug(f"Utterance[{uid}] PARTIAL blocked: no lifecycle entry")
                 return False
-            if uid in self._finalized_uids:
-                log.debug(f"Utterance[{uid}] PARTIAL blocked: finalized")
+            if entry.get("generation") != gen:
+                log.info(f"Utterance[{uid}] PARTIAL blocked: stale generation (have={gen}, lifecycle={entry.get('generation')})")
+                return False
+            state = entry.get("state", "unknown")
+            if state in ("finalizing", "finalized"):
+                log.debug(f"Utterance[{uid}] PARTIAL blocked: state={state}")
                 return False
             return True
         
@@ -442,10 +456,18 @@ def create_pipeline():
                 # Move from finalizing → finalized
                 self._finalizing_uids.discard(chunk_id)
                 self._finalized_uids.add(chunk_id)
-                # Prune old
-                while len(self._finalized_uids) > 20:
+                if chunk_id in self._utt_lifecycle:
+                    old_state = self._utt_lifecycle[chunk_id]["state"]
+                    self._utt_lifecycle[chunk_id]["state"] = "finalized"
+                    log.info(f"Utterance[{chunk_id}] state {old_state} -> finalized")
+                
+                # Prune old lifecycle entries
+                while len(self._utt_lifecycle) > 50:
+                    oldest = min(self._utt_lifecycle.keys())
+                    del self._utt_lifecycle[oldest]
+                while len(self._finalized_uids) > 50:
                     self._finalized_uids.remove(min(self._finalized_uids))
-                while len(self._finalizing_uids) > 10:
+                while len(self._finalizing_uids) > 20:
                     self._finalizing_uids.remove(min(self._finalizing_uids))
                 
                 if text:
