@@ -65,6 +65,8 @@ class SubtitleBubble(QFrame):
         
         # Translated text — hidden if no translation expected (off mode)
         show_trans = self.parent_style.get("show_translation", True)
+        translation_color = self.parent_style.get("translation_color", "#89b4fa")
+        translation_font_size = self.parent_style.get("translation_font_size", 16)
         self.translated_label = QLabel(translated_text if translated_text else "")
         self.translated_label.setStyleSheet(
             f"color: {translation_color}; font-size: {translation_font_size}px; "
