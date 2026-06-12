@@ -252,28 +252,43 @@ def create_pipeline():
         def processing_loop(self):
             log.info("Pipeline: processing loop started (state-machine mode)")
             
+            # ASR: single-thread executor for sequential execution
+            # Translation: multi-thread for parallel translate
             transcribe_executor = ThreadPoolExecutor(max_workers=1)
             translate_executor = ThreadPoolExecutor(max_workers=config.translation_threads)
             
-            # Utterance state machine:
-            # IDLE -> SPEECH_STARTED -> RECORDING -> SILENCE -> FINALIZE -> IDLE
+            # --- State machine ---
             STATE_IDLE = 0
             STATE_RECORDING = 1
-            STATE_SILENCE = 2
             
             state = STATE_IDLE
             buffer = np.array([], dtype=np.float32)
-            pre_roll = np.array([], dtype=np.float32)  # 400ms pre-speech audio
+            pre_roll = np.array([], dtype=np.float32)
             silence_counter = 0
             utterance_id = 1
             last_partial_time = 0.0
             
-            # Configurable thresholds
-            SILENCE_DUR_SEC = config.silence_duration  # e.g. 1.0s
-            MIN_UTTERANCE_DUR = 1.0  # minimum utterance duration to process
-            MAX_UTTERANCE_DUR = config.max_phrase_duration  # force-finalize
-            PARTIAL_INTERVAL = 1.2  # min seconds between partial updates
-            PRE_ROLL_MS = 0.4  # 400ms audio before speech start
+            # Pending futures for busy-skip
+            self._partial_future = None
+            self._final_submitted = False
+            
+            SILENCE_DUR_SEC = config.silence_duration
+            MIN_UTTERANCE_DUR = 1.0
+            MAX_UTTERANCE_DUR = config.max_phrase_duration
+            PARTIAL_INTERVAL = 1.2
+            PRE_ROLL_MS = 0.4
+            
+            def _reset_utterance():
+                nonlocal buffer, pre_roll, silence_counter, state
+                nonlocal last_partial_time, self
+                buffer = np.array([], dtype=np.float32)
+                pre_roll = np.array([], dtype=np.float32)
+                silence_counter = 0
+                state = STATE_IDLE
+                last_partial_time = 0.0
+                self._partial_future = None
+                self._final_submitted = False
+                log.debug(f"Utterance[{utterance_id}] RESET")
             
             try:
                 audio_gen = self.audio.generator()
@@ -286,13 +301,13 @@ def create_pipeline():
                     now = time.time()
                     chunk_dur = len(audio_chunk) / self.audio.sample_rate
                     
-                    # Emit audio status
-                    status_text = "🎤 Listening" if is_speech else "🔇 Silent"
-                    self.signals.audio_status.emit(status_text, min(chunk_rms * 50, 1.0))
+                    self.signals.audio_status.emit(
+                        "🎤 Listening" if is_speech else "🔇 Silent",
+                        min(chunk_rms * 50, 1.0)
+                    )
                     
-                    # --- STATE MACHINE ---
+                    # --- STATE: IDLE ---
                     if state == STATE_IDLE:
-                        # Maintain pre-roll sliding window
                         pre_roll = np.concatenate([pre_roll, audio_chunk])
                         pr_samples = int(self.audio.sample_rate * PRE_ROLL_MS)
                         if len(pre_roll) > pr_samples:
@@ -300,13 +315,13 @@ def create_pipeline():
                         
                         if is_speech:
                             log.info(f"Utterance[{utterance_id}] START rms={chunk_rms:.4f} pre_roll_ms={len(pre_roll)/self.audio.sample_rate*1000:.0f}")
-                            buffer = pre_roll.copy()  # include pre-roll
+                            buffer = pre_roll.copy()
                             pre_roll = np.array([], dtype=np.float32)
                             state = STATE_RECORDING
                             silence_counter = 0
                             last_partial_time = now
-                        # else: remain IDLE, keep pre-roll
-                        
+                    
+                    # --- STATE: RECORDING ---
                     elif state == STATE_RECORDING:
                         buffer = np.concatenate([buffer, audio_chunk])
                         buf_dur = len(buffer) / self.audio.sample_rate
@@ -316,31 +331,45 @@ def create_pipeline():
                         else:
                             silence_counter += chunk_dur
                         
-                        # Force-finalize on max duration
+                        should_finalize = False
+                        reason = ""
+                        
                         if buf_dur >= MAX_UTTERANCE_DUR:
-                            log.info(f"Utterance[{utterance_id}] FORCE-finalize dur={buf_dur:.1f}s reason=max_dur")
-                            transcribe_executor.submit(
-                                self._process_final, buffer.copy(), utterance_id, self.last_final_text, translate_executor
-                            )
-                            buffer = np.array([], dtype=np.float32)
-                            state = STATE_IDLE
-                            utterance_id += 1
-                        
-                        # Silence timeout — finalize utterance
+                            should_finalize = True
+                            reason = "max_dur"
                         elif silence_counter >= SILENCE_DUR_SEC and buf_dur >= MIN_UTTERANCE_DUR:
-                            log.info(f"Utterance[{utterance_id}] END dur={buf_dur:.1f}s silence={silence_counter:.1f}s reason=silence")
-                            transcribe_executor.submit(
-                                self._process_final, buffer.copy(), utterance_id, self.last_final_text, translate_executor
-                            )
-                            buffer = np.array([], dtype=np.float32)
-                            state = STATE_IDLE
-                            utterance_id += 1
+                            should_finalize = True
+                            reason = "silence"
                         
-                        # Partial update (throttled)
-                        elif buf_dur >= 1.0 and (now - last_partial_time) >= PARTIAL_INTERVAL:
+                        if should_finalize:
+                            # Cancel any in-flight partial before final
+                            if self._partial_future and not self._partial_future.done():
+                                self._partial_future.cancel()
+                                log.debug(f"Utterance[{utterance_id}] PARTIAL cancelled for final")
+                            
+                            self._final_submitted = True
+                            buf_copy = buffer.copy()
+                            uid = utterance_id
+                            prompt = self.last_final_text
+                            
+                            log.info(f"Utterance[{utterance_id}] END dur={buf_dur:.1f}s silence={silence_counter:.1f}s reason={reason}")
                             transcribe_executor.submit(
-                                self._process_partial, buffer.copy(), utterance_id, self.last_final_text
+                                self._process_final, buf_copy, uid, prompt, translate_executor
                             )
+                            
+                            utterance_id += 1
+                            _reset_utterance()
+                        
+                        # Partial: busy-skip if previous partial still running
+                        elif buf_dur >= 1.0 and (now - last_partial_time) >= PARTIAL_INTERVAL:
+                            pf = self._partial_future
+                            if pf and not pf.done():
+                                log.debug(f"Utterance[{utterance_id}] PARTIAL skipped: worker busy")
+                            else:
+                                log.debug(f"Utterance[{utterance_id}] PARTIAL requested dur={buf_dur:.1f}s")
+                                self._partial_future = transcribe_executor.submit(
+                                    self._process_partial, buffer.copy(), utterance_id, self.last_final_text
+                                )
                             last_partial_time = now
                     
             except Exception:
@@ -361,35 +390,35 @@ def create_pipeline():
                 pass
         
         def _process_final(self, audio_data, chunk_id, prompt="", translate_executor=None):
+            t0 = time.time()
             try:
-                # Log audio stats
                 dur = len(audio_data) / self.audio.sample_rate
                 rms = float(np.sqrt(np.mean(audio_data**2)))
                 peak = float(np.max(np.abs(audio_data)))
-                log.info(f"Utterance[{chunk_id}] FINAL dur={dur:.1f}s rms={rms:.4f} peak={peak:.3f}")
                 
                 text = self.transcriber.transcribe(audio_data, prompt=prompt)
+                t1 = time.time()
+                latency = t1 - t0
+                
                 if text:
-                    log.info(f"ASR [{chunk_id}] FINAL: \"{text}\"")
+                    log.info(f"Utterance[{chunk_id}] FINAL text=\"{text}\" dur={dur:.1f}s rms={rms:.4f} peak={peak:.3f} latency={latency:.2f}s")
                 else:
-                    log.info(f"ASR [{chunk_id}] FINAL: (empty)")
+                    log.info(f"Utterance[{chunk_id}] FINAL (empty) dur={dur:.1f}s rms={rms:.4f} peak={peak:.3f} latency={latency:.2f}s")
+                
                 if text:
                     if len(text.split()) > 2:
                         self.last_final_text = text
                     
-                    # Check if translation is active
                     trans_active = self.translation_engine.current_mode != "off"
                     
                     if trans_active:
-                        # Show original + "translating..." placeholder
                         self.signals.update_text.emit(chunk_id, text, "(translating...)")
                         if translate_executor:
                             translate_executor.submit(self._run_translation, text, chunk_id)
                     else:
-                        # Translation off — just show original
                         self.signals.update_text.emit(chunk_id, text, "")
             except Exception:
-                log.exception("Final chunk error")
+                log.exception(f"Utterance[{chunk_id}] FINAL error")
         
         def _run_translation(self, text, chunk_id):
             try:
