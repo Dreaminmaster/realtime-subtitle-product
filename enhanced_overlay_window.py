@@ -176,7 +176,7 @@ class EnhancedOverlayWindow(QWidget):
             "font_family": "Helvetica Neue",
             "display_mode": "bilingual",  # bilingual, original_only, translation_only
             "auto_scroll": True,
-            "max_bubbles": 50,
+            "max_bubbles": 8,
             "border_width": 0,
             "border_color": "rgba(255,255,255,50)",
         }
@@ -393,18 +393,9 @@ class EnhancedOverlayWindow(QWidget):
         self.style_changed.emit(self.subtitle_style.copy())
     
     def update_text(self, chunk_id, original_text, translated_text=""):
-        """Update or add a subtitle bubble"""
+        """Update or add a subtitle bubble — latest always visible at bottom."""
         if not original_text and not translated_text:
             return
-        
-        # Cap max bubbles
-        max_bubbles = self.subtitle_style.get("max_bubbles", 50)
-        while len(self.items) >= max_bubbles:
-            old_id, old_widget = self.items.pop(0)
-            self.container_layout.removeWidget(old_widget)
-            old_widget.deleteLater()
-            if old_id in self.transcript_data:
-                del self.transcript_data[old_id]
         
         # Store data
         if chunk_id not in self.transcript_data:
@@ -419,13 +410,11 @@ class EnhancedOverlayWindow(QWidget):
             if translated_text:
                 self.transcript_data[chunk_id]['translated'] = translated_text
         
-        # Check if widget exists
+        # Check if widget exists for this chunk
         existing = None
-        existing_idx = -1
-        for i, (cid, widget) in enumerate(self.items):
+        for cid, w in self.items:
             if cid == chunk_id:
-                existing = widget
-                existing_idx = i
+                existing = w
                 break
         
         if existing:
@@ -434,21 +423,18 @@ class EnhancedOverlayWindow(QWidget):
             if translated_text:
                 existing.update_translated(translated_text)
         else:
-            # Create new bubble
+            # Create new bubble, append to items list, insert before stretch spacer
             timestamp = self.transcript_data[chunk_id]['timestamp']
             bubble = SubtitleBubble(
                 chunk_id, timestamp, original_text, translated_text,
                 parent_style=self.subtitle_style
             )
-            
-            # Insert BEFORE the stretch spacer (last item in layout)
-            # Stretch is at index layout.count() - 1
-            spacer_idx = self.container_layout.count() - 1  # the stretch
-            self.items.insert(insert_idx, (chunk_id, bubble))
+            self.items.append((chunk_id, bubble))
+            spacer_idx = self.container_layout.count() - 1  # before the stretch
             self.container_layout.insertWidget(spacer_idx, bubble)
         
-        # Cap to max_bubbles + auto-scroll
-        max_bubbles = self.subtitle_style.get("max_bubbles", 8)
+        # Cap to 8 bubbles max (remove oldest)
+        max_bubbles = 8
         while len(self.items) > max_bubbles:
             old_id, old_widget = self.items.pop(0)
             self.container_layout.removeWidget(old_widget)
@@ -456,6 +442,7 @@ class EnhancedOverlayWindow(QWidget):
             if old_id in self.transcript_data:
                 del self.transcript_data[old_id]
         
+        # Auto-scroll to latest
         if self.subtitle_style.get("auto_scroll", True):
             QTimer.singleShot(10, self._scroll_to_bottom)
     
