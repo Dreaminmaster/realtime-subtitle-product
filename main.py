@@ -253,11 +253,12 @@ def create_pipeline():
             log.info("Stop requested")
             self.running = False
             self.audio.stop()
-            self._session_generation += 1  # invalidate all in-flight ASR/translation tasks
-            log.info("Audio capture stopped, pending partials invalidated")
+            log.info("Audio capture stopped")
             if hasattr(self, 'thread') and self.thread.is_alive():
-                self.thread.join(timeout=10)
-            log.info("Pipeline stopped")
+                self.thread.join(timeout=15)
+            # Session invalidation AFTER thread has drained ASR queue
+            self._session_generation += 1
+            log.info("Pipeline stopped — session invalidated")
         
         def processing_loop(self):
             log.info("Pipeline: processing loop started (state-machine mode)")
@@ -466,11 +467,11 @@ def create_pipeline():
             finally:
                 log.info("Pipeline loop ending — draining ASR queue...")
                 
-                # Force-finalize any recording in progress
+                # Force-finalize any recording in progress (carries CURRENT session_gen, still valid)
                 if state == STATE_RECORDING and len(buffer) > 0 and len(buffer) >= int(self.audio.sample_rate * MIN_UTTERANCE_DUR):
                     uid = utterance_id
                     gen = utterance_generation
-                    log.info(f"Utterance[{uid}] FORCE-finalize on stop dur={len(buffer)/self.audio.sample_rate:.1f}s")
+                    log.info(f"Utterance[{uid}] FORCE-finalize on stop dur={len(buffer)/self.audio.sample_rate:.1f}s session={session_gen}")
                     with lifecycle_lock:
                         self._latest_partial_seq.pop(uid, None)
                         self._finalizing_uids.add(uid)
@@ -487,17 +488,23 @@ def create_pipeline():
                 with lifecycle_lock:
                     self._latest_partial_seq.clear()
                 
-                # Submit sentinel
-                asr_queue.put((-1, self._seq_counter + 1, _SENTINEL))
-                
-                # Wait for remaining finals
+                # Wait for all queued FINAL tasks to complete
+                log.info("Waiting for ASR queue to drain...")
                 remaining = asr_queue.qsize()
-                if remaining > 1:  # >1 because sentinel counts
-                    log.info(f"Waiting for ASR final tasks: {remaining - 1}")
+                if remaining > 0:
+                    log.info(f"ASR queue has {remaining} pending tasks — waiting")
                 
-                asr_thread.join(timeout=10)
+                # Submit sentinel at lowest priority (after all FINAL=0 tasks)
+                asr_queue.put((99, self._seq_counter + 1, _SENTINEL))
+                
+                asr_thread.join(timeout=15)
+                if asr_thread.is_alive():
+                    log.error("ASR worker did not stop within timeout")
+                else:
+                    log.info("ASR worker stopped")
+                
                 translate_executor.shutdown(wait=False)
-                log.info("Pipeline loop ended")
+                log.info("Pipeline loop ended (ASR queue drained)")
         
         def _partial_safe_to_emit_v2(self, uid, gen):
             """Check if partial may emit: gen match, not finalizing, not finalized."""
