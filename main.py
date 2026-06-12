@@ -180,6 +180,7 @@ def create_pipeline():
     class WorkerSignals(QObject):
         update_text = pyqtSignal(int, str, str)
         audio_status = pyqtSignal(str, float)  # (status_text, volume_level 0.0-1.0)
+        pipeline_failed = pyqtSignal(str)       # error message when pipeline crashes
     
     class Pipeline(QObject):
         def __init__(self, signals_obj):
@@ -194,6 +195,7 @@ def create_pipeline():
             self._finalized_uids = set()
             self._latest_partial_seq = {}  # uid -> latest seq
             self._session_generation = 0    # incremented each Launch, stops stale tasks
+            self.last_final_text = ""        # context prompt across utterances
             
             from audio_capture import AudioCapture
             from transcriber import Transcriber

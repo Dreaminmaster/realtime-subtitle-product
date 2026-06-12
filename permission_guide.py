@@ -161,8 +161,9 @@ def create_permission_guide(parent=None):
             card = QFrame()
             border_color = "#f38ba8" if critical else "#45475a"
             card.setStyleSheet(
-                f"QFrame {{ background: #313244; border: 1px solid {border_color}; "
-                f"border-radius: 8px; padding: 15px; }}"
+                f"QFrame {{ background: #45475a; border: 1px solid {border_color}; "
+                f"border-radius: 8px; padding: 15px; }} "
+                f"QLabel {{ color: #cdd6f4; }}"
             )
             card_layout = QVBoxLayout()
             card_layout.setSpacing(5)

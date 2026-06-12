@@ -144,7 +144,7 @@ class Dashboard(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Realtime Subtitle — Control Center")
-        self.setMinimumSize(600, 500)
+        self.setMinimumSize(750, 500)
         self.setStyleSheet(STYLESHEET)
         
         # Main Layout
@@ -1309,6 +1309,8 @@ class Dashboard(QWidget):
                 self.overlay_window.stop_requested.connect(self.on_stop)
             if hasattr(self.overlay_window, 'style_changed'):
                 self.overlay_window.style_changed.connect(self._on_style_changed)
+            if hasattr(signals, 'pipeline_failed'):
+                signals.pipeline_failed.connect(self._on_pipeline_failed)
             
             self.status_label.setText("Running...")
             self.status_label.setStyleSheet("font-size: 18px; color: #a6e3a1;")
@@ -1335,6 +1337,22 @@ class Dashboard(QWidget):
         from PyQt6.QtWidgets import QMessageBox
         QMessageBox.critical(self, "Launch Failed",
                            f"Failed to launch translator:\n\n{str(error)[:500]}")
+    
+    def _on_pipeline_failed(self, error):
+        """Pipeline thread crashed. Reset UI to error state."""
+        import logging
+        log = logging.getLogger("RealtimeSubtitle")
+        log.error(f"Pipeline failed: {error}")
+        self.status_label.setText("Pipeline Error — see log")
+        self.status_label.setStyleSheet("font-size: 18px; color: #f38ba8;")
+        self.stop_btn.hide()
+        self.start_btn.show()
+        self.start_btn.setEnabled(True)
+        self.start_btn.setText("▶ Launch")
+        self.showNormal()
+        from PyQt6.QtWidgets import QMessageBox
+        QMessageBox.critical(self, "Pipeline Error",
+                           f"Pipeline crashed:\n\n{str(error)[:500]}\n\nFull error in app.log")
     
     def _on_style_changed(self, style):
         """Sync style changes back to the style tab"""
