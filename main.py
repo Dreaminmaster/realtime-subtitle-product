@@ -186,10 +186,14 @@ def create_pipeline():
             super().__init__()
             self.signals = signals_obj
             self.running = True
-            # Utterance lifecycle tracking — generation-guarded, pruned
+            # Utterance lifecycle tracking — generation-guarded, pruned, thread-safe
+            import threading as _threading_mod
+            self._lifecycle_lock = _threading_mod.RLock()
             self._utt_lifecycle = {}  # uid -> {"generation": int, "state": str}
             self._finalizing_uids = set()
             self._finalized_uids = set()
+            self._latest_partial_seq = {}  # uid -> latest seq
+            self._session_generation = 0    # incremented each Launch, stops stale tasks
             
             from audio_capture import AudioCapture
             from transcriber import Transcriber
@@ -246,32 +250,39 @@ def create_pipeline():
             self.thread.start()
         
         def stop(self):
-            log.info("Pipeline: stopping...")
+            log.info("Stop requested")
             self.running = False
             self.audio.stop()
+            self._session_generation += 1  # invalidate all in-flight ASR/translation tasks
+            log.info("Audio capture stopped, pending partials invalidated")
             if hasattr(self, 'thread') and self.thread.is_alive():
-                self.thread.join(timeout=3)
-            log.info("Pipeline: stopped")
+                self.thread.join(timeout=10)
+            log.info("Pipeline stopped")
         
         def processing_loop(self):
             log.info("Pipeline: processing loop started (state-machine mode)")
             
             translate_executor = ThreadPoolExecutor(max_workers=config.translation_threads)
+            lifecycle_lock = self._lifecycle_lock
+            session_gen = self._session_generation  # snapshot for this session
             
             # ---- Priority ASR queue: FINAL(0) > PARTIAL(1) ----
             import queue as pyqueue
+            _SENTINEL = object()
             asr_queue = pyqueue.PriorityQueue()
             asr_running = threading.Event()
-            asr_stop = threading.Event()
             
             def asr_worker_loop():
-                while not asr_stop.is_set():
+                while True:
                     try:
                         prio, seq, task = asr_queue.get(timeout=0.5)
                     except pyqueue.Empty:
                         continue
-                    if task is None:
-                        continue
+                    
+                    if task is _SENTINEL:
+                        log.info("ASR worker shutdown sentinel received")
+                        asr_queue.task_done()
+                        break
                     
                     asr_running.set()
                     t0 = time.time()
@@ -284,15 +295,16 @@ def create_pipeline():
                     if task_type == "final":
                         qwait = (t0 - task["created_at"]) * 1000
                         log.info(f"Utterance[{uid}] FINAL started queue_wait_ms={qwait:.0f}")
-                        self._process_final_v3(audio, uid, gen, prompt, translate_executor)
+                        self._process_final_v3(audio, uid, gen, prompt, translate_executor, lifecycle_lock, session_gen)
                         inference_ms = (time.time() - t0) * 1000
                         total_ms = (time.time() - task["created_at"]) * 1000
                         log.info(f"Utterance[{uid}] FINAL completed inference_ms={inference_ms:.0f} total_ms={total_ms:.0f}")
                     else:
-                        seq = task.get("seq", 0)
-                        log.debug(f"Utterance[{uid}] PARTIAL started seq={seq}")
-                        self._process_partial_v3(audio, uid, gen, seq, prompt)
+                        task_seq = task.get("seq", 0)
+                        log.debug(f"Utterance[{uid}] PARTIAL started seq={task_seq}")
+                        self._process_partial_v3(audio, uid, gen, task_seq, prompt, lifecycle_lock, session_gen)
                     
+                    asr_queue.task_done()
                     asr_running.clear()
                 log.info("ASR worker stopped")
             
@@ -452,7 +464,38 @@ def create_pipeline():
             except Exception:
                 log.exception("Pipeline loop error")
             finally:
-                asr_stop.set()
+                log.info("Pipeline loop ending — draining ASR queue...")
+                
+                # Force-finalize any recording in progress
+                if state == STATE_RECORDING and len(buffer) > 0 and len(buffer) >= int(self.audio.sample_rate * MIN_UTTERANCE_DUR):
+                    uid = utterance_id
+                    gen = utterance_generation
+                    log.info(f"Utterance[{uid}] FORCE-finalize on stop dur={len(buffer)/self.audio.sample_rate:.1f}s")
+                    with lifecycle_lock:
+                        self._latest_partial_seq.pop(uid, None)
+                        self._finalizing_uids.add(uid)
+                        entry = self._utt_lifecycle.get(uid)
+                        if entry:
+                            entry["state"] = "finalizing"
+                    self._seq_counter += 1
+                    task = {"type": "final", "uid": uid, "gen": gen,
+                            "audio": buffer.copy(), "prompt": self.last_final_text,
+                            "created_at": time.time()}
+                    asr_queue.put((0, self._seq_counter, task))
+                
+                # Invalidate all pending partials
+                with lifecycle_lock:
+                    self._latest_partial_seq.clear()
+                
+                # Submit sentinel
+                asr_queue.put((-1, self._seq_counter + 1, _SENTINEL))
+                
+                # Wait for remaining finals
+                remaining = asr_queue.qsize()
+                if remaining > 1:  # >1 because sentinel counts
+                    log.info(f"Waiting for ASR final tasks: {remaining - 1}")
+                
+                asr_thread.join(timeout=10)
                 translate_executor.shutdown(wait=False)
                 log.info("Pipeline loop ended")
         
@@ -471,36 +514,51 @@ def create_pipeline():
                 return False
             return True
         
-        def _process_partial_v3(self, audio_data, chunk_id, gen, seq, prompt=""):
-            """Partial called from ASR worker. Emit guarded by lifecycle + generation + latest seq."""
-            # Check seq before ASR — discard if superseded
-            latest_seq = self._latest_partial_seq.get(chunk_id)
-            if latest_seq != seq:
-                log.info(f"Utterance[{chunk_id}] PARTIAL discarded before ASR: superseded seq={seq} latest={latest_seq}")
-                return
+        def _process_partial_v3(self, audio_data, chunk_id, gen, seq, prompt="",
+                                lifecycle_lock=None, session_gen=None):
+            """Partial called from ASR worker. Thread-safe lifecycle check + generation guard."""
+            with lifecycle_lock or self._lifecycle_lock:
+                latest_seq = self._latest_partial_seq.get(chunk_id)
+                entry = self._utt_lifecycle.get(chunk_id)
+                allowed = (
+                    latest_seq == seq
+                    and entry is not None
+                    and entry.get("generation") == gen
+                    and entry.get("state") not in ("finalizing", "finalized")
+                )
             
-            if not self._partial_safe_to_emit_v2(chunk_id, gen):
-                log.info(f"Utterance[{chunk_id}] PARTIAL discarded: state changed before ASR gen={gen}")
+            if not allowed:
+                if latest_seq != seq:
+                    log.info(f"Utterance[{chunk_id}] PARTIAL discarded before ASR: superseded seq={seq} latest={latest_seq}")
+                else:
+                    log.info(f"Utterance[{chunk_id}] PARTIAL discarded before ASR: state={entry.get('state') if entry else 'no_entry'}")
                 return
             
             try:
                 text = self.transcriber.transcribe(audio_data, prompt=prompt)
                 
-                # Re-check seq after ASR — may have been superseded during inference
-                latest_seq = self._latest_partial_seq.get(chunk_id)
-                if latest_seq != seq:
-                    log.info(f"Utterance[{chunk_id}] PARTIAL discarded after ASR: superseded seq={seq} latest={latest_seq}")
+                with lifecycle_lock or self._lifecycle_lock:
+                    latest_seq = self._latest_partial_seq.get(chunk_id)
+                    entry = self._utt_lifecycle.get(chunk_id)
+                    allowed2 = (
+                        latest_seq == seq
+                        and entry is not None
+                        and entry.get("generation") == gen
+                        and entry.get("state") not in ("finalizing", "finalized")
+                    )
+                
+                if not allowed2:
+                    log.info(f"Utterance[{chunk_id}] PARTIAL discarded after ASR: superseded seq={seq} latest={latest_seq} state={entry.get('state') if entry else '?'}")
                     return
                 
-                # Re-check lifecycle
-                if not self._partial_safe_to_emit_v2(chunk_id, gen):
-                    log.info(f"Utterance[{chunk_id}] PARTIAL result discarded: stale gen={gen}")
+                # Session check — stop may have been called
+                if session_gen is not None and self._session_generation != session_gen:
+                    log.info(f"Utterance[{chunk_id}] PARTIAL discarded: session changed")
                     return
                 
-                # Clean up seq tracking if we are still the latest
-                ent = self._latest_partial_seq.get(chunk_id)
-                if ent == seq:
-                    self._latest_partial_seq.pop(chunk_id, None)
+                with lifecycle_lock or self._lifecycle_lock:
+                    if self._latest_partial_seq.get(chunk_id) == seq:
+                        self._latest_partial_seq.pop(chunk_id, None)
                 
                 if text:
                     log.info(f"Utterance[{chunk_id}] PARTIAL text=\"{text}\" seq={seq}")
@@ -508,10 +566,20 @@ def create_pipeline():
             except Exception:
                 log.exception(f"Utterance[{chunk_id}] PARTIAL error")
         
-        def _process_final_v3(self, audio_data, chunk_id, gen, prompt="", translate_executor=None):
-            """Final with lifecycle tracking. Called from ASR worker with priority."""
-            # Invalidate all pending partials for this uid
-            self._latest_partial_seq.pop(chunk_id, None)
+        def _process_final_v3(self, audio_data, chunk_id, gen, prompt="",
+                              translate_executor=None, lifecycle_lock=None, session_gen=None):
+            """Final with lifecycle tracking, thread-safe, session-aware."""
+            with lifecycle_lock or self._lifecycle_lock:
+                self._latest_partial_seq.pop(chunk_id, None)
+                self._finalizing_uids.add(chunk_id)
+                entry = self._utt_lifecycle.get(chunk_id)
+                if entry:
+                    entry["state"] = "finalizing"
+            
+            if session_gen is not None and self._session_generation != session_gen:
+                log.warning(f"Utterance[{chunk_id}] FINAL discarded: session changed")
+                return
+            
             try:
                 dur = len(audio_data) / self.audio.sample_rate
                 rms = float(np.sqrt(np.mean(audio_data**2)))
@@ -519,21 +587,22 @@ def create_pipeline():
                 
                 text = self.transcriber.transcribe(audio_data, prompt=prompt)
                 
-                if chunk_id in self._finalized_uids:
-                    log.warning(f"Utterance[{chunk_id}] FINAL duplicate discarded")
+                if session_gen is not None and self._session_generation != session_gen:
+                    log.warning(f"Utterance[{chunk_id}] FINAL discarded after ASR: session changed")
                     return
                 
-                self._finalizing_uids.discard(chunk_id)
-                self._finalized_uids.add(chunk_id)
-                if chunk_id in self._utt_lifecycle:
-                    old_state = self._utt_lifecycle[chunk_id]["state"]
-                    self._utt_lifecycle[chunk_id]["state"] = "finalized"
-                    log.info(f"Utterance[{chunk_id}] state {old_state} -> finalized")
+                with lifecycle_lock or self._lifecycle_lock:
+                    if chunk_id in self._finalized_uids:
+                        log.warning(f"Utterance[{chunk_id}] FINAL duplicate discarded")
+                        return
+                    self._finalizing_uids.discard(chunk_id)
+                    self._finalized_uids.add(chunk_id)
+                    entry = self._utt_lifecycle.get(chunk_id)
+                    if entry:
+                        entry["state"] = "finalized"
                 
                 if text:
                     log.info(f"Utterance[{chunk_id}] FINAL text=\"{text}\" dur={dur:.1f}s rms={rms:.4f} peak={peak:.3f}")
-                else:
-                    log.info(f"Utterance[{chunk_id}] FINAL (empty) dur={dur:.1f}s rms={rms:.4f} peak={peak:.3f}")
                 
                 if text:
                     if len(text.split()) > 2:
@@ -546,17 +615,18 @@ def create_pipeline():
                     else:
                         self.signals.update_text.emit(chunk_id, text, "")
                 
-                # Prune lifecycle
-                while len(self._utt_lifecycle) > 50:
-                    del self._utt_lifecycle[min(self._utt_lifecycle.keys())]
-                while len(self._finalized_uids) > 50:
-                    self._finalized_uids.remove(min(self._finalized_uids))
-                while len(self._finalizing_uids) > 20:
-                    self._finalizing_uids.remove(min(self._finalizing_uids))
+                with lifecycle_lock or self._lifecycle_lock:
+                    while len(self._utt_lifecycle) > 50:
+                        del self._utt_lifecycle[min(self._utt_lifecycle.keys())]
+                    while len(self._finalized_uids) > 50:
+                        self._finalized_uids.remove(min(self._finalized_uids))
+                    while len(self._finalizing_uids) > 20:
+                        self._finalizing_uids.remove(min(self._finalizing_uids))
             except Exception:
                 log.exception(f"Utterance[{chunk_id}] FINAL error")
             finally:
-                self._finalizing_uids.discard(chunk_id)
+                with lifecycle_lock or self._lifecycle_lock:
+                    self._finalizing_uids.discard(chunk_id)
     
     signals = WorkerSignals()
     pipeline = Pipeline(signals)
