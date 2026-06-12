@@ -245,17 +245,30 @@ def create_pipeline():
             log.info("Pipeline: stopped")
         
         def processing_loop(self):
-            log.info("Pipeline: processing loop started")
+            log.info("Pipeline: processing loop started (state-machine mode)")
             
             transcribe_executor = ThreadPoolExecutor(max_workers=1)
             translate_executor = ThreadPoolExecutor(max_workers=config.translation_threads)
             
+            # Utterance state machine:
+            # IDLE -> SPEECH_STARTED -> RECORDING -> SILENCE -> FINALIZE -> IDLE
+            STATE_IDLE = 0
+            STATE_RECORDING = 1
+            STATE_SILENCE = 2
+            
+            state = STATE_IDLE
             buffer = np.array([], dtype=np.float32)
-            pre_roll_buffer = np.array([], dtype=np.float32)  # 500ms pre-roll for speech start
-            chunk_id = 1
-            last_update_time = time.time()
-            self.last_final_text = ""
-            speech_active = False
+            pre_roll = np.array([], dtype=np.float32)  # 400ms pre-speech audio
+            silence_counter = 0
+            utterance_id = 1
+            last_partial_time = 0.0
+            
+            # Configurable thresholds
+            SILENCE_DUR_SEC = config.silence_duration  # e.g. 1.0s
+            MIN_UTTERANCE_DUR = 1.0  # minimum utterance duration to process
+            MAX_UTTERANCE_DUR = config.max_phrase_duration  # force-finalize
+            PARTIAL_INTERVAL = 1.2  # min seconds between partial updates
+            PRE_ROLL_MS = 0.4  # 400ms audio before speech start
             
             try:
                 audio_gen = self.audio.generator()
@@ -263,59 +276,69 @@ def create_pipeline():
                     if not self.running:
                         break
                     
-                    # Emit audio status — current volume level
-                    rms_now = np.sqrt(np.mean(audio_chunk**2))
-                    status = "🎤 Listening" if rms_now > self.audio.silence_threshold else "🔇 Silent"
-                    self.signals.audio_status.emit(status, min(float(rms_now) * 50, 1.0))
-                    vol_level = min(float(rms_now) * 50, 1.0)
-                    if rms_now > self.audio.silence_threshold:
-                        pass  # debug: log.debug(f"Audio: level={vol_level:.3f}")
-                    
-                    buffer = np.concatenate([buffer, audio_chunk])
-                    
-                    # Maintain pre-roll window (last 500ms before speech)
-                    pre_roll_buffer = np.concatenate([pre_roll_buffer, audio_chunk])
-                    pre_roll_len = int(self.audio.sample_rate * 0.5)
-                    if len(pre_roll_buffer) > pre_roll_len:
-                        pre_roll_buffer = pre_roll_buffer[-pre_roll_len:]
-                    
+                    chunk_rms = float(np.sqrt(np.mean(audio_chunk**2)))
+                    is_speech = chunk_rms > self.audio.silence_threshold
                     now = time.time()
-                    buffer_duration = len(buffer) / self.audio.sample_rate
+                    chunk_dur = len(audio_chunk) / self.audio.sample_rate
                     
-                    is_silence = False
-                    min_silence_dur = config.silence_duration
-                    if buffer_duration > min_silence_dur:
-                        tail = buffer[-int(self.audio.sample_rate * min_silence_dur):]
-                        rms = np.sqrt(np.mean(tail**2))
-                        if rms < self.audio.silence_threshold:
-                            is_silence = True
+                    # Emit audio status
+                    status_text = "🎤 Listening" if is_speech else "🔇 Silent"
+                    self.signals.audio_status.emit(status_text, min(chunk_rms * 50, 1.0))
                     
-                    standard_cut = (is_silence and buffer_duration > 2.0)
-                    soft_cut = (buffer_duration > 6.0 and is_silence)
-                    hard_cut = (buffer_duration > self.audio.max_phrase_duration)
+                    # --- STATE MACHINE ---
+                    if state == STATE_IDLE:
+                        # Maintain pre-roll sliding window
+                        pre_roll = np.concatenate([pre_roll, audio_chunk])
+                        pr_samples = int(self.audio.sample_rate * PRE_ROLL_MS)
+                        if len(pre_roll) > pr_samples:
+                            pre_roll = pre_roll[-pr_samples:]
+                        
+                        if is_speech:
+                            log.info(f"Utterance[{utterance_id}] START rms={chunk_rms:.4f} pre_roll_ms={len(pre_roll)/self.audio.sample_rate*1000:.0f}")
+                            buffer = pre_roll.copy()  # include pre-roll
+                            pre_roll = np.array([], dtype=np.float32)
+                            state = STATE_RECORDING
+                            silence_counter = 0
+                            last_partial_time = now
+                        # else: remain IDLE, keep pre-roll
+                        
+                    elif state == STATE_RECORDING:
+                        buffer = np.concatenate([buffer, audio_chunk])
+                        buf_dur = len(buffer) / self.audio.sample_rate
+                        
+                        if is_speech:
+                            silence_counter = 0
+                        else:
+                            silence_counter += chunk_dur
+                        
+                        # Force-finalize on max duration
+                        if buf_dur >= MAX_UTTERANCE_DUR:
+                            log.info(f"Utterance[{utterance_id}] FORCE-finalize dur={buf_dur:.1f}s reason=max_dur")
+                            transcribe_executor.submit(
+                                self._process_final, buffer.copy(), utterance_id, self.last_final_text, translate_executor
+                            )
+                            buffer = np.array([], dtype=np.float32)
+                            state = STATE_IDLE
+                            utterance_id += 1
+                        
+                        # Silence timeout — finalize utterance
+                        elif silence_counter >= SILENCE_DUR_SEC and buf_dur >= MIN_UTTERANCE_DUR:
+                            log.info(f"Utterance[{utterance_id}] END dur={buf_dur:.1f}s silence={silence_counter:.1f}s reason=silence")
+                            transcribe_executor.submit(
+                                self._process_final, buffer.copy(), utterance_id, self.last_final_text, translate_executor
+                            )
+                            buffer = np.array([], dtype=np.float32)
+                            state = STATE_IDLE
+                            utterance_id += 1
+                        
+                        # Partial update (throttled)
+                        elif buf_dur >= 1.0 and (now - last_partial_time) >= PARTIAL_INTERVAL:
+                            transcribe_executor.submit(
+                                self._process_partial, buffer.copy(), utterance_id, self.last_final_text
+                            )
+                            last_partial_time = now
                     
-                    if (standard_cut or soft_cut or hard_cut) and buffer_duration > 0.5:
-                        # Prepend pre-roll buffer for speech start
-                        full_buffer = np.concatenate([pre_roll_buffer, buffer]).copy()
-                        fb = full_buffer
-                        cid = chunk_id
-                        prompt = self.last_final_text
-                        overall_rms = np.sqrt(np.mean(fb**2))
-                        log.debug(f"Chunk {cid}: finalizing, dur={buffer_duration:.1f}s, rms={overall_rms:.4f}, silent={is_silence}")
-                        if overall_rms >= self.audio.silence_threshold:
-                            transcribe_executor.submit(self._process_final, fb, cid, prompt, translate_executor)
-                        buffer = np.array([], dtype=np.float32)
-                        pre_roll_buffer = np.array([], dtype=np.float32)
-                        chunk_id += 1
-                        last_update_time = now
-                    elif now - last_update_time > config.update_interval and buffer_duration > 0.5:
-                        pb = buffer.copy()
-                        prompt = self.last_final_text
-                        rms = np.sqrt(np.mean(pb**2))
-                        if rms > self.audio.silence_threshold:
-                            transcribe_executor.submit(self._process_partial, pb, chunk_id, prompt)
-                        last_update_time = now
-            except Exception as e:
+            except Exception:
                 log.exception("Pipeline loop error")
             finally:
                 transcribe_executor.shutdown(wait=False)
@@ -326,17 +349,25 @@ def create_pipeline():
             try:
                 text = self.transcriber.transcribe(audio_data, prompt=prompt)
                 if text:
+                    log.debug(f"ASR [{chunk_id}] PARTIAL: \"{text}\"")
+                    # Partial updates emit with empty translation
                     self.signals.update_text.emit(chunk_id, text, "")
             except Exception:
                 pass
         
         def _process_final(self, audio_data, chunk_id, prompt="", translate_executor=None):
             try:
+                # Log audio stats
+                dur = len(audio_data) / self.audio.sample_rate
+                rms = float(np.sqrt(np.mean(audio_data**2)))
+                peak = float(np.max(np.abs(audio_data)))
+                log.info(f"Utterance[{chunk_id}] FINAL dur={dur:.1f}s rms={rms:.4f} peak={peak:.3f}")
+                
                 text = self.transcriber.transcribe(audio_data, prompt=prompt)
                 if text:
-                    log.info(f"ASR [{chunk_id}]: \"{text}\"")
+                    log.info(f"ASR [{chunk_id}] FINAL: \"{text}\"")
                 else:
-                    log.debug(f"ASR [{chunk_id}]: (empty)")
+                    log.info(f"ASR [{chunk_id}] FINAL: (empty)")
                 if text:
                     if len(text.split()) > 2:
                         self.last_final_text = text
