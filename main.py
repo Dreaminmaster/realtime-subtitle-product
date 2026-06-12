@@ -289,8 +289,9 @@ def create_pipeline():
                         total_ms = (time.time() - task["created_at"]) * 1000
                         log.info(f"Utterance[{uid}] FINAL completed inference_ms={inference_ms:.0f} total_ms={total_ms:.0f}")
                     else:
-                        log.debug(f"Utterance[{uid}] PARTIAL started")
-                        self._process_partial_v3(audio, uid, gen, prompt)
+                        seq = task.get("seq", 0)
+                        log.debug(f"Utterance[{uid}] PARTIAL started seq={seq}")
+                        self._process_partial_v3(audio, uid, gen, seq, prompt)
                     
                     asr_running.clear()
                 log.info("ASR worker stopped")
@@ -305,7 +306,7 @@ def create_pipeline():
             self._finalizing_uids = set()
             self._finalized_uids = set()
             # Per-utterance pending partial: only one per uid
-            self._pending_partial_by_uid = {}  # uid -> {"gen": int, "seq": int}
+            self._latest_partial_seq = {}       # uid -> latest seq (for superseding)
             self._seq_counter = 0
             
             STATE_IDLE = 0
@@ -332,11 +333,12 @@ def create_pipeline():
                 state = STATE_IDLE
                 last_partial_time = 0.0
             
-            def _cancel_pending_partial_for_uid(uid):
-                """Remove pending partial for uid from queue tracking."""
-                if uid in self._pending_partial_by_uid:
-                    old = self._pending_partial_by_uid.pop(uid)
-                    log.info(f"Utterance[{uid}] pending PARTIAL removed (gen={old.get('gen')})")
+            def _invalidate_partials_for_uid(uid):
+                """Invalidate all pending partials for uid by clearing latest seq.
+                Tasks remain in the queue but will be discarded at dispatch time."""
+                if uid in self._latest_partial_seq:
+                    old_seq = self._latest_partial_seq.pop(uid)
+                    log.info(f"Utterance[{uid}] pending PARTIAL invalidated (was seq={old_seq})")
             
             try:
                 audio_gen = self.audio.generator()
@@ -396,7 +398,7 @@ def create_pipeline():
                             gen = utterance_generation
                             
                             # Remove pending partial for this uid
-                            _cancel_pending_partial_for_uid(uid)
+                            _invalidate_partials_for_uid(uid)
                             
                             # Mark finalizing
                             self._finalizing_uids.add(uid)
@@ -428,20 +430,21 @@ def create_pipeline():
                             uid = utterance_id
                             
                             # Replace any pending partial for this uid
-                            _cancel_pending_partial_for_uid(uid)
+                            _invalidate_partials_for_uid(uid)
                             
                             self._seq_counter += 1
                             seq = self._seq_counter
+                            self._latest_partial_seq[uid] = seq
                             task = {
                                 "type": "partial",
                                 "uid": uid,
                                 "gen": gen,
+                                "seq": seq,
                                 "audio": buffer.copy(),
                                 "prompt": self.last_final_text,
                                 "created_at": time.time(),
                             }
-                            self._pending_partial_by_uid[uid] = {"gen": gen, "seq": seq}
-                            log.debug(f"Utterance[{uid}] PARTIAL queued priority=1 gen={gen} dur={buf_dur:.1f}s")
+                            log.info(f"Utterance[{uid}] PARTIAL queued seq={seq} priority=1 gen={gen} dur={buf_dur:.1f}s")
                             asr_queue.put((1, seq, task))  # priority 1 = PARTIAL
                             
                             last_partial_time = now
@@ -468,25 +471,47 @@ def create_pipeline():
                 return False
             return True
         
-        def _process_partial_v3(self, audio_data, chunk_id, gen, prompt=""):
-            """Partial called from ASR worker. Emit guarded by lifecycle + generation."""
-            if not self._partial_safe_to_emit_v2(chunk_id, gen):
-                log.info(f"Utterance[{chunk_id}] PARTIAL result discarded: state changed before emit gen={gen}")
+        def _process_partial_v3(self, audio_data, chunk_id, gen, seq, prompt=""):
+            """Partial called from ASR worker. Emit guarded by lifecycle + generation + latest seq."""
+            # Check seq before ASR — discard if superseded
+            latest_seq = self._latest_partial_seq.get(chunk_id)
+            if latest_seq != seq:
+                log.info(f"Utterance[{chunk_id}] PARTIAL discarded before ASR: superseded seq={seq} latest={latest_seq}")
                 return
+            
+            if not self._partial_safe_to_emit_v2(chunk_id, gen):
+                log.info(f"Utterance[{chunk_id}] PARTIAL discarded: state changed before ASR gen={gen}")
+                return
+            
             try:
                 text = self.transcriber.transcribe(audio_data, prompt=prompt)
+                
+                # Re-check seq after ASR — may have been superseded during inference
+                latest_seq = self._latest_partial_seq.get(chunk_id)
+                if latest_seq != seq:
+                    log.info(f"Utterance[{chunk_id}] PARTIAL discarded after ASR: superseded seq={seq} latest={latest_seq}")
+                    return
+                
+                # Re-check lifecycle
                 if not self._partial_safe_to_emit_v2(chunk_id, gen):
                     log.info(f"Utterance[{chunk_id}] PARTIAL result discarded: stale gen={gen}")
                     return
+                
+                # Clean up seq tracking if we are still the latest
+                ent = self._latest_partial_seq.get(chunk_id)
+                if ent == seq:
+                    self._latest_partial_seq.pop(chunk_id, None)
+                
                 if text:
-                    log.info(f"Utterance[{chunk_id}] PARTIAL text=\"{text}\"")
+                    log.info(f"Utterance[{chunk_id}] PARTIAL text=\"{text}\" seq={seq}")
                     self.signals.update_text.emit(chunk_id, text, "")
             except Exception:
                 log.exception(f"Utterance[{chunk_id}] PARTIAL error")
         
         def _process_final_v3(self, audio_data, chunk_id, gen, prompt="", translate_executor=None):
             """Final with lifecycle tracking. Called from ASR worker with priority."""
-            self._finalizing_uids.add(chunk_id)
+            # Invalidate all pending partials for this uid
+            self._latest_partial_seq.pop(chunk_id, None)
             try:
                 dur = len(audio_data) / self.audio.sample_rate
                 rms = float(np.sqrt(np.mean(audio_data**2)))
