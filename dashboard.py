@@ -1310,13 +1310,19 @@ class Dashboard(QWidget):
         import logging
         log = logging.getLogger("RealtimeSubtitle")
         
-        # Debounce: disable button immediately
         self.stop_btn.setEnabled(False)
         self.stop_btn.setText("Stopping...")
         log.info("Stop requested")
         
         if hasattr(self, 'pipeline') and self.pipeline:
-            self.pipeline.stop()
+            ok = self.pipeline.stop()
+            if not ok and hasattr(self.pipeline, 'thread') and self.pipeline.thread.is_alive():
+                log.error("Pipeline stop timed out")
+                self.status_label.setText("Stop timed out — Retry or Force Quit")
+                self.status_label.setStyleSheet("font-size: 18px; color: #f38ba8;")
+                self.stop_btn.setEnabled(True)
+                self.stop_btn.setText("Retry Stop")
+                return
             self.pipeline = None
             
         if hasattr(self, 'overlay_window') and self.overlay_window:

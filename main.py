@@ -257,12 +257,12 @@ def create_pipeline():
             if hasattr(self, 'thread') and self.thread.is_alive():
                 self.thread.join(timeout=15)
                 if self.thread.is_alive():
-                    log.error("Pipeline loop did not stop within timeout — force-stopping")
-                    # Do NOT invalidate session if thread didn't drain cleanly
-                    return
+                    log.error("Pipeline loop did not stop within timeout")
+                    return False
             # Session invalidation ONLY after clean shutdown
             self._session_generation += 1
             log.info("Pipeline stopped — session invalidated")
+            return True
         
         def processing_loop(self):
             log.info("Pipeline: processing loop started (state-machine mode)")
