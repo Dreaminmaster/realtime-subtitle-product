@@ -181,6 +181,7 @@ def create_pipeline():
         update_text = pyqtSignal(int, str, str)
         audio_status = pyqtSignal(str, float)  # (status_text, volume_level 0.0-1.0)
         pipeline_failed = pyqtSignal(str)       # error message when pipeline crashes
+        pipeline_cleanup_finished = pyqtSignal() # fired after finally block completes
     
     class Pipeline(QObject):
         def __init__(self, signals_obj):
@@ -196,6 +197,8 @@ def create_pipeline():
             self._latest_partial_seq = {}  # uid -> latest seq
             self._session_generation = 0    # incremented each Launch, stops stale tasks
             self.last_final_text = ""        # context prompt across utterances
+            self._cleanup_in_progress = False
+            self._failed = False
             
             from audio_capture import AudioCapture
             from transcriber import Transcriber
@@ -470,6 +473,7 @@ def create_pipeline():
                     
             except Exception as exc:
                 log.exception("Pipeline loop error")
+                self._failed = True
                 try:
                     self.signals.pipeline_failed.emit(str(exc))
                 except Exception:
@@ -514,6 +518,14 @@ def create_pipeline():
                     log.info("ASR worker stopped")
                 
                 translate_executor.shutdown(wait=False)
+                
+                self._cleanup_in_progress = False
+                if self._failed:
+                    try:
+                        self.signals.pipeline_cleanup_finished.emit()
+                    except Exception:
+                        log.critical("Failed to emit cleanup_finished")
+                
                 log.info("Pipeline loop ended (ASR queue drained)")
         
         def _partial_safe_to_emit_v2(self, uid, gen):
