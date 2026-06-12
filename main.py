@@ -88,7 +88,12 @@ def run_diagnostics():
 def main():
     args = parse_args()
     
-    log.info(f"App started with args: {args}")
+    try:
+        from version import BUILD_VERSION, BUILD_COMMIT, BUILD_TIME
+        log.info(f"Realtime Subtitle v{BUILD_VERSION} (commit {BUILD_COMMIT} built {BUILD_TIME})")
+    except ImportError:
+        log.info("Realtime Subtitle (dev build)")
+    log.info(f"Args: {args}")
     
     # Handle diagnostics mode — no GUI imports needed
     if args.diagnostics:

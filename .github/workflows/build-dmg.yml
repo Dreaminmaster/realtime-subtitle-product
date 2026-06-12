@@ -101,7 +101,16 @@ jobs:
           echo "=== Format checks all passed ==="
 
       - name: Build DMG
-        run: bash build_dmg.sh "${{ github.event.inputs.version }}"
+        run: |
+          # Inject build identity into version.py BEFORE build
+          GIT_SHA=$(git rev-parse HEAD | cut -c1-10)
+          BUILD_TS=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          cat > version.py <<EOF
+          BUILD_VERSION = "${{ github.event.inputs.version }}"
+          BUILD_COMMIT = "${GIT_SHA}"
+          BUILD_TIME = "${BUILD_TS}"
+          EOF
+          bash build_dmg.sh "${{ github.event.inputs.version }}"
 
       - name: List generated files
         run: |
@@ -133,6 +142,21 @@ jobs:
             echo "❌ main.py MISSING"; exit 1
           fi
           echo "  ✅ main.py"
+
+          # ---- Source code fingerprint: ensure bundle matches committed source ----
+          BUNDLE_MAIN="${APP}/Contents/Resources/main.py"
+          if ! grep -q "utterance_id\|STATE_IDLE\|Utterance.*START\|Utterance.*END" "$BUNDLE_MAIN" 2>/dev/null; then
+            echo "❌ Bundle main.py appears to be OLD version (missing utterance state machine)"
+            echo "   Bundle may not match the committed source. Aborting."
+            exit 1
+          fi
+          echo "  ✅ source fingerprint: utterance state machine present"
+
+          # Build identity
+          echo "  🔏 Build identity:"
+          echo "     git commit: $(git rev-parse HEAD | cut -c1-10)"
+          echo "     git tag: $(git describe --tags --always 2>/dev/null || echo 'none')"
+          echo "     build time: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 
           # Portable Python
           PORTABLE_PY="${APP}/Contents/Resources/python/bin/python3"
