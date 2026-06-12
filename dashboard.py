@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 from PyQt6.QtCore import Qt, QSize, pyqtSignal, QThread
 from PyQt6.QtGui import QFont, QIcon, QColor
 import sys
+import os
 import sounddevice as sd
 from config import config
 
@@ -1187,15 +1188,42 @@ class Dashboard(QWidget):
         self.tabs.setTabToolTip(self.tabs.count() - 1, "Diagnostics — check system, view logs")
     
     def _run_diagnostics(self):
-        """Run and display system diagnostics"""
+        """Run and display system diagnostics with pipeline state"""
         from diagnostics import diagnostics
+        import logging
         
         self.run_diag_btn.setEnabled(False)
         self.run_diag_btn.setText("Running...")
         
         report = diagnostics.get_status_text()
-        self.diag_results.setText(report)
         
+        # Add pipeline runtime state
+        try:
+            from version import BUILD_VERSION, BUILD_COMMIT, BUILD_TIME
+            report += f"\n\nApp: v{BUILD_VERSION} (commit {BUILD_COMMIT})"
+        except ImportError:
+            report += f"\n\nApp: dev build"
+        
+        log_dir = os.path.expanduser("~/Library/Logs/RealtimeSubtitle")
+        report += f"\nLogs: {log_dir}"
+        
+        # Pipeline state
+        if hasattr(self, 'pipeline') and self.pipeline:
+            alive = hasattr(self.pipeline, 'thread') and self.pipeline.thread.is_alive()
+            report += f"\nPipeline: {'Running' if alive else 'STOPPED'}"
+            report += f"\nWorker: {'alive' if alive else 'not running'}"
+            if self.pipeline.running:
+                report += "\nState: ACTIVE"
+            else:
+                report += "\nState: STOPPING/STOPPED"
+        else:
+            report += "\nPipeline: NOT STARTED"
+        
+        # Last error
+        if hasattr(self, 'last_pipeline_error') and self.last_pipeline_error:
+            report += f"\n\nLast Pipeline Error:\n{self.last_pipeline_error[:300]}"
+        
+        self.diag_results.setText(report)
         self.run_diag_btn.setEnabled(True)
         self.run_diag_btn.setText("▶ Run Diagnostics")
     
@@ -1349,6 +1377,7 @@ class Dashboard(QWidget):
         log.error(f"Pipeline failed: {error}")
         self.status_label.setText("Pipeline Error — see log")
         self.status_label.setStyleSheet("font-size: 18px; color: #f38ba8;")
+        self.last_pipeline_error = error
         self.stop_btn.hide()
         self.start_btn.show()
         self.start_btn.setEnabled(True)

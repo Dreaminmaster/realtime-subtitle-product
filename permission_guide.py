@@ -79,6 +79,10 @@ def create_permission_guide(parent=None):
             self.setWindowTitle("Permission Setup - Realtime Subtitle")
             self.setMinimumSize(550, 500)
             self.setModal(True)
+            # Force dark background — works in both light and dark macOS appearance
+            self.setStyleSheet("QDialog { background-color: #1e1e2e; } "
+                             "QLabel { color: #cdd6f4; }")
+            self.setAutoFillBackground(True)
             self.init_ui()
         
         def init_ui(self):
