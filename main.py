@@ -256,7 +256,11 @@ def create_pipeline():
             log.info("Audio capture stopped")
             if hasattr(self, 'thread') and self.thread.is_alive():
                 self.thread.join(timeout=15)
-            # Session invalidation AFTER thread has drained ASR queue
+                if self.thread.is_alive():
+                    log.error("Pipeline loop did not stop within timeout — force-stopping")
+                    # Do NOT invalidate session if thread didn't drain cleanly
+                    return
+            # Session invalidation ONLY after clean shutdown
             self._session_generation += 1
             log.info("Pipeline stopped — session invalidated")
         
@@ -618,7 +622,7 @@ def create_pipeline():
                     if trans_active:
                         self.signals.update_text.emit(chunk_id, text, "(translating...)")
                         if translate_executor:
-                            translate_executor.submit(self._run_translation, text, chunk_id)
+                            translate_executor.submit(self._run_translation_safe, text, chunk_id, session_gen)
                     else:
                         self.signals.update_text.emit(chunk_id, text, "")
                 
@@ -634,6 +638,26 @@ def create_pipeline():
             finally:
                 with lifecycle_lock or self._lifecycle_lock:
                     self._finalizing_uids.discard(chunk_id)
+        
+        def _run_translation_safe(self, text, chunk_id, session_gen):
+            """Session-safe translation. Discards result if session changed."""
+            log.info(f"Translation[{chunk_id}] requested session={session_gen}")
+            try:
+                if self._session_generation != session_gen:
+                    log.info(f"Translation[{chunk_id}] discarded before translate: stale session current={self._session_generation}")
+                    return
+                
+                translated = self.translation_engine.translate(text)
+                
+                if self._session_generation != session_gen:
+                    log.info(f"Translation[{chunk_id}] discarded after translate: stale session current={self._session_generation}")
+                    return
+                
+                if translated:
+                    log.info(f"Translation[{chunk_id}] completed session={session_gen}")
+                    self.signals.update_text.emit(chunk_id, text, translated)
+            except Exception:
+                log.exception(f"Translation[{chunk_id}] error")
     
     signals = WorkerSignals()
     pipeline = Pipeline(signals)
