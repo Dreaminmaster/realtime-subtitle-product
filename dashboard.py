@@ -145,7 +145,7 @@ class Dashboard(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Realtime Subtitle — Control Center")
-        self.setMinimumSize(750, 500)
+        self.setMinimumSize(800, 500)
         self.setStyleSheet(STYLESHEET)
         
         # Main Layout

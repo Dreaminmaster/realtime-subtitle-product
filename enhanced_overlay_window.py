@@ -40,7 +40,7 @@ class SubtitleBubble(QFrame):
         self.parent_style = parent_style or {}
         
         self.setStyleSheet(self._get_bubble_style())
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self.setFixedHeight(max(70, original_font_size + translation_font_size + 30))
         
         layout = QVBoxLayout()
         layout.setContentsMargins(12, 8, 12, 8)
@@ -321,7 +321,7 @@ class EnhancedOverlayWindow(QWidget):
         main_layout.addLayout(control_bar)
         
         # Initial size and position — bottom-centered like standard subtitles
-        w = self.subtitle_style.get("window_width", 400)
+        w = self.subtitle_style.get("window_width", 500)
         h = 250
         self.resize(w, h)
         
