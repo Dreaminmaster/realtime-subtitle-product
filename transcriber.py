@@ -348,7 +348,7 @@ class Transcriber:
         print("[Transcriber] No compatible GPU detected, using CPU")
         return "cpu"
     def transcribe(self, audio_data, prompt=None):
-        """Transcribe audio using the configured backend"""
+        """Transcribe audio using the configured backend."""
         if self.backend == "funasr":
             text = self._transcribe_funasr(audio_data, prompt)
         elif self.backend == "mlx":
@@ -359,11 +359,6 @@ class Transcriber:
         # Filter hallucinations (infinite loops, e.g. "once once once")
         if self._is_hallucination(text):
             print(f"[Transcriber] Filtered hallucination: {text[:50]}...")
-            return ""
-
-        # Filter prompt echoes (music/noise causing repetition of context)
-        if prompt and self._is_prompt_echo(text, prompt):
-            print(f"[Transcriber] Filtered prompt echo: {text[:50]}...")
             return ""
             
         return text
@@ -564,12 +559,14 @@ class Transcriber:
                 return ""
 
     def _transcribe_faster_whisper(self, audio_data, prompt=None):
+        """Transcribe audio via faster-whisper.
+        prompt is intentionally IGNORED — initial_prompt causes cross-utterance
+        contamination on repeated phrases (whisper echoes prompt as 'already transcribed')."""
         segments, _ = self.model.transcribe(
             audio_data, 
             language=self.language, 
             beam_size=5,
-            condition_on_previous_text=False, # We manage context manually if needed
-            initial_prompt=prompt,
+            condition_on_previous_text=False,
             no_speech_threshold=0.6
         )
         text = " ".join([segment.text for segment in segments]).strip()
