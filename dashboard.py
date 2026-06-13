@@ -159,8 +159,11 @@ class Dashboard(QWidget):
         header.setStyleSheet("font-size: 24px; font-weight: bold; color: #89b4fa;")
         self.layout.addWidget(header)
         
-        # Tabs
+        # Tabs — use horizontal scroll for small windows
         self.tabs = QTabWidget()
+        self.tabs.setUsesScrollButtons(True)
+        self.tabs.setElideMode(Qt.TextElideMode.ElideRight)
+        self.tabs.setMinimumWidth(500)
         self.layout.addWidget(self.tabs)
         
         self.init_home_tab()

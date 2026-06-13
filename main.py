@@ -478,7 +478,6 @@ def create_pipeline():
                 self._failed = True
                 try:
                     self.signals.audio_failed.emit(str(ace))
-                    self.signals.pipeline_failed.emit(f"Audio: {ace}")
                 except Exception:
                     log.critical("audio signal broken")
             except Exception as exc:
