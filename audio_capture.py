@@ -125,8 +125,27 @@ class AudioCapture:
             print(f"2. Sample rate {self.sample_rate}Hz not supported by device (Try 44100 or 48000)")
             print("3. Invalid device index in config.ini (Try 'auto' or check 'python audio_capture.py')")
             self.running = False
-            # Yield silence to prevent immediate crash if running in loop
-            yield np.zeros(block_size, dtype=np.float32)
+            # Try reconnection with default device
+            print("[Audio] Attempting fallback to default input device...")
+            try:
+                default_dev = sd.query_devices(kind='input')
+                print(f"[Audio] Fallback: [{default_dev['index']}] {default_dev['name']}")
+                with sd.InputStream(channels=1, samplerate=self.sample_rate,
+                                    blocksize=block_size, dtype='float32') as stream2:
+                    self.running = True
+                    while self.running:
+                        data, overflow = stream2.read(block_size)
+                        if overflow:
+                            print("Audio overflow (fallback)")
+                        yield data.flatten()
+            except Exception as e2:
+                print(f"[Audio] FALLBACK ALSO FAILED: {e2}")
+                print("[Audio] All audio devices unavailable. Check System Settings > Privacy > Microphone.")
+                import logging
+                log = logging.getLogger("RealtimeSubtitle")
+                log.error(f"Audio capture failed on all devices: {e} | fallback: {e2}")
+                self.running = False
+                yield np.zeros(block_size, dtype=np.float32)
             
         print("[Audio] Generator stopped.")
 
