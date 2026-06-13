@@ -555,7 +555,18 @@ class EnhancedOverlayWindow(QWidget):
         self.setCursor(Qt.CursorShape.ArrowCursor)
         if self.is_moving and self.oldPos:
             delta = event.globalPosition().toPoint() - self.oldPos
-            self.move(self.x() + delta.x(), self.y() + delta.y())
+            new_x = self.x() + delta.x()
+            new_y = self.y() + delta.y()
+            
+            # Constrain to current screen rectangle
+            screen = QApplication.screenAt(event.globalPosition().toPoint())
+            if screen is None:
+                screen = QApplication.primaryScreen()
+            geo = screen.availableGeometry()
+            new_x = max(geo.x(), min(new_x, geo.x() + geo.width() - self.width()))
+            new_y = max(geo.y(), min(new_y, geo.y() + geo.height() - self.height()))
+            
+            self.move(new_x, new_y)
             self.oldPos = event.globalPosition().toPoint()
     
     def mouseReleaseEvent(self, event):
