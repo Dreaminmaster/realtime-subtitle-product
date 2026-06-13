@@ -1410,6 +1410,8 @@ class Dashboard(QWidget):
                 signals.pipeline_cleanup_finished.connect(self._on_pipeline_cleanup_finished)
             if hasattr(signals, 'pipeline_started'):
                 signals.pipeline_started.connect(self._on_pipeline_started)
+            if hasattr(signals, 'audio_failed'):
+                signals.audio_failed.connect(self._on_audio_failed)
             
             # Set a 10s startup timeout
             self._startup_timeout = QTimer()
@@ -1491,6 +1493,20 @@ class Dashboard(QWidget):
         self.stop_btn.show()
         self.stop_btn.setEnabled(True)
         self.showMinimized()
+    
+    def _on_audio_failed(self, message):
+        """Audio device failure. Show error + allow retry."""
+        import logging
+        log = logging.getLogger("RealtimeSubtitle")
+        log.error(f"Audio device failed: {message}")
+        self.status_label.setText("Audio Device Error")
+        self.status_label.setStyleSheet("font-size: 18px; color: #f38ba8;")
+        self.last_pipeline_error = f"Audio: {message[:200]}"
+        self.stop_btn.hide()
+        self.start_btn.show()
+        self.start_btn.setEnabled(True)
+        self.start_btn.setText("Retry Launch")
+        self.showNormal()
     
     def _on_startup_timeout(self):
         """Pipeline never confirmed start."""

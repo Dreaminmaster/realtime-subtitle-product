@@ -21,7 +21,7 @@ Status: COMPLETE_VERIFIED | COMPLETE_UNVERIFIED | PARTIAL | MISSING | KNOWN_LIMI
 | 8 | EN→ZH translation | COMPLETE_UNVERIFIED | translation_engine.py OnlineAPITranslator | — | Needs user API key | — |
 | 9 | ZH→EN translation | COMPLETE_UNVERIFIED | translation_engine.py OnlineAPITranslator | — | Needs user API key | — |
 | 10 | Preserve original on fail | COMPLETE_UNVERIFIED | main.py _run_translation_safe | eb31b85 | Needs user API key + fail sim | — |
-| 11 | Translation timeout/cancel | COMPLETE_UNVERIFIED | translation_engine.py timeout=10.0, main.py _run_translation_safe | eb31b85, 9fb6b2f | Has timeout, session token, stop-safe. Needs mock test. | — | — | — | No timeout guard in translate() |
+| 11 | Translation timeout/cancel | PARTIAL | translation_engine.py timeout=10.0, main.py _run_translation_safe | eb31b85, 9fb6b2f | Has timeout, session token, stop-safe. Needs mock test. | — | — | — | No timeout guard in translate() |
 | 12 | API key safety | COMPLETE_VERIFIED | config.py _safe_mask, translation_engine.py | ccb5f8f | Masking verified, placeholder skip | — |
 
 ## Overlay
@@ -55,7 +55,7 @@ Status: COMPLETE_VERIFIED | COMPLETE_UNVERIFIED | PARTIAL | MISSING | KNOWN_LIMI
 | # | Item | Status | File/Function | Commit | Test Evidence | Gap |
 |---|------|--------|---------------|--------|---------------|-----|
 | 24 | Dynamic device resolution | COMPLETE_UNVERIFIED | audio_capture.py generator | 7bb6d9f | — | — |
-| 25 | Device failure prompt | COMPLETE_UNVERIFIED | audio_capture.py generator with fallback reconnect | ca0794f | Explicit error messages, auto fallback to default device, Voice Isolation detection. | Unverified on real device failure. |
+| 25 | Device failure prompt | PARTIAL | audio_capture.py generator with fallback reconnect | ca0794f | Explicit error messages, auto fallback to default device, Voice Isolation detection. | Unverified on real device failure. |
 
 ## Install/Launch
 
@@ -80,7 +80,7 @@ Status: COMPLETE_VERIFIED | COMPLETE_UNVERIFIED | PARTIAL | MISSING | KNOWN_LIMI
 ## Summary
 
 - COMPLETE_VERIFIED: 14
-- COMPLETE_UNVERIFIED: 20
-- PARTIAL: 3
+- COMPLETE_UNVERIFIED: 17
+- PARTIAL: 4
 - MISSING: 0
-- KNOWN_LIMITATION: 1
+- KNOWN_LIMITATION: 0

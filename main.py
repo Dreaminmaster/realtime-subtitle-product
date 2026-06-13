@@ -183,6 +183,7 @@ def create_pipeline():
         pipeline_failed = pyqtSignal(str)       # error message when pipeline crashes
         pipeline_cleanup_finished = pyqtSignal(bool, str) # (success, message)
         pipeline_started = pyqtSignal()          # pipeline loop started successfully
+        audio_failed = pyqtSignal(str)           # audio device failure message
     
     class Pipeline(QObject):
         def __init__(self, signals_obj):
@@ -475,8 +476,15 @@ def create_pipeline():
             except Exception as exc:
                 log.exception("Pipeline loop error")
                 self._failed = True
+                # Try to determine if this was an audio device failure
+                exc_str = str(exc)
+                if any(kw in exc_str.lower() for kw in ("audio", "device", "sounddevice", "portaudio", "stream")):
+                    try:
+                        self.signals.audio_failed.emit(exc_str)
+                    except Exception:
+                        log.critical("audio_failed signal broken")
                 try:
-                    self.signals.pipeline_failed.emit(str(exc))
+                    self.signals.pipeline_failed.emit(exc_str)
                 except Exception:
                     log.critical("pipeline_failed signal broken")
             finally:
