@@ -82,6 +82,8 @@ QGroupBox::title {
 class Dashboard(QWidget):
     start_requested = pyqtSignal()
     stop_requested = pyqtSignal()
+    model_download_status = pyqtSignal(str, str, int)
+    model_download_done = pyqtSignal(str, bool, object, int)
 
     FORCE_QUIT = "force_quit"
     RETRY = "retry"
@@ -173,6 +175,10 @@ class Dashboard(QWidget):
         self.init_model_tab()
         self.init_style_tab()
         self.init_diagnostics_tab()
+        
+        # Connect download signals (must be done after handlers are defined)
+        self.model_download_status.connect(self._on_model_status)
+        self.model_download_done.connect(self._on_model_done)
         
         # Footer Actions
         footer = QHBoxLayout()
@@ -1040,38 +1046,31 @@ class Dashboard(QWidget):
         """Start download via DownloadTask, receive status via Qt signals."""
         from model_download_task import DownloadTask
         from model_manager import model_manager
-        import logging
+        import logging, threading
         log = logging.getLogger("RealtimeSubtitle")
         
-        # Dedup: prevent double-start for same model
         if hasattr(self, '_active_downloads') and model_id in self._active_downloads:
             log.info(f"Model download already active: {model_id}")
             return
         
-        # Update UI
-        self.model_mgmt_status.setText(f"⏳ Preparing {model_id}...")
+        self.model_mgmt_status.setText(f"⏳ {model_id}: starting...")
         self.model_mgmt_status.setStyleSheet("color: #fab387; font-size: 12px;")
         
         if not hasattr(self, '_active_downloads'):
             self._active_downloads = {}
         
+        # Use SYNCHRONOUS download — DownloadTask handles retries, not nested threads
         def do_download(ctx):
-            try:
-                model_manager.download_model(model_id, backend)
-                return True
-            except Exception as e:
-                ctx.last_error = str(e)
-                return False
+            model_manager.download_model_sync(model_id, backend)
+            return True  # success — exception would be caught by DownloadTask
         
         task = DownloadTask(model_id, backend, do_download, max_attempts=3)
         self._active_downloads[model_id] = task
         
-        task.on_status(lambda s, a: self._on_model_status(model_id, s, a))
-        task.on_done(lambda ok, err, a: self._on_model_done(model_id, ok, err, a))
-        task.on_cleanup(lambda: None)  # model_manager handles cleanup
+        task.on_status(lambda s, a: self.model_download_status.emit(model_id, s, a))
+        task.on_done(lambda ok, err, a: self.model_download_done.emit(model_id, ok, err, a))
+        task.on_cleanup(lambda: None)
         
-        # Run in background thread — DO NOT block UI
-        import threading
         threading.Thread(target=task.start, daemon=True, name=f"dl-{model_id}").start()
     
     def _on_model_status(self, model_id, status, attempt):

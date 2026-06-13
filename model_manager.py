@@ -255,34 +255,37 @@ class ModelManager:
         
         return round(total / (1024 * 1024), 1)
     
+    def download_model_sync(self, model_id: str, backend="whisper",
+                            progress_callback=None, cancel_event=None):
+        """Synchronous download — blocks until complete. Returns True on success, raises on failure."""
+        if progress_callback:
+            progress_callback("starting", 0)
+        if cancel_event and cancel_event.is_set():
+            raise RuntimeError("Cancelled")
+        if backend == "mlx":
+            self._download_mlx_model(model_id, progress_callback)
+        elif backend == "funasr":
+            self._download_funasr_model(model_id, progress_callback)
+        else:
+            self._download_whisper_model(model_id, progress_callback)
+        self._cache[model_id] = {
+            "backend": backend,
+            "downloaded_at": str(__import__('datetime').datetime.now())
+        }
+        self._save_cache()
+        if progress_callback:
+            progress_callback("completed", 100)
+        return True
+
     def download_model(self, model_id: str, backend="whisper", 
                       progress_callback=None, done_callback=None):
-        """Download a model in background thread"""
+        """Legacy async wrapper. Prefer download_model_sync in DownloadTask workers."""
         
         def _download():
             try:
-                if progress_callback:
-                    progress_callback("starting", 0)
-                
-                if backend == "mlx":
-                    self._download_mlx_model(model_id, progress_callback)
-                elif backend == "funasr":
-                    self._download_funasr_model(model_id, progress_callback)
-                else:
-                    self._download_whisper_model(model_id, progress_callback)
-                
-                # Mark as downloaded
-                self._cache[model_id] = {
-                    "backend": backend,
-                    "downloaded_at": str(__import__('datetime').datetime.now())
-                }
-                self._save_cache()
-                
-                if progress_callback:
-                    progress_callback("completed", 100)
+                self.download_model_sync(model_id, backend, progress_callback)
                 if done_callback:
                     done_callback(True, None)
-                    
             except Exception as e:
                 if progress_callback:
                     progress_callback("error", 0)
