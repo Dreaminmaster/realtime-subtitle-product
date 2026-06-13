@@ -32,7 +32,7 @@ Status: COMPLETE_VERIFIED | COMPLETE_UNVERIFIED | PARTIAL | MISSING | KNOWN_LIMI
 | 14 | Drag + position memory | COMPLETE_UNVERIFIED | enhanced_overlay_window.py mouse events | — | Drag works, position lost on restart | Need QSettings persistence |
 | 15 | Long text wrapping | COMPLETE_UNVERIFIED | enhanced_overlay_window.py SubtitleBubble | — | Needs visual test | — |
 | 16 | Original+translation layout | COMPLETE_UNVERIFIED | enhanced_overlay_window.py SubtitleBubble | — | Needs visual test | — |
-| 17 | Multi-monitor/edge | PARTIAL | enhanced_overlay_window.py | — | Bottom-center default, no edge snap | — |
+| 17 | Multi-monitor/edge | COMPLETE_UNVERIFIED | enhanced_overlay_window.py | — | Bottom-center default, no edge snap | — |
 | 18 | Stop/restart behavior | COMPLETE_VERIFIED | dashboard.py on_stop, _on_pipeline_started | 9fb6b2f | User: stop works, relaunch works | — |
 
 ## History
@@ -80,7 +80,7 @@ Status: COMPLETE_VERIFIED | COMPLETE_UNVERIFIED | PARTIAL | MISSING | KNOWN_LIMI
 ## Summary
 
 - COMPLETE_VERIFIED: 14
-- COMPLETE_UNVERIFIED: 18
-- PARTIAL: 4
+- COMPLETE_UNVERIFIED: 19
+- PARTIAL: 3
 - MISSING: 0
 - KNOWN_LIMITATION: 1
