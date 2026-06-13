@@ -75,7 +75,18 @@ class SubtitleBubble(QFrame):
         self.translated_label.setWordWrap(True)
         if not show_trans or not translated_text:
             self.translated_label.setVisible(False)
-        layout.addWidget(self.translated_label)
+        # Copy button — hidden by default, shown on hover
+        self.copy_btn = QPushButton("📋")
+        self.copy_btn.setToolTip("Copy to clipboard")
+        self.copy_btn.setFixedSize(20, 20)
+        self.copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.copy_btn.setStyleSheet(
+            "QPushButton { background: transparent; border: none; color: #6c7086; font-size: 10px; } "
+            "QPushButton:hover { color: #cdd6f4; }"
+        )
+        self.copy_btn.clicked.connect(self.copy_to_clipboard)
+        self.copy_btn.hide()
+        layout.addWidget(self.copy_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
     
     def _get_bubble_style(self):
         bg = self.parent_style.get("bubble_bg", "rgba(0, 0, 0, 150)")
@@ -89,12 +100,33 @@ class SubtitleBubble(QFrame):
     def update_original(self, text):
         self.original_label.setText(text)
     
+        # Show copy button on hover
+        self.setMouseTracking(True)
+        self.enterEvent = lambda e: self.copy_btn.show()
+        self.leaveEvent = lambda e: self.copy_btn.hide()
+    
     def update_translated(self, text):
         if text:
             self.translated_label.setText(text)
             self.translated_label.setVisible(True)
         else:
             self.translated_label.setVisible(False)
+    
+    def copy_to_clipboard(self):
+        """Copy original + translation text to clipboard."""
+        import logging
+        log = logging.getLogger("RealtimeSubtitle")
+        parts = []
+        if self.original_label.text():
+            parts.append(self.original_label.text())
+        if self.translated_label.isVisible() and self.translated_label.text():
+            parts.append(self.translated_label.text())
+        if parts:
+            text = "\n".join(parts)
+            QApplication.clipboard().setText(text)
+            log.info(f"Copied to clipboard: {text[:60]}...")
+            self.copy_btn.setText("✓")
+            QTimer.singleShot(800, lambda: self.copy_btn.setText("📋"))
     
     def update_style(self, parent_style):
         """Update styling dynamically"""
