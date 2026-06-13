@@ -240,6 +240,8 @@ def create_pipeline():
             log.info(f"Pipeline: translation engine ({trans_mode}) initialized")
         
         def start(self):
+            self._stopping = False  # reset for new session
+            self.running = True     # reset from previous stop
             self.thread = threading.Thread(target=self.processing_loop, daemon=True, name="PipelineLoop")
             self.thread.start()
         
