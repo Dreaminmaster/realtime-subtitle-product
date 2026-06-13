@@ -67,7 +67,7 @@ Status: COMPLETE_VERIFIED | COMPLETE_UNVERIFIED | PARTIAL | MISSING | KNOWN_LIMI
 | 29 | Overwrite install (retain user dir) | COMPLETE_UNVERIFIED | build_dmg.sh | — | DMG replaces .app only, not user dir | — |
 | 30 | Permission recovery | COMPLETE_UNVERIFIED | permission_guide.py | — | — | — |
 | 31 | Crash recovery | COMPLETE_VERIFIED | main.py pipeline_failed + cleanup | 9fb6b2f | test_pipeline_recovery.py PASS | — |
-| 32 | Exit during Running | PARTIAL | dashboard.py closeEvent | 185b2c7 | Stop+drain before quit, no background residue check | — |
+| 32 | Exit during Running | COMPLETE_UNVERIFIED | dashboard.py closeEvent | 185b2c7 | Stop+drain before quit, no background residue check | — |
 
 ## UI/UX
 
@@ -81,6 +81,6 @@ Status: COMPLETE_VERIFIED | COMPLETE_UNVERIFIED | PARTIAL | MISSING | KNOWN_LIMI
 
 - COMPLETE_VERIFIED: 15
 - COMPLETE_UNVERIFIED: 14
-- PARTIAL: 4
+- PARTIAL: 3
 - MISSING: 0
 - KNOWN_LIMITATION: 1
