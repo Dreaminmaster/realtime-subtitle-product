@@ -124,7 +124,7 @@ class SubtitleBubble(QFrame):
         if parts:
             text = "\n".join(parts)
             QApplication.clipboard().setText(text)
-            log.info(f"Copied to clipboard: {text[:60]}...")
+            log.info("Subtitle copied to clipboard, chars=%d", len(text))
             self.copy_btn.setText("✓")
             QTimer.singleShot(800, lambda: self.copy_btn.setText("📋"))
     

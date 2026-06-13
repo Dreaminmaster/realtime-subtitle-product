@@ -21,7 +21,7 @@ Status: COMPLETE_VERIFIED | COMPLETE_UNVERIFIED | PARTIAL | MISSING | KNOWN_LIMI
 | 8 | EN→ZH translation | COMPLETE_UNVERIFIED | translation_engine.py OnlineAPITranslator | — | Needs user API key | — |
 | 9 | ZH→EN translation | COMPLETE_UNVERIFIED | translation_engine.py OnlineAPITranslator | — | Needs user API key | — |
 | 10 | Preserve original on fail | COMPLETE_UNVERIFIED | main.py _run_translation_safe | eb31b85 | Needs user API key + fail sim | — |
-| 11 | Translation timeout/cancel | MISSING | — | — | — | No timeout guard in translate() |
+| 11 | Translation timeout/cancel | COMPLETE_UNVERIFIED | translation_engine.py timeout=10.0, main.py _run_translation_safe | eb31b85, 9fb6b2f | Has timeout, session token, stop-safe. Needs mock test. | — | — | — | No timeout guard in translate() |
 | 12 | API key safety | COMPLETE_VERIFIED | config.py _safe_mask, translation_engine.py | ccb5f8f | Masking verified, placeholder skip | — |
 
 ## Overlay
@@ -40,7 +40,7 @@ Status: COMPLETE_VERIFIED | COMPLETE_UNVERIFIED | PARTIAL | MISSING | KNOWN_LIMI
 | # | Item | Status | File/Function | Commit | Test Evidence | Gap |
 |---|------|--------|---------------|--------|---------------|-----|
 | 19 | Capacity + scroll | COMPLETE_UNVERIFIED | enhanced_overlay_window.py update_text (max 8) | 59ea3c5 | — | — |
-| 20 | Copy to clipboard | MISSING | — | — | — | No copy button/gesture |
+| 20 | Copy to clipboard | COMPLETE_UNVERIFIED | enhanced_overlay_window.py copy_to_clipboard | 17dfc16 | Hover copy button. Privacy-safe log. | — | — | — | No copy button/gesture |
 | 21 | Session clear rules | COMPLETE_UNVERIFIED | enhanced_overlay_window.py clear_all | — | — | — |
 
 ## Settings
@@ -80,7 +80,7 @@ Status: COMPLETE_VERIFIED | COMPLETE_UNVERIFIED | PARTIAL | MISSING | KNOWN_LIMI
 ## Summary
 
 - COMPLETE_VERIFIED: 15
-- COMPLETE_UNVERIFIED: 12
+- COMPLETE_UNVERIFIED: 14
 - PARTIAL: 5
-- MISSING: 2
+- MISSING: 0
 - KNOWN_LIMITATION: 1
