@@ -1037,22 +1037,70 @@ class Dashboard(QWidget):
         return card
     
     def _download_model(self, model_id, backend):
-        """Download a model"""
+        """Start download via DownloadTask, receive status via Qt signals."""
+        from model_download_task import DownloadTask
         from model_manager import model_manager
+        import logging
+        log = logging.getLogger("RealtimeSubtitle")
         
-        self.model_mgmt_status.setText(f"Downloading {model_id}...")
+        # Dedup: prevent double-start for same model
+        if hasattr(self, '_active_downloads') and model_id in self._active_downloads:
+            log.info(f"Model download already active: {model_id}")
+            return
+        
+        # Update UI
+        self.model_mgmt_status.setText(f"⏳ Preparing {model_id}...")
         self.model_mgmt_status.setStyleSheet("color: #fab387; font-size: 12px;")
         
-        def on_done(success, error):
-            if success:
-                self.model_mgmt_status.setText(f"✅ Downloaded {model_id}")
-                self.model_mgmt_status.setStyleSheet("color: #a6e3a1; font-size: 12px;")
-            else:
-                self.model_mgmt_status.setText(f"❌ Failed: {error}")
-                self.model_mgmt_status.setStyleSheet("color: #f38ba8; font-size: 12px;")
-            self._refresh_model_list()
+        if not hasattr(self, '_active_downloads'):
+            self._active_downloads = {}
         
-        model_manager.download_model(model_id, backend, done_callback=on_done)
+        def do_download(ctx):
+            try:
+                model_manager.download_model(model_id, backend)
+                return True
+            except Exception as e:
+                ctx.last_error = str(e)
+                return False
+        
+        task = DownloadTask(model_id, backend, do_download, max_attempts=3)
+        self._active_downloads[model_id] = task
+        
+        task.on_status(lambda s, a: self._on_model_status(model_id, s, a))
+        task.on_done(lambda ok, err, a: self._on_model_done(model_id, ok, err, a))
+        task.on_cleanup(lambda: None)  # model_manager handles cleanup
+        
+        # Run in background thread — DO NOT block UI
+        import threading
+        threading.Thread(target=task.start, daemon=True, name=f"dl-{model_id}").start()
+    
+    def _on_model_status(self, model_id, status, attempt):
+        """Qt-safe status callback — queued to main thread."""
+        if status == "downloading":
+            self.model_mgmt_status.setText(f"⏳ {model_id}: attempt {attempt}...")
+            self.model_mgmt_status.setStyleSheet("color: #fab387; font-size: 12px;")
+        elif status == "retrying":
+            self.model_mgmt_status.setText(f"🔄 {model_id}: retry {attempt}...")
+            self.model_mgmt_status.setStyleSheet("color: #f9e2af; font-size: 12px;")
+        elif status == "cancelled":
+            self.model_mgmt_status.setText(f"⊘ {model_id}: cancelled")
+            self.model_mgmt_status.setStyleSheet("color: #6c7086; font-size: 12px;")
+    
+    def _on_model_done(self, model_id, ok, error, attempt):
+        """Qt-safe done callback — queued to main thread."""
+        import logging
+        log = logging.getLogger("RealtimeSubtitle")
+        if ok:
+            log.info(f"Model {model_id} downloaded")
+            self.model_mgmt_status.setText(f"✅ {model_id} installed")
+            self.model_mgmt_status.setStyleSheet("color: #a6e3a1; font-size: 12px;")
+        else:
+            log.error(f"Model {model_id} failed: {error}")
+            self.model_mgmt_status.setText(f"❌ {model_id}: failed ({error or 'unknown'})")
+            self.model_mgmt_status.setStyleSheet("color: #f38ba8; font-size: 12px;")
+        if hasattr(self, '_active_downloads'):
+            self._active_downloads.pop(model_id, None)
+        self._refresh_model_list()
     
     def _delete_model(self, model_id, backend):
         """Delete a model with confirmation"""
