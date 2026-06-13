@@ -84,3 +84,12 @@ Status: COMPLETE_VERIFIED | COMPLETE_UNVERIFIED | PARTIAL | MISSING | KNOWN_LIMI
 - PARTIAL: 4
 - MISSING: 0
 - KNOWN_LIMITATION: 0
+
+Total: 35
+
+## Known Limitations Outside Audit Matrix
+
+These are not tracked in the 35-item product matrix but affect real-world usage:
+
+1. **FaceTime / Voice Isolation compatibility**: macOS Voice Isolation mode creates aggregate audio devices that may route audio differently. Detected with warning in log; no automatic workaround.
+2. **macOS permission principal shows "python3"**: Because the app launches via shell script that exec's python3, the TCC permission dialog shows python3 instead of "RealtimeSubtitle". Fix requires native macOS app bundle with embedded framework.

@@ -1495,7 +1495,7 @@ class Dashboard(QWidget):
         self.showMinimized()
     
     def _on_audio_failed(self, message):
-        """Audio device failure. Show error + allow retry."""
+        """Audio device failure. Show error, disable Retry until cleanup."""
         import logging
         log = logging.getLogger("RealtimeSubtitle")
         log.error(f"Audio device failed: {message}")
@@ -1504,8 +1504,8 @@ class Dashboard(QWidget):
         self.last_pipeline_error = f"Audio: {message[:200]}"
         self.stop_btn.hide()
         self.start_btn.show()
-        self.start_btn.setEnabled(True)
-        self.start_btn.setText("Retry Launch")
+        self.start_btn.setEnabled(False)  # disabled until cleanup_finished
+        self.start_btn.setText("Wait...")
         self.showNormal()
     
     def _on_startup_timeout(self):

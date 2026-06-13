@@ -203,7 +203,7 @@ def create_pipeline():
             self._failed = False
             self._stopping = False             # dedup stop guard
             
-            from audio_capture import AudioCapture
+            from audio_capture import AudioCapture, AudioCaptureError
             from transcriber_pool import get_or_create_transcriber
             
             log.info("Pipeline: initializing audio capture...")
@@ -473,18 +473,19 @@ def create_pipeline():
                             
                             last_partial_time = now
                     
+            except AudioCaptureError as ace:
+                log.error(f"Audio device error: {ace}")
+                self._failed = True
+                try:
+                    self.signals.audio_failed.emit(str(ace))
+                    self.signals.pipeline_failed.emit(f"Audio: {ace}")
+                except Exception:
+                    log.critical("audio signal broken")
             except Exception as exc:
                 log.exception("Pipeline loop error")
                 self._failed = True
-                # Try to determine if this was an audio device failure
-                exc_str = str(exc)
-                if any(kw in exc_str.lower() for kw in ("audio", "device", "sounddevice", "portaudio", "stream")):
-                    try:
-                        self.signals.audio_failed.emit(exc_str)
-                    except Exception:
-                        log.critical("audio_failed signal broken")
                 try:
-                    self.signals.pipeline_failed.emit(exc_str)
+                    self.signals.pipeline_failed.emit(str(exc))
                 except Exception:
                     log.critical("pipeline_failed signal broken")
             finally:

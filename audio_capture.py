@@ -4,6 +4,18 @@ import queue
 import threading
 import time
 
+
+class AudioCaptureError(RuntimeError):
+    """Structured audio device error with stage and device info."""
+    def __init__(self, message, *, stage="open", requested_device=None,
+                 fallback_device=None, fallback_attempted=False):
+        super().__init__(message)
+        self.stage = stage                 # "open" or "read"
+        self.requested_device = requested_device
+        self.fallback_device = fallback_device
+        self.fallback_attempted = fallback_attempted
+
+
 class AudioCapture:
     def __init__(self, device_index=None, sample_rate=16000, chunk_duration=0.1, 
                  silence_threshold=0.01, silence_duration=1.0, max_phrase_duration=5.0,
@@ -114,10 +126,20 @@ class AudioCapture:
                                 blocksize=block_size, dtype='float32') as stream:
                  self.running = True
                  while self.running:
-                     data, overflow = stream.read(block_size)
+                     try:
+                         data, overflow = stream.read(block_size)
+                     except Exception as e_read:
+                         self.running = False
+                         raise AudioCaptureError(
+                             f"Audio stream read failed: {e_read}",
+                             stage="read",
+                             requested_device=str(device)
+                         ) from e_read
                      if overflow:
                          print("Audio overflow")
                      yield data.flatten()
+        except AudioCaptureError:
+            raise  # re-raise structured errors
         except Exception as e:
             print(f"\n[ERROR] Audio Device Initialization Failed: {e}")
             print("Possible causes:")
@@ -140,12 +162,16 @@ class AudioCapture:
                         yield data.flatten()
             except Exception as e2:
                 print(f"[Audio] FALLBACK ALSO FAILED: {e2}")
-                print("[Audio] All audio devices unavailable. Check System Settings > Privacy > Microphone.")
                 import logging
                 log = logging.getLogger("RealtimeSubtitle")
                 log.error(f"Audio capture failed on all devices: {e} | fallback: {e2}")
                 self.running = False
-                yield np.zeros(block_size, dtype=np.float32)
+                raise AudioCaptureError(
+                    f"Audio device failed: requested device={device}, fallback also failed: {e2}",
+                    stage="open",
+                    requested_device=str(device),
+                    fallback_attempted=True
+                ) from e2
             
         print("[Audio] Generator stopped.")
 
