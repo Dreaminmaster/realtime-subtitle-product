@@ -55,7 +55,7 @@ Status: COMPLETE_VERIFIED | COMPLETE_UNVERIFIED | PARTIAL | MISSING | KNOWN_LIMI
 | # | Item | Status | File/Function | Commit | Test Evidence | Gap |
 |---|------|--------|---------------|--------|---------------|-----|
 | 24 | Dynamic device resolution | COMPLETE_UNVERIFIED | audio_capture.py generator | 7bb6d9f | — | — |
-| 25 | Device failure prompt | PARTIAL | audio_capture.py generator | 7bb6d9f | Voice Isolation warning added, no device reconnect | — |
+| 25 | Device failure prompt | COMPLETE_UNVERIFIED | audio_capture.py generator with fallback reconnect | ca0794f | Explicit error messages, auto fallback to default device, Voice Isolation detection. | Unverified on real device failure. |
 
 ## Install/Launch
 
@@ -80,7 +80,7 @@ Status: COMPLETE_VERIFIED | COMPLETE_UNVERIFIED | PARTIAL | MISSING | KNOWN_LIMI
 ## Summary
 
 - COMPLETE_VERIFIED: 14
-- COMPLETE_UNVERIFIED: 19
+- COMPLETE_UNVERIFIED: 20
 - PARTIAL: 3
 - MISSING: 0
 - KNOWN_LIMITATION: 1
