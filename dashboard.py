@@ -129,9 +129,17 @@ class Dashboard(QWidget):
                 return True
     
     def closeEvent(self, event):
-        """Close window only after clean stop."""
+        """Close window only after clean stop + cancel downloads."""
         import logging
         log = logging.getLogger("RealtimeSubtitle")
+        
+        # Cancel all active downloads
+        if hasattr(self, '_active_downloads'):
+            for mid, task in list(self._active_downloads.items()):
+                log.info(f"Cancelling download: {mid}")
+                task.cancel()
+            self._active_downloads.clear()
+        
         if not hasattr(self, 'pipeline') or self.pipeline is None:
             event.accept()
             QApplication.quit()

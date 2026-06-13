@@ -51,7 +51,7 @@ class DownloadTask:
             self.attempt = 0
             self.last_error = None
             self.state = DOWNLOADING
-        self._run()
+        self._run()  # release lock before entering run loop
 
     def _finalize(self, ok, error, attempt):
         with self._lock:
