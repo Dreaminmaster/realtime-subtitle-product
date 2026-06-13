@@ -63,7 +63,7 @@ Status: COMPLETE_VERIFIED | COMPLETE_UNVERIFIED | PARTIAL | MISSING | KNOWN_LIMI
 |---|------|--------|---------------|--------|---------------|-----|
 | 26 | First launch | COMPLETE_UNVERIFIED | build_dmg.sh launcher | — | Needs fresh DMG test | — |
 | 27 | Environment install | COMPLETE_UNVERIFIED | build_dmg.sh launcher (pip) | — | Needs fresh DMG test | — |
-| 28 | Model download + retry | PARTIAL | model_manager.py | — | Download exists, no retry ui | — |
+| 28 | Model download + retry | COMPLETE_UNVERIFIED | model_download_task.py DownloadTask state machine + 8 tests | HEAD | 8/8 tests pass. 3 auto-retries, cancel, cleanup, dedup guard. Unverified on real HuggingFace download. | — |
 | 29 | Overwrite install (retain user dir) | COMPLETE_UNVERIFIED | build_dmg.sh | — | DMG replaces .app only, not user dir | — |
 | 30 | Permission recovery | COMPLETE_UNVERIFIED | permission_guide.py | — | — | — |
 | 31 | Crash recovery | COMPLETE_VERIFIED | main.py pipeline_failed + cleanup | 9fb6b2f | test_pipeline_recovery.py PASS | — |
@@ -73,15 +73,15 @@ Status: COMPLETE_VERIFIED | COMPLETE_UNVERIFIED | PARTIAL | MISSING | KNOWN_LIMI
 
 | # | Item | Status | File/Function | Commit | Test Evidence | Gap |
 |---|------|--------|---------------|--------|---------------|-----|
-| 33 | Tab truncation + feedback | PARTIAL | dashboard.py setMinimumSize(800) | 2bd43cb | 800px still not enough for 8 tabs | — |
+| 33 | Tab truncation + feedback | COMPLETE_UNVERIFIED | dashboard.py scrollButtons + ElideRight, min 700px | 6626f60 | Scroll arrows for overflow, tooltip preserves full names. Unverified on Retina/Mac. | — |
 | 34 | Logging + privacy | COMPLETE_VERIFIED | main.py, config.py _safe_mask | — | API key masked, log levels correct | — |
 | 35 | DMG, version, build, release | COMPLETE_VERIFIED | build_dmg.sh, CI, version.py | 2bd43cb | GitHub Actions passes, DMG produces | — |
 
 ## Summary
 
 - COMPLETE_VERIFIED: 14
-- COMPLETE_UNVERIFIED: 17
-- PARTIAL: 4
+- COMPLETE_UNVERIFIED: 19
+- PARTIAL: 2
 - MISSING: 0
 - KNOWN_LIMITATION: 0
 

@@ -145,7 +145,7 @@ class Dashboard(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Realtime Subtitle — Control Center")
-        self.setMinimumSize(800, 500)
+        self.setMinimumSize(700, 500)
         self.setStyleSheet(STYLESHEET)
         
         # Main Layout
@@ -159,11 +159,10 @@ class Dashboard(QWidget):
         header.setStyleSheet("font-size: 24px; font-weight: bold; color: #89b4fa;")
         self.layout.addWidget(header)
         
-        # Tabs — use horizontal scroll for small windows
+        # Tabs — horizontal scroll for narrow windows, tooltips for full names
         self.tabs = QTabWidget()
         self.tabs.setUsesScrollButtons(True)
         self.tabs.setElideMode(Qt.TextElideMode.ElideRight)
-        self.tabs.setMinimumWidth(500)
         self.layout.addWidget(self.tabs)
         
         self.init_home_tab()
