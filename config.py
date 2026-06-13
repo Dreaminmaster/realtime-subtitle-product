@@ -12,10 +12,20 @@ class Config:
         self.config = configparser.ConfigParser()
         
         if os.path.exists(config_path):
-            self.config.read(config_path)
-            print(f"[Config] Loaded from: {config_path}")
-        else:
-            print(f"[Config] Warning: {config_path} not found, using defaults/env vars")
+            try:
+                self.config.read(config_path)
+                print(f"[Config] Loaded from: {config_path}")
+            except configparser.Error as e:
+                print(f"[Config] WARNING: failed to parse {config_path}: {e}")
+                print(f"[Config] Using defaults instead. The file will be overwritten on next save.")
+                # Backup corrupt file before replacing
+                import time
+                backup = f"{config_path}.corrupt-{int(time.time())}"
+                try:
+                    os.rename(config_path, backup)
+                except OSError:
+                    print(f"[Config] Cannot backup corrupted config at {config_path}")
+                self.config = configparser.ConfigParser()  # fresh empty config
         
         # API settings (env vars take precedence)
         self.api_base_url = os.getenv("OPENAI_BASE_URL") or self._get("api", "base_url") or None
