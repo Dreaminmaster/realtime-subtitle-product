@@ -80,16 +80,37 @@ class AudioCapture:
 
     def generator(self):
         """Yields small raw audio chunks for external accumulation logic."""
-        if self.device_index is None:
-             # Just safety check, usually handled in start()
-             pass
-             
+        # Resolve device index at stream open time
+        device = self.device_index
+        
         # Use configured step size
         block_size = int(self.sample_rate * self.streaming_step_size)
-        print(f"[Audio] Starting raw processing stream (step={self.streaming_step_size}s)")
+        
+        # Resolve default device if using auto
+        if device is None or isinstance(device, str) and device == "auto":
+            try:
+                default_dev = sd.query_devices(kind='input')
+                device = default_dev['index']
+                print(f"[Audio] Resolved default input: [{device}] {default_dev['name']}")
+            except Exception:
+                device = None
+        
+        # Detect Voice Isolation / aggregate mode
+        try:
+            dev_info = sd.query_devices(device) if device is not None else sd.query_devices(kind='input')
+            dev_name = dev_info.get('name', '')
+            if 'aggregate' in dev_name.lower() or 'isolation' in dev_name.lower():
+                import logging
+                log = logging.getLogger("RealtimeSubtitle")
+                log.warning(f"Audio device '{dev_name}' may be affected by macOS Voice Isolation.")
+                log.warning("If no audio is captured, switch Mic Mode to Standard in the macOS menu bar.")
+        except Exception:
+            pass
+        
+        print(f"[Audio] Starting raw processing stream (step={self.streaming_step_size}s, device={device})")
         
         try:
-            with sd.InputStream(device=self.device_index, channels=1, samplerate=self.sample_rate, 
+            with sd.InputStream(device=device, channels=1, samplerate=self.sample_rate, 
                                 blocksize=block_size, dtype='float32') as stream:
                  self.running = True
                  while self.running:

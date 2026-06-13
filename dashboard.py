@@ -1532,7 +1532,6 @@ class Dashboard(QWidget):
         
         self.stop_btn.setEnabled(False)
         self.stop_btn.setText("Stopping...")
-        log.info("Stop requested")
         
         if hasattr(self, 'pipeline') and self.pipeline:
             try:
