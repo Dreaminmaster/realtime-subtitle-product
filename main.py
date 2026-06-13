@@ -202,7 +202,7 @@ def create_pipeline():
             self._failed = False
             
             from audio_capture import AudioCapture
-            from transcriber import Transcriber
+            from transcriber_pool import get_or_create_transcriber
             
             log.info("Pipeline: initializing audio capture...")
             config.print_config()
@@ -221,20 +221,9 @@ def create_pipeline():
             )
             log.info("Pipeline: audio capture initialized")
             
-            if config.asr_backend == "funasr":
-                model_size = config.funasr_model
-            else:
-                model_size = config.whisper_model
-            
-            log.info(f"Pipeline: initializing transcriber ({config.asr_backend}/{model_size})...")
-            self.transcriber = Transcriber(
-                backend=config.asr_backend,
-                model_size=model_size,
-                device=config.whisper_device,
-                compute_type=config.whisper_compute_type,
-                language=config.source_language
-            )
-            log.info("Pipeline: transcriber initialized")
+            # Use global singleton — no reload on relaunch
+            self.transcriber = get_or_create_transcriber()
+            log.info("Pipeline: transcriber ready (pooled)")
             
             from translation_engine import translation_engine
             self.translation_engine = translation_engine
@@ -246,16 +235,15 @@ def create_pipeline():
                 model=config.model
             )
             log.info(f"Pipeline: translation engine ({trans_mode}) initialized")
-            
-            log.info("Pipeline: warming up transcriber...")
-            self.transcriber.warmup()
-            log.info("Pipeline: warmup complete")
         
         def start(self):
             self.thread = threading.Thread(target=self.processing_loop, daemon=True, name="PipelineLoop")
             self.thread.start()
         
         def stop(self):
+            if self._stopping:
+                return True  # already stopping
+            self._stopping = True
             log.info("Stop requested")
             self.running = False
             self.audio.stop()
