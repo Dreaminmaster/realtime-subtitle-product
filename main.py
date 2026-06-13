@@ -519,7 +519,8 @@ def create_pipeline():
                 else:
                     log.info("ASR worker stopped")
                 
-                translate_executor.shutdown(wait=False)
+                translate_executor.shutdown(wait=True)
+                log.info("Translation executor shut down")
                 
                 self._cleanup_in_progress = True
                 cleanup_ok = not asr_thread.is_alive()
