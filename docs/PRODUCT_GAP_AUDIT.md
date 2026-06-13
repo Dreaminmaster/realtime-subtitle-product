@@ -29,10 +29,10 @@ Status: COMPLETE_VERIFIED | COMPLETE_UNVERIFIED | PARTIAL | MISSING | KNOWN_LIMI
 | # | Item | Status | File/Function | Commit | Test Evidence | Gap |
 |---|------|--------|---------------|--------|---------------|-----|
 | 13 | Subtitle display | COMPLETE_VERIFIED | enhanced_overlay_window.py update_text | 59ea3c5 | User screenshot | — |
-| 14 | Drag + position memory | COMPLETE_UNVERIFIED | enhanced_overlay_window.py mouse events | — | Drag works, position lost on restart | Need QSettings persistence |
+| 14 | Drag + position memory | COMPLETE_UNVERIFIED | enhanced_overlay_window.py QSettings save/restore on drag end | 25ba6a7 | QSettings persists x/y between sessions. Unverified on Mac restart. | — |
 | 15 | Long text wrapping | COMPLETE_UNVERIFIED | enhanced_overlay_window.py SubtitleBubble | — | Needs visual test | — |
 | 16 | Original+translation layout | COMPLETE_UNVERIFIED | enhanced_overlay_window.py SubtitleBubble | — | Needs visual test | — |
-| 17 | Multi-monitor/edge | COMPLETE_UNVERIFIED | enhanced_overlay_window.py | — | Bottom-center default, no edge snap | — |
+| 17 | Multi-monitor/edge | COMPLETE_UNVERIFIED | enhanced_overlay_window.py screenAt + availableGeometry clamp | 9a5c066 | Edge-clamped drag, multi-monitor screen detect. Unverified on real dual display. | — |
 | 18 | Stop/restart behavior | COMPLETE_VERIFIED | dashboard.py on_stop, _on_pipeline_started | 9fb6b2f | User: stop works, relaunch works | — |
 
 ## History
