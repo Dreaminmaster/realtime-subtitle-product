@@ -1535,7 +1535,11 @@ class Dashboard(QWidget):
         log.info("Stop requested")
         
         if hasattr(self, 'pipeline') and self.pipeline:
-            ok = self.pipeline.stop()
+            try:
+                ok = self.pipeline.stop()
+            except Exception:
+                log.exception("Pipeline stop failed — forcing cleanup")
+                ok = False
             if not ok:
                 log.error("Pipeline stop timed out")
                 self.status_label.setText("Stop timed out — Retry or Force Quit")

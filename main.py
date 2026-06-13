@@ -200,6 +200,7 @@ def create_pipeline():
             self.last_final_text = ""        # context prompt across utterances
             self._cleanup_in_progress = False
             self._failed = False
+            self._stopping = False             # dedup stop guard
             
             from audio_capture import AudioCapture
             from transcriber_pool import get_or_create_transcriber
@@ -220,6 +221,8 @@ def create_pipeline():
                 streaming_overlap=config.streaming_overlap
             )
             log.info("Pipeline: audio capture initialized")
+            if self.audio and not self.running:
+                return  # stop was requested during initialization
             
             # Use global singleton — no reload on relaunch
             self.transcriber = get_or_create_transcriber()
