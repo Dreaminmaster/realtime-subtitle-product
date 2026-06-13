@@ -101,12 +101,13 @@ class OnlineAPITranslator(BaseTranslator):
                 for host in ("localhost", "127.0.0.1", "::1", "0.0.0.0")
             ))
             
+            # Bounded timeouts: connect=5s, read=15s, total pool=30s
+            timeout = httpx.Timeout(connect=5.0, read=15.0, write=10.0, pool=5.0)
+            
             if is_local:
-                # Local endpoint — NEVER route through system proxy
-                http_client = httpx.Client(verify=False, timeout=15.0, trust_env=False)
+                http_client = httpx.Client(verify=False, timeout=timeout, trust_env=False)
             else:
-                # Remote endpoint — use system proxy settings
-                http_client = httpx.Client(verify=False, timeout=15.0)
+                http_client = httpx.Client(verify=False, timeout=timeout)
             
             self._client = OpenAI(
                 api_key=self.api_key or os.getenv("OPENAI_API_KEY", "dummy-key"),
