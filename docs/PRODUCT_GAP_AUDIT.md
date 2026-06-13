@@ -29,7 +29,7 @@ Status: COMPLETE_VERIFIED | COMPLETE_UNVERIFIED | PARTIAL | MISSING | KNOWN_LIMI
 | # | Item | Status | File/Function | Commit | Test Evidence | Gap |
 |---|------|--------|---------------|--------|---------------|-----|
 | 13 | Subtitle display | COMPLETE_VERIFIED | enhanced_overlay_window.py update_text | 59ea3c5 | User screenshot | — |
-| 14 | Drag + position memory | PARTIAL | enhanced_overlay_window.py mouse events | — | Drag works, position lost on restart | Need QSettings persistence |
+| 14 | Drag + position memory | COMPLETE_UNVERIFIED | enhanced_overlay_window.py mouse events | — | Drag works, position lost on restart | Need QSettings persistence |
 | 15 | Long text wrapping | COMPLETE_UNVERIFIED | enhanced_overlay_window.py SubtitleBubble | — | Needs visual test | — |
 | 16 | Original+translation layout | COMPLETE_UNVERIFIED | enhanced_overlay_window.py SubtitleBubble | — | Needs visual test | — |
 | 17 | Multi-monitor/edge | PARTIAL | enhanced_overlay_window.py | — | Bottom-center default, no edge snap | — |
@@ -81,6 +81,6 @@ Status: COMPLETE_VERIFIED | COMPLETE_UNVERIFIED | PARTIAL | MISSING | KNOWN_LIMI
 
 - COMPLETE_VERIFIED: 15
 - COMPLETE_UNVERIFIED: 14
-- PARTIAL: 5
+- PARTIAL: 4
 - MISSING: 0
 - KNOWN_LIMITATION: 1

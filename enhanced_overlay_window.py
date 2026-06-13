@@ -360,6 +360,18 @@ class EnhancedOverlayWindow(QWidget):
         screen = QApplication.primaryScreen().availableGeometry()
         x = screen.x() + (screen.width() - w) // 2
         y = screen.y() + screen.height() - h - 60
+        
+        # Restore saved position if available
+        from PyQt6.QtCore import QSettings
+        settings = QSettings("RealtimeSubtitle", "Overlay")
+        saved_x = settings.value("window/x")
+        saved_y = settings.value("window/y")
+        if saved_x is not None and saved_y is not None:
+            try:
+                x, y = int(saved_x), int(saved_y)
+            except (ValueError, TypeError):
+                pass
+        
         self.move(x, y)
     
     def _control_btn_style(self):
@@ -549,6 +561,11 @@ class EnhancedOverlayWindow(QWidget):
     def mouseReleaseEvent(self, event):
         self.is_moving = False
         self.setCursor(Qt.CursorShape.ArrowCursor)
+        # Persist position
+        from PyQt6.QtCore import QSettings
+        settings = QSettings("RealtimeSubtitle", "Overlay")
+        settings.setValue("window/x", self.x())
+        settings.setValue("window/y", self.y())
 
 
 # For backward compatibility
