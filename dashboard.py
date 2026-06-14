@@ -83,7 +83,7 @@ class Dashboard(QWidget):
     start_requested = pyqtSignal()
     stop_requested = pyqtSignal()
     model_download_status = pyqtSignal(str, str, int)
-    model_download_done = pyqtSignal(str, bool, object, int)
+    model_download_done = pyqtSignal(str, int, object, int)  # (model_id, terminal_state, error, attempt)
     progress_event = pyqtSignal(object)  # ProgressEvent — update ProgressPanel
 
     FORCE_QUIT = "force_quit"
@@ -190,7 +190,8 @@ class Dashboard(QWidget):
         from progress_panel import ProgressPanel
         self.progress_panel = ProgressPanel()
         self.progress_panel.setVisible(False)
-        self.layout.addWidget(self.progress_panel)
+        # Will be added to Models tab when init_model_tab runs
+        self._progress_panel_needs_placement = True
         
         # Connect once — use _progress_model_id/_progress_backend for current task
         self.progress_panel.retry_clicked.connect(self._retry_progress_model)
@@ -983,6 +984,12 @@ class Dashboard(QWidget):
         tab.setLayout(layout)
         self.tabs.addTab(tab, "📦 Models")
         
+        if self._progress_panel_needs_placement:
+            layout.addWidget(self.progress_panel)
+            self._progress_panel_needs_placement = False
+
+        self.progress_panel.title.setText("Download Progress")
+        
         self._refresh_model_list()
     
     def _refresh_model_list(self):
@@ -1089,6 +1096,11 @@ class Dashboard(QWidget):
         
         if hasattr(self, '_active_downloads') and model_id in self._active_downloads:
             log.info(f"Model download already active: {model_id}")
+            return
+        
+        # Only one download at a time across all models
+        if self._active_downloads and hasattr(self, '_active_downloads'):
+            log.info("Another model is already downloading — ignoring")
             return
         
         self.model_mgmt_status.setText(f"⏳ {model_id}: starting...")
