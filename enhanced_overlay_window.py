@@ -39,8 +39,12 @@ class SubtitleBubble(QFrame):
         self.chunk_id = chunk_id
         self.parent_style = parent_style or {}
         
+        # Read font sizes FIRST — used in height calculation
+        original_font_size = self.parent_style.get("original_font_size", 18)
+        translation_font_size = self.parent_style.get("translation_font_size", 16)
+        
         self.setStyleSheet(self._get_bubble_style())
-        self.setFixedHeight(max(70, original_font_size + translation_font_size + 30))
+        self.setMinimumHeight(max(70, original_font_size + translation_font_size + 30))
         
         layout = QVBoxLayout()
         layout.setContentsMargins(12, 8, 12, 8)
@@ -147,6 +151,7 @@ class SubtitleBubble(QFrame):
         )
         self.translated_label.setVisible(parent_style.get("show_translation", True))
         
+        self.setMinimumHeight(max(70, original_font_size + translation_font_size + 30))
         self.setStyleSheet(self._get_bubble_style())
 
 

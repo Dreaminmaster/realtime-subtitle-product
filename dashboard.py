@@ -173,6 +173,7 @@ class Dashboard(QWidget):
         self.tabs = QTabWidget()
         self.tabs.setUsesScrollButtons(True)
         self.tabs.setElideMode(Qt.TextElideMode.ElideRight)
+        self.tabs.setMinimumWidth(500)
         self.layout.addWidget(self.tabs)
         
         self.init_home_tab()
