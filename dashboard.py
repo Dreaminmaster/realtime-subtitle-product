@@ -192,6 +192,19 @@ class Dashboard(QWidget):
         self.progress_panel.setVisible(False)
         self.layout.addWidget(self.progress_panel)
         
+        # Connect once — use _progress_model_id/_progress_backend for current task
+        self.progress_panel.retry_clicked.connect(self._retry_progress_model)
+        self.progress_panel.cancel_clicked.connect(self._cancel_progress_model)
+        self.progress_panel.dismiss_clicked.connect(lambda: (
+            self.progress_panel.hide(),
+            setattr(self, '_progress_model_id', None),
+            setattr(self, '_progress_backend', None)
+        ))
+        
+        # Track current progress task to avoid signal accumulation
+        self._progress_model_id = None
+        self._progress_backend = None
+        
         # Connect download signals (must be done after handlers are defined)
         self.model_download_status.connect(self._on_model_status)
         self.model_download_done.connect(self._on_model_done)
@@ -1095,20 +1108,20 @@ class Dashboard(QWidget):
         # Wire progress channel to the associated ProgressPanel
         from model_progress_channel import ModelProgressChannel
         channel = ModelProgressChannel(model_id, max_attempts=3)
+        self._progress_model_id = model_id
+        self._progress_backend = backend
         self.progress_event.emit(channel.on_start())
         self.progress_panel.setVisible(True)
-        self.progress_panel.retry_clicked.connect(lambda: self._retry_download(model_id, backend))
-        self.progress_panel.cancel_clicked.connect(lambda: self._cancel_download(model_id))
         task._progress_channel = channel  # store for cleanup
         
         task.on_status(lambda s, a: (
             self.model_download_status.emit(model_id, s, a),
             self._emit_channel_status(channel, s, a, None)
         ))
-        task.on_done(lambda ok, err, a: (
+        task.on_done(lambda ts, err, a: (
             self._active_downloads.pop(model_id, None),
-            self._emit_channel_done(channel, ok, err, a),
-            self.model_download_done.emit(model_id, ok, err, a)
+            self._emit_channel_done(channel, ts, err, a),
+            self.model_download_done.emit(model_id, ts, err, a)
         ))
         task.on_cleanup(lambda: None)
         
@@ -1126,10 +1139,12 @@ class Dashboard(QWidget):
             self.model_mgmt_status.setText(f"⊘ {model_id}: cancelled")
             self.model_mgmt_status.setStyleSheet("color: #6c7086; font-size: 12px;")
     
-    def _on_model_done(self, model_id, ok, error, attempt):
+    def _on_model_done(self, model_id, terminal_state, error, attempt):
         """Qt-safe done callback — queued to main thread."""
         import logging
         log = logging.getLogger("RealtimeSubtitle")
+        from model_download_task import SUCCEEDED
+        ok = (terminal_state == SUCCEEDED)
         if ok:
             log.info(f"Model {model_id} downloaded")
             self.model_mgmt_status.setText(f"✅ {model_id} installed")
@@ -1162,13 +1177,26 @@ class Dashboard(QWidget):
             return
         self.progress_event.emit(evt)
 
-    def _emit_channel_done(self, channel, ok, error, attempt):
-        """Final event for progress panel."""
-        if ok:
+    def _emit_channel_done(self, channel, terminal_state, error, attempt):
+        """Final event for progress panel — uses terminal_state, not ok bool."""
+        from model_download_task import SUCCEEDED, FAILED, CANCELLED
+        if terminal_state == SUCCEEDED:
             self.progress_event.emit(channel.on_success(attempt))
+        elif terminal_state == CANCELLED:
+            self.progress_event.emit(channel.on_cancel(attempt))
         else:
             self.progress_event.emit(channel.on_fail(error, attempt))
 
+    def _retry_progress_model(self):
+        """Retry the model currently shown in progress panel."""
+        if self._progress_model_id and self._progress_backend:
+            self._retry_download(self._progress_model_id, self._progress_backend)
+    
+    def _cancel_progress_model(self):
+        """Cancel the model currently shown in progress panel."""
+        if self._progress_model_id:
+            self._cancel_download(self._progress_model_id)
+    
     def _retry_download(self, model_id, backend):
         """Retry a failed download."""
         import logging

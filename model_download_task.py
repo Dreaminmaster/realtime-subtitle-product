@@ -55,7 +55,7 @@ class DownloadTask:
             self.state = DOWNLOADING
         self._run()  # release lock before entering run loop
 
-    def _finalize(self, ok, error, attempt):
+    def _finalize(self, terminal_state, error, attempt):
         cleanup = None
         done = None
         with self._lock:
@@ -64,11 +64,10 @@ class DownloadTask:
             self._finished = True
             cleanup = self._cleanup_fn
             done = self._done_callback
-        # Call outside lock to prevent callback deadlock
-        if cleanup and not ok:
+        if cleanup and terminal_state != SUCCEEDED:
             cleanup()
         if done:
-            done(ok, error, attempt)
+            done(terminal_state, error, attempt)
 
     def _run(self):
         while self.attempt < self.max_attempts:
@@ -80,7 +79,7 @@ class DownloadTask:
                 if ok:
                     self._set_state(SUCCEEDED)
                     self._emit_status("completed", self.attempt)
-                    self._finalize(True, None, self.attempt)
+                    self._finalize(SUCCEEDED, None, self.attempt)
                     return
                 self.last_error = "Download returned False"
             except Exception as e:
@@ -89,7 +88,7 @@ class DownloadTask:
             if self._cancel.is_set():
                 self._set_state(CANCELLED)
                 self._emit_status("cancelled", self.attempt)
-                self._finalize(False, "Cancelled", self.attempt)
+                self._finalize(CANCELLED, "Cancelled", self.attempt)
                 return
 
             if self.attempt < self.max_attempts:
@@ -99,12 +98,12 @@ class DownloadTask:
                 if self._cancel.wait(delay):
                     self._set_state(CANCELLED)
                     self._emit_status("cancelled", self.attempt)
-                    self._finalize(False, "Cancelled", self.attempt)
+                    self._finalize(CANCELLED, "Cancelled", self.attempt)
                     return
 
         self._set_state(FAILED)
         self._emit_status("failed", self.attempt)
-        self._finalize(False, self.last_error or "Failed after attempts", self.attempt)
+        self._finalize(FAILED, self.last_error or "Failed after attempts", self.attempt)
 
     def _set_state(self, s):
         with self._lock:
