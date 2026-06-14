@@ -1101,6 +1101,8 @@ class Dashboard(QWidget):
         
         task = DownloadTask(model_id, backend, do_download, max_attempts=3)
         self._active_downloads[model_id] = task
+        # Immediately refresh card to show Cancel button
+        self._refresh_model_list()
         
         # Wire progress channel to the associated ProgressPanel
         from model_progress_channel import ModelProgressChannel
@@ -1140,22 +1142,21 @@ class Dashboard(QWidget):
         """Qt-safe done callback — queued to main thread."""
         import logging
         log = logging.getLogger("RealtimeSubtitle")
-        from model_download_task import SUCCEEDED
-        ok = (terminal_state == SUCCEEDED)
-        if ok:
+        from model_download_task import SUCCEEDED, CANCELLED
+        if terminal_state == SUCCEEDED:
             log.info(f"Model {model_id} downloaded")
             self.model_mgmt_status.setText(f"✅ {model_id} installed")
             self.model_mgmt_status.setStyleSheet("color: #a6e3a1; font-size: 12px;")
+        elif terminal_state == CANCELLED:
+            log.info(f"Model download cancelled: {model_id}")
+            self.model_mgmt_status.setText(f"⊘ {model_id}: cancelled")
+            self.model_mgmt_status.setStyleSheet("color: #6c7086; font-size: 12px;")
         else:
             log.error(f"Model {model_id} failed: {error}")
-            self.model_mgmt_status.setText(f"❌ {model_id}: failed ({error or 'unknown'})")
+            self.model_mgmt_status.setText(f"❌ {model_id}: failed after {attempt} attempts — retry?")
             self.model_mgmt_status.setStyleSheet("color: #f38ba8; font-size: 12px;")
-        # Remove from active downloads (may have been pre-removed by done callback lambda)
         if hasattr(self, '_active_downloads'):
             self._active_downloads.pop(model_id, None)
-        # Better failure message with retry hint
-        if not ok:
-            self.model_mgmt_status.setText(f"❌ {model_id}: failed after {attempt} attempts — retry?")
         self._refresh_model_list()
     
     def _emit_channel_status(self, channel, status, attempt, error):

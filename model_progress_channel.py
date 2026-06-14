@@ -55,4 +55,5 @@ class ModelProgressChannel:
 
     def on_cancel(self, attempt):
         return ProgressEvent(self.model_id, "cancelled", "Download cancelled",
-                             attempt=attempt, max_attempts=self.max_attempts, can_cancel=False)
+                             attempt=attempt, max_attempts=self.max_attempts,
+                             can_cancel=False, can_retry=False, percent=100)
