@@ -1085,7 +1085,10 @@ class Dashboard(QWidget):
         self._active_downloads[model_id] = task
         
         task.on_status(lambda s, a: self.model_download_status.emit(model_id, s, a))
-        task.on_done(lambda ok, err, a: self.model_download_done.emit(model_id, ok, err, a))
+        task.on_done(lambda ok, err, a: (
+            self._active_downloads.pop(model_id, None),
+            self.model_download_done.emit(model_id, ok, err, a)
+        ))
         task.on_cleanup(lambda: None)
         
         threading.Thread(target=task.start, daemon=True, name=f"dl-{model_id}").start()
@@ -1114,8 +1117,12 @@ class Dashboard(QWidget):
             log.error(f"Model {model_id} failed: {error}")
             self.model_mgmt_status.setText(f"❌ {model_id}: failed ({error or 'unknown'})")
             self.model_mgmt_status.setStyleSheet("color: #f38ba8; font-size: 12px;")
+        # Remove from active downloads (may have been pre-removed by done callback lambda)
         if hasattr(self, '_active_downloads'):
             self._active_downloads.pop(model_id, None)
+        # Better failure message with retry hint
+        if not ok:
+            self.model_mgmt_status.setText(f"❌ {model_id}: failed after {attempt} attempts — retry?")
         self._refresh_model_list()
     
     def _cancel_download(self, model_id):

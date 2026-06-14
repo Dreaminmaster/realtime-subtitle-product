@@ -42,6 +42,8 @@ class DownloadTask:
             if self._finished:
                 return
             self._cancel.set()
+            if self.state not in (FAILED, SUCCEEDED, CANCELLED):
+                self.state = CANCELLED
 
     def start(self):
         with self._lock:
