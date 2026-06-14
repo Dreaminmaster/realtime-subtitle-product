@@ -63,7 +63,7 @@ Status: COMPLETE_VERIFIED | COMPLETE_UNVERIFIED | PARTIAL | MISSING | KNOWN_LIMI
 |---|------|--------|---------------|--------|---------------|-----|
 | 26 | First launch | COMPLETE_UNVERIFIED | build_dmg.sh launcher | — | Needs fresh DMG test | — |
 | 27 | Environment install | COMPLETE_UNVERIFIED | build_dmg.sh launcher (pip) | — | Needs fresh DMG test | — |
-| 28 | Model download + retry | COMPLETE_UNVERIFIED | model_download_task.py + dashboard.py via QThread | HEAD | DownloadTask sync download_model_sync, pyqtSignal, cancel button callbacks, dedup. Wired to model page. Unverified on real HF. | — |
+| 28 | Model download + retry | PARTIAL | model_download_task.py + dashboard.py via QThread | HEAD | DownloadTask sync download_model_sync, pyqtSignal, cancel button callbacks, dedup. Wired to model page. Unverified on real HF. | — |
 | 29 | Overwrite install (retain user dir) | COMPLETE_UNVERIFIED | build_dmg.sh | — | DMG replaces .app only, not user dir | — |
 | 30 | Permission recovery | COMPLETE_UNVERIFIED | permission_guide.py | — | — | — |
 | 31 | Crash recovery | COMPLETE_VERIFIED | main.py pipeline_failed + cleanup | 9fb6b2f | test_pipeline_recovery.py PASS | — |
@@ -80,8 +80,8 @@ Status: COMPLETE_VERIFIED | COMPLETE_UNVERIFIED | PARTIAL | MISSING | KNOWN_LIMI
 ## Summary
 
 - COMPLETE_VERIFIED: 14
-- COMPLETE_UNVERIFIED: 19
-- PARTIAL: 2
+- COMPLETE_UNVERIFIED: 18
+- PARTIAL: 3
 - MISSING: 0
 - KNOWN_LIMITATION: 0
 
