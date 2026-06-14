@@ -54,14 +54,19 @@ class DownloadTask:
         self._run()  # release lock before entering run loop
 
     def _finalize(self, ok, error, attempt):
+        cleanup = None
+        done = None
         with self._lock:
             if self._finished:
                 return
             self._finished = True
-        if self._cleanup_fn and not ok:
-            self._cleanup_fn()
-        if self._done_callback:
-            self._done_callback(ok, error, attempt)
+            cleanup = self._cleanup_fn
+            done = self._done_callback
+        # Call outside lock to prevent callback deadlock
+        if cleanup and not ok:
+            cleanup()
+        if done:
+            done(ok, error, attempt)
 
     def _run(self):
         while self.attempt < self.max_attempts:

@@ -1020,6 +1020,10 @@ class Dashboard(QWidget):
         
         # Action button
         downloaded = model_info['downloaded']
+        mid = model_info['id']
+        be = backend
+        is_downloading = hasattr(self, '_active_downloads') and mid in self._active_downloads
+        
         if downloaded:
             btn = QPushButton("✓ Downloaded")
             btn.setStyleSheet(
@@ -1027,9 +1031,15 @@ class Dashboard(QWidget):
                 "border-radius: 4px; font-size: 11px; } "
                 "QPushButton:hover { background: #f38ba8; }"
             )
-            btn.clicked.connect(
-                lambda checked, mid=model_info['id'], be=backend: self._delete_model(mid, be)
+            btn.clicked.connect(lambda checked, mid=mid, be=be: self._delete_model(mid, be))
+        elif is_downloading:
+            btn = QPushButton("Cancel")
+            btn.setStyleSheet(
+                "QPushButton { background: #f38ba8; color: #1e1e2e; padding: 4px 8px; "
+                "border-radius: 4px; font-size: 11px; } "
+                "QPushButton:hover { background: #eba0ac; }"
             )
+            btn.clicked.connect(lambda checked, mid=mid: self._cancel_download(mid))
         else:
             btn = QPushButton("Download")
             btn.setStyleSheet(
@@ -1037,9 +1047,7 @@ class Dashboard(QWidget):
                 "border-radius: 4px; font-size: 11px; } "
                 "QPushButton:hover { background: #b4befe; }"
             )
-            btn.clicked.connect(
-                lambda checked, mid=model_info['id'], be=backend: self._download_model(mid, be)
-            )
+            btn.clicked.connect(lambda checked, mid=mid, be=be: self._download_model(mid, be))
         
         if model_info.get('recommended'):
             rec_label = QLabel("⭐")
@@ -1108,6 +1116,17 @@ class Dashboard(QWidget):
         if hasattr(self, '_active_downloads'):
             self._active_downloads.pop(model_id, None)
         self._refresh_model_list()
+    
+    def _cancel_download(self, model_id):
+        """Cancel an active download."""
+        import logging
+        log = logging.getLogger("RealtimeSubtitle")
+        if hasattr(self, '_active_downloads') and model_id in self._active_downloads:
+            task = self._active_downloads[model_id]
+            task.cancel()
+            log.info(f"Download cancelled: {model_id}")
+            self.model_mgmt_status.setText(f"⊘ {model_id}: cancelling...")
+            self.model_mgmt_status.setStyleSheet("color: #fab387; font-size: 12px;")
     
     def _delete_model(self, model_id, backend):
         """Delete a model with confirmation"""
