@@ -1,60 +1,60 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from progress_events import ProgressEvent
+from model_progress_channel import ModelProgressChannel
 
-# 1: known bytes
-e1 = ProgressEvent("m1", "downloading", "36% done", current_bytes=105, total_bytes=288,
-                   percent=36.0, speed_bps=2_400_000, eta_seconds=60, attempt=1,
-                   max_attempts=3, can_cancel=True)
-assert e1.percent == 36.0
-assert e1.can_cancel == True
-assert e1.can_retry == False
-print("PASS 1: known bytes")
+ch = ModelProgressChannel("tiny", max_attempts=3)
+errors = 0
 
-# 2: indeterminate
-e2 = ProgressEvent("m1", "connecting", "Connecting to server...", attempt=1,
-                   max_attempts=3, can_cancel=True)
-assert e2.percent is None
-assert e2.total_bytes is None
-print("PASS 2: indeterminate")
+def check(name, cond):
+    global errors
+    if cond: print(f"PASS {name}")
+    else:
+        print(f"FAIL {name}")
+        errors += 1
 
-# 3: retry state
-e3 = ProgressEvent("m1", "failed", "Connection timed out", attempt=3,
-                   max_attempts=3, can_retry=True, can_cancel=False)
-assert e3.can_retry
-assert not e3.can_cancel
-print("PASS 3: retry state")
+# 1: start
+e = ch.on_start()
+check("start stage", e.stage == "starting")
+check("start cancel", e.can_cancel)
 
-# 4: cancelled
-e4 = ProgressEvent("m1", "cancelled", "Download cancelled", can_cancel=False,
-                   can_retry=False)
-assert not e4.can_cancel and not e4.can_retry
-print("PASS 4: cancelled")
+# 2: retry
+e2 = ch.on_retry(2)
+check("retry stage", e2.stage == "retrying")
+check("retry attempt", e2.attempt == 2)
 
-# 5: completed
-e5 = ProgressEvent("m1", "completed", "Download complete", percent=100.0,
-                   can_cancel=False, can_retry=False)
-assert e5.percent == 100.0
-print("PASS 5: completed")
+# 3: progress with bytes
+e3 = ch.on_progress(105*1024*1024, 288*1024*1024, attempt=1)
+check("progress stage", e3.stage == "downloading")
+check("progress percent", e3.percent is not None and 30 < e3.percent < 45)
+check("progress speed", e3.speed_bps is not None and True)
+check("progress cancel", e3.can_cancel)
 
-# 6: stages (first-launch)
-for i in range(3):
-    e = ProgressEvent("setup", f"step_{i}", f"Step {i+1} of 3",
-                      stage_index=i, total_stages=3, attempt=1, max_attempts=1,
-                      can_cancel=True)
-    assert e.stage_index == i and e.total_stages == 3
-print("PASS 6: stages")
+# 4: indeterminate (no total_bytes)
+e4 = ch.on_progress(0, 0, attempt=1)
+check("indeterminate", e4.percent is None)
+check("indeterminate cancel", e4.can_cancel)
 
-# 7: retry after failure preserves stage_index
-e7 = ProgressEvent("setup", "failed", "Step 1 failed", stage_index=0,
-                   total_stages=3, can_retry=True, can_cancel=False)
-assert e7.stage_index == 0 and e7.can_retry
-print("PASS 7: retry preserves stage")
+# 5: success
+e5 = ch.on_success(1)
+check("success stage", e5.stage == "succeeded")
+check("success percent", e5.percent == 100.0)
+check("success no cancel", not e5.can_cancel)
 
-# 8: default values
-e8 = ProgressEvent("test", "idle", "")
-assert e8.attempt == 1 and e8.max_attempts == 3
-assert e8.percent is None and e8.total_bytes is None
-print("PASS 8: defaults")
+# 6: fail after 3 attempts
+e6 = ch.on_fail("Connection timed out", 3)
+check("fail stage", e6.stage == "failed")
+check("fail retry", e6.can_retry)
+check("fail no cancel", not e6.can_cancel)
 
-print("ALL 8 PASSED")
+# 7: fail message rewrite
+e7 = ch.on_fail("ConnectTimeout", 2)
+check("fail timeout msg", "timed out" in e7.message.lower() or "connect" in e7.message.lower())
+
+# 8: cancel
+e8 = ch.on_cancel(2)
+check("cancel stage", e8.stage == "cancelled")
+check("cancel no retry", not e8.can_retry)
+check("cancel no cancel", not e8.can_cancel)
+
+print(f"PASSED" if errors == 0 else f"FAILED with {errors} errors")

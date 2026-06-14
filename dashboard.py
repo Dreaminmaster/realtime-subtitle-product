@@ -84,6 +84,7 @@ class Dashboard(QWidget):
     stop_requested = pyqtSignal()
     model_download_status = pyqtSignal(str, str, int)
     model_download_done = pyqtSignal(str, bool, object, int)
+    progress_event = pyqtSignal(object)  # ProgressEvent — update ProgressPanel
 
     FORCE_QUIT = "force_quit"
     RETRY = "retry"
@@ -185,9 +186,16 @@ class Dashboard(QWidget):
         self.init_style_tab()
         self.init_diagnostics_tab()
         
+        # Progress panel on model tab (hidden by default)
+        from progress_panel import ProgressPanel
+        self.progress_panel = ProgressPanel()
+        self.progress_panel.setVisible(False)
+        self.layout.addWidget(self.progress_panel)
+        
         # Connect download signals (must be done after handlers are defined)
         self.model_download_status.connect(self._on_model_status)
         self.model_download_done.connect(self._on_model_done)
+        self.progress_event.connect(self.progress_panel.set_progress)
         
         # Footer Actions
         footer = QHBoxLayout()
@@ -1084,9 +1092,22 @@ class Dashboard(QWidget):
         task = DownloadTask(model_id, backend, do_download, max_attempts=3)
         self._active_downloads[model_id] = task
         
-        task.on_status(lambda s, a: self.model_download_status.emit(model_id, s, a))
+        # Wire progress channel to the associated ProgressPanel
+        from model_progress_channel import ModelProgressChannel
+        channel = ModelProgressChannel(model_id, max_attempts=3)
+        self.progress_event.emit(channel.on_start())
+        self.progress_panel.setVisible(True)
+        self.progress_panel.retry_clicked.connect(lambda: self._retry_download(model_id, backend))
+        self.progress_panel.cancel_clicked.connect(lambda: self._cancel_download(model_id))
+        task._progress_channel = channel  # store for cleanup
+        
+        task.on_status(lambda s, a: (
+            self.model_download_status.emit(model_id, s, a),
+            self._emit_channel_status(channel, s, a, None)
+        ))
         task.on_done(lambda ok, err, a: (
             self._active_downloads.pop(model_id, None),
+            self._emit_channel_done(channel, ok, err, a),
             self.model_download_done.emit(model_id, ok, err, a)
         ))
         task.on_cleanup(lambda: None)
@@ -1124,6 +1145,36 @@ class Dashboard(QWidget):
         if not ok:
             self.model_mgmt_status.setText(f"❌ {model_id}: failed after {attempt} attempts — retry?")
         self._refresh_model_list()
+    
+    def _emit_channel_status(self, channel, status, attempt, error):
+        """Translate DownloadTask status string to ProgressEvent and emit."""
+        if status == "downloading":
+            evt = channel.on_start() if attempt <= 1 else channel.on_retry(attempt)
+        elif status == "retrying":
+            evt = channel.on_retry(attempt)
+        elif status == "completed":
+            evt = channel.on_success(attempt)
+        elif status == "cancelled":
+            evt = channel.on_cancel(attempt)
+        elif status == "failed":
+            evt = channel.on_fail(error, attempt)
+        else:
+            return
+        self.progress_event.emit(evt)
+
+    def _emit_channel_done(self, channel, ok, error, attempt):
+        """Final event for progress panel."""
+        if ok:
+            self.progress_event.emit(channel.on_success(attempt))
+        else:
+            self.progress_event.emit(channel.on_fail(error, attempt))
+
+    def _retry_download(self, model_id, backend):
+        """Retry a failed download."""
+        import logging
+        log = logging.getLogger("RealtimeSubtitle")
+        log.info(f"Retry download: {model_id}")
+        self._download_model(model_id, backend)
     
     def _cancel_download(self, model_id):
         """Cancel an active download."""
