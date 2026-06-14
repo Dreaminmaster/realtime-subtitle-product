@@ -165,6 +165,18 @@ class Dashboard(QWidget):
         self.layout.setContentsMargins(20, 20, 20, 20)
         self.setLayout(self.layout)
         
+        # ---- Create UI elements BEFORE any tab that needs them ----
+        self._active_downloads = {}
+        self._progress_model_id = None
+        self._progress_backend = None
+        
+        from progress_panel import ProgressPanel
+        self.progress_panel = ProgressPanel()
+        self.progress_panel.setVisible(False)
+        self.progress_panel.retry_clicked.connect(self._retry_progress_model)
+        self.progress_panel.cancel_clicked.connect(self._cancel_progress_model)
+        self.progress_panel.dismiss_clicked.connect(self._dismiss_progress_panel)
+        
         # Header
         header = QLabel("🎙️ Realtime Subtitle")
         header.setStyleSheet("font-size: 24px; font-weight: bold; color: #89b4fa;")
@@ -185,26 +197,6 @@ class Dashboard(QWidget):
         self.init_model_tab()
         self.init_style_tab()
         self.init_diagnostics_tab()
-        
-        # Progress panel on model tab (hidden by default)
-        from progress_panel import ProgressPanel
-        self.progress_panel = ProgressPanel()
-        self.progress_panel.setVisible(False)
-        # Will be added to Models tab when init_model_tab runs
-        self._progress_panel_needs_placement = True
-        
-        # Connect once — use _progress_model_id/_progress_backend for current task
-        self.progress_panel.retry_clicked.connect(self._retry_progress_model)
-        self.progress_panel.cancel_clicked.connect(self._cancel_progress_model)
-        self.progress_panel.dismiss_clicked.connect(lambda: (
-            self.progress_panel.hide(),
-            setattr(self, '_progress_model_id', None),
-            setattr(self, '_progress_backend', None)
-        ))
-        
-        # Track current progress task to avoid signal accumulation
-        self._progress_model_id = None
-        self._progress_backend = None
         
         # Connect download signals (must be done after handlers are defined)
         self.model_download_status.connect(self._on_model_status)
@@ -984,10 +976,7 @@ class Dashboard(QWidget):
         tab.setLayout(layout)
         self.tabs.addTab(tab, "📦 Models")
         
-        if self._progress_panel_needs_placement:
-            layout.addWidget(self.progress_panel)
-            self._progress_panel_needs_placement = False
-
+        layout.addWidget(self.progress_panel)
         self.progress_panel.title.setText("Download Progress")
         
         self._refresh_model_list()
@@ -1098,16 +1087,12 @@ class Dashboard(QWidget):
             log.info(f"Model download already active: {model_id}")
             return
         
-        # Only one download at a time across all models
-        if self._active_downloads and hasattr(self, '_active_downloads'):
+        if self._active_downloads:
             log.info("Another model is already downloading — ignoring")
             return
         
         self.model_mgmt_status.setText(f"⏳ {model_id}: starting...")
         self.model_mgmt_status.setStyleSheet("color: #fab387; font-size: 12px;")
-        
-        if not hasattr(self, '_active_downloads'):
-            self._active_downloads = {}
         
         # Use SYNCHRONOUS download — DownloadTask handles retries, not nested threads
         def do_download(ctx):
@@ -1199,6 +1184,12 @@ class Dashboard(QWidget):
         else:
             self.progress_event.emit(channel.on_fail(error, attempt))
 
+    def _dismiss_progress_panel(self):
+        """Dismiss progress panel — hide and clear tracking."""
+        self.progress_panel.hide()
+        self._progress_model_id = None
+        self._progress_backend = None
+    
     def _retry_progress_model(self):
         """Retry the model currently shown in progress panel."""
         if self._progress_model_id and self._progress_backend:
