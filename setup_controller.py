@@ -20,6 +20,7 @@ class SetupController:
         self._event_cb = event_callback
         self._cancel_requested = False
         self._active_process = None
+        self._cancel_event = None  # threading.Event for model download cancel
         self._stage_map = {
             SetupStage.CHECK_SYSTEM:          self._step_check_system,
             SetupStage.CREATE_ENV:            self._step_create_env,

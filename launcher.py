@@ -17,8 +17,8 @@ class SetupWorker(QThread):
 
     def run(self):
         from setup_controller import SetupController
-        ctrl = SetupController(self._model_id, event_callback=self._on_event)
-        ok = ctrl.resume()
+        self.ctrl = SetupController(self._model_id, event_callback=self._on_event)
+        ok = self.ctrl.resume()
         self.finished.emit(ok)
 
     def _on_event(self, event):
@@ -103,9 +103,9 @@ class LauncherWindow(QMainWindow):
         self.layout.addWidget(self.label)
         
         # Progress Bar
-        self.pbar = QProgressBar()
-        self.pbar.setRange(0, 0) # Indeterminate initially
-        self.layout.addWidget(self.pbar)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 0)
+        self.layout.addWidget(self.progress_bar)
         
         # Log Label
         self.log_label = QLabel("Checking environment...")
@@ -126,6 +126,23 @@ class LauncherWindow(QMainWindow):
         QTimer.singleShot(500, self.start_check)
 
     def start_check(self):
+        # Retry / Cancel buttons
+        btn_layout = QHBoxLayout()
+        self.retry_btn = QPushButton("Retry")
+        self.retry_btn.clicked.connect(self._retry_setup)
+        self.retry_btn.setEnabled(False)
+        btn_layout.addWidget(self.retry_btn)
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.clicked.connect(self._cancel_setup)
+        btn_layout.addWidget(self.cancel_btn)
+        self.layout.addLayout(btn_layout)
+        # Launch Application button (shown on success)
+        self.launch_btn = QPushButton("Launch Application")
+        self.launch_btn.clicked.connect(self._launch_dashboard)
+        self.launch_btn.setEnabled(False)
+        self.layout.addWidget(self.launch_btn)
+        
+        self._setup_ctrl = None
         self.installer = SetupWorker("tiny")
         self.installer.stage_event.connect(self._on_stage_event)
         self.installer.finished.connect(self.on_install_finished)
@@ -137,28 +154,46 @@ class LauncherWindow(QMainWindow):
             self.progress_bar.setValue(int(event.percent))
         else:
             self.progress_bar.setRange(0, 0)
+        # Enable retry on failure
+        if event.can_retry:
+            self.retry_btn.setEnabled(True)
+            self.cancel_btn.setEnabled(False)
+        if event.can_cancel:
+            self.cancel_btn.setEnabled(True)
+            self.retry_btn.setEnabled(False)
+    
+    def _retry_setup(self):
+        self.retry_btn.setEnabled(False)
+        self.installer = SetupWorker(self._setup_ctrl.sm.model_id if self._setup_ctrl else "tiny")
+        self.installer.stage_event.connect(self._on_stage_event)
+        self.installer.finished.connect(self.on_install_finished)
+        self.installer.start()
+    
+    def _cancel_setup(self):
+        if self._setup_ctrl:
+            self._setup_ctrl.cancel()
+        self.cancel_btn.setEnabled(False)
+    
+    def _launch_dashboard(self):
+        QApplication.quit()
+        os.execv(sys.executable, [sys.executable, "main.py"])
     
     def update_log(self, message):
         self.log_label.setText(message)
 
     def on_install_finished(self, success):
-        self.pbar.setRange(0, 100)
-        self.pbar.setValue(100)
-        
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(100)
+        self._setup_ctrl = getattr(self.installer, 'ctrl', None)
         if success:
             self.log_label.setText("Ready to launch!")
             self.start_btn.show()
             self.label.setText("Initialization Complete")
-            
-            # Auto-launch after 1 second if no interaction? 
-            # Or just wait for user since they might want to see the "Ready" state.
-            # Let's auto launch for convenience.
             QTimer.singleShot(800, self.launch_main_app)
-            
         else:
             self.label.setText("Initialization Failed")
             self.log_label.setStyleSheet("color: red;")
-            QMessageBox.critical(self, "Error", "Failed to install dependencies.\nCheck console for details.")
+            self.retry_btn.setEnabled(True)
 
     def launch_main_app(self):
         self.close()
