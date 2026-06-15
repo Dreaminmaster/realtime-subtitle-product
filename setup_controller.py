@@ -8,8 +8,17 @@ RESOURCES = os.path.dirname(os.path.abspath(__file__))
 
 
 class SetupController:
-    def __init__(self, model_id="tiny"):
+    EXECUTION_ORDER = (
+        SetupStage.CHECK_SYSTEM,
+        SetupStage.CREATE_ENV,
+        SetupStage.INSTALL_DEPENDENCIES,
+        SetupStage.DOWNLOAD_MODEL,
+        SetupStage.VERIFY,
+    )
+
+    def __init__(self, model_id="tiny", event_callback=None):
         self.sm = SetupStateMachine(model_id)
+        self._event_cb = event_callback
         self._load()
         self._stage_map = {
             SetupStage.CHECK_SYSTEM:    self._step_check_system,
@@ -19,10 +28,19 @@ class SetupController:
             SetupStage.VERIFY:          self._step_verify,
         }
         self._cancel_requested = False
+        self._active_process = None
+
+    EXECUTION_ORDER = (
+        SetupStage.CHECK_SYSTEM,
+        SetupStage.CREATE_ENV,
+        SetupStage.INSTALL_DEPENDENCIES,
+        SetupStage.DOWNLOAD_MODEL,
+        SetupStage.VERIFY,
+    )
 
     def resume(self):
         """Run all incomplete stages. Returns True if all complete."""
-        for stage in list(SetupStage)[:6]:  # CHECK_SYSTEM..VERIFY
+        for stage in self.EXECUTION_ORDER:
             if stage in self.sm.completed:
                 continue
             if self._cancel_requested:
