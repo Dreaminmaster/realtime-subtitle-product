@@ -76,11 +76,13 @@ class OnlineAPITranslator(BaseTranslator):
     
     name = "Online API"
     
-    def __init__(self, target_lang="Chinese", base_url=None, api_key=None, model="gpt-3.5-turbo"):
+    def __init__(self, target_lang="Chinese", base_url=None, api_key=None, model="gpt-3.5-turbo",
+                 timeout=12.0):
         self.target_lang = target_lang
         self.model = model
         self.previous_text = ""
         self.previous_translation = ""
+        self.timeout = timeout  # total request timeout
         
         # URLs to try in order — auto-fix missing scheme
         if base_url and not base_url.startswith(("http://", "https://")):
@@ -101,8 +103,9 @@ class OnlineAPITranslator(BaseTranslator):
                 for host in ("localhost", "127.0.0.1", "::1", "0.0.0.0")
             ))
             
-            # Bounded timeouts: connect=5s, read=15s, total pool=30s
-            timeout = httpx.Timeout(connect=5.0, read=15.0, write=10.0, pool=5.0)
+            # Bounded timeouts driven by config.translation_timeout
+            t = self.timeout or 12.0
+            timeout = httpx.Timeout(connect=5.0, read=t, write=10.0, pool=5.0)
             
             if is_local:
                 http_client = httpx.Client(verify=False, timeout=timeout, trust_env=False)
@@ -152,7 +155,7 @@ class OnlineAPITranslator(BaseTranslator):
                 ],
                 temperature=0.3,
                 max_tokens=500,
-                timeout=10.0
+                timeout=self.timeout
             )
             result = response.choices[0].message.content.strip()
             result = re.sub(r'<think>.*?</think>', '', result, flags=re.DOTALL).strip()
@@ -256,7 +259,8 @@ class TranslationEngine:
                 target_lang=self.target_lang,
                 base_url=kwargs.get("base_url"),
                 api_key=kwargs.get("api_key"),
-                model=kwargs.get("model", "gpt-3.5-turbo")
+                model=kwargs.get("model", "gpt-3.5-turbo"),
+                timeout=kwargs.get("timeout", 12.0)
             )
         elif mode == "local":
             self._translator = LocalLLMTranslator(

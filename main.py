@@ -236,7 +236,8 @@ def create_pipeline():
                 trans_mode,
                 base_url=config.api_base_url,
                 api_key=config.api_key or "",
-                model=config.model
+                model=config.model,
+                timeout=getattr(config, 'translation_timeout', 12.0)
             )
             log.info(f"Pipeline: translation engine ({trans_mode}) initialized")
         
