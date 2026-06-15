@@ -36,6 +36,11 @@ class SetupWorker(QThread):
         self.stage_event.emit(event)
 
 
+# Clear PYTHONHOME inherited from shell launcher (would overrides user-venv pyvenv.cfg)
+os.environ.pop("PYTHONHOME", None)
+os.environ.pop("PYTHONPATH", None)
+
+
 class LauncherWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -128,7 +133,11 @@ class LauncherWindow(QMainWindow):
             "~/Library/Application Support/RealtimeSubtitle/venv/bin/python3")
         resources = os.path.dirname(os.path.abspath(__file__))
         main_py = os.path.join(resources, "main.py")
-        os.execv(venv_py, [venv_py, main_py])
+        env = os.environ.copy()
+        env.pop("PYTHONHOME", None)
+        env.pop("PYTHONPATH", None)
+        env["VIRTUAL_ENV"] = os.path.dirname(os.path.dirname(venv_py))
+        os.execve(venv_py, [venv_py, main_py], env)
     
     def update_log(self, message):
         self.log_label.setText(message)
@@ -143,6 +152,13 @@ class LauncherWindow(QMainWindow):
             self.launch_btn.show()
             self.retry_btn.setEnabled(False)
             self.cancel_btn.setEnabled(False)
+        elif getattr(self.installer, 'ctrl', None) and self.installer.ctrl._cancel_requested:
+            self.label.setText("Initialization Cancelled")
+            self.log_label.setStyleSheet("color: #fab387;")
+            self.retry_btn.setEnabled(True)
+            self.cancel_btn.setEnabled(False)
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(0)
         else:
             self.label.setText("Initialization Failed")
             self.log_label.setStyleSheet("color: red;")
