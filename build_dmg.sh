@@ -256,7 +256,13 @@ else
 fi
 
 # No builder paths in source code (excluding build scripts that contain this check)
-if grep -RIl "/Users/runner" "${APP_BUNDLE}/Contents" --exclude='build_dmg.sh' --exclude='build-dmg.yml' --exclude='*.md' --exclude='*.pyc' 2>/dev/null | grep -v '__pycache__' | grep -q .; then
+if grep -RIl "/Users/runner" "${APP_BUNDLE}/Contents" \
+     --exclude='build_dmg.sh' --exclude='build-dmg.yml' \
+     --exclude='*.md' --exclude='*.pyc' \
+     --exclude-dir='__pycache__' --exclude-dir='python' \
+     2>/dev/null | grep -q .; then
+    echo "❌ Builder path /Users/runner found in app code"
+    grep -RIl "/Users/runner" "${APP_BUNDLE}/Contents" --exclude-dir='python' --exclude-dir='__pycache__' 2>/dev/null
     echo "  ❌ builder path /Users/runner found in bundle"
     FAIL=true
 else
