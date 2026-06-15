@@ -180,7 +180,10 @@ jobs:
           echo "  ✅ no pre-built venv"
 
           # NO builder machine paths (exclude this workflow file itself)
-          if grep -RIl "/Users/runner" "${APP}/Contents" --exclude='build-dmg.yml' --exclude='build_dmg.sh' --exclude='*.md' --exclude='*.pyc' 2>/dev/null | grep -v '__pycache__' | grep -q .; then
+          if grep -RIl "/Users/runner" "${APP}/Contents" \
+               --exclude='build-dmg.yml' --exclude='build_dmg.sh' \
+               --exclude='*.md' --exclude='*.pyc' \
+               --exclude-dir='__pycache__' 2>/dev/null | grep -q .; then
             echo "❌ Builder path /Users/runner found in bundle"; exit 1
           fi
           echo "  ✅ no builder paths"
