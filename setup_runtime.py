@@ -39,28 +39,33 @@ def verify_model(model_id="tiny"):
         return False
 
 def download_model(model_id="tiny"):
-    """Download model. Supports cancel via SIGTERM sent by parent."""
+    """Download model. Returns True on success."""
     try:
         from model_manager import model_manager
         emit({"type":"progress","stage":"download","message":f"Downloading {model_id}..."})
         ok = model_manager.download_model_sync(model_id, "whisper")
         if ok:
             emit({"type":"download_done","model_id":model_id})
+            return True
         else:
             emit({"type":"download_fail","reason":"returned False"})
+            return False
     except Exception as e:
         emit({"type":"download_fail","reason":str(type(e).__name__)})
+        return False
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        emit({"type":"error","reason":"usage: setup_runtime.py <download-model|verify-model> [model_id]"})
-        sys.exit(1)
+        emit({"type":"error","reason":"usage"})
+        sys.exit(2)
     cmd = sys.argv[1]
-    model_id = sys.argv[2] if len(sys.argv) > 2 else "tiny"
+    mid = sys.argv[2] if len(sys.argv) > 2 else "tiny"
     if cmd == "download-model":
-        download_model(model_id)
+        ok = download_model(mid)
+        sys.exit(0 if ok else 1)
     elif cmd == "verify-model":
-        verify_model(model_id)
+        ok = verify_model(mid)
+        sys.exit(0 if ok else 1)
     else:
         emit({"type":"error","reason":f"unknown cmd {cmd}"})
-        sys.exit(1)
+        sys.exit(2)

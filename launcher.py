@@ -2,8 +2,9 @@ import sys
 import os
 import subprocess
 import configparser
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QLabel, QProgressBar, QMessageBox, QPushButton)
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+                             QHBoxLayout, QLabel, QProgressBar, QMessageBox,
+                             QPushButton)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 
 class SetupWorker(QThread):
