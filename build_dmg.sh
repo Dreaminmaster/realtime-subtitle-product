@@ -51,6 +51,14 @@ mkdir -p "${PYTHON_DIR}"
 tar xzf "${SCRIPT_DIR}/.python_cache/cpython-3.12.tar.gz" -C "${PYTHON_DIR}" --strip-components=1 2>&1
 echo "  Python: $(${PYTHON_BIN} --version 2>&1)"
 
+# ---- Step 1.5: Install PyQt6 into portable Python (bootstrap dependency) ----
+echo "[1.5/6] Installing bootstrap PyQt6 into portable Python..."
+"${PYTHON_DIR}/bin/python3" -m pip install --no-cache-dir --quiet PyQt6 2>&1 || {
+    echo "  WARNING: failed to install PyQt6 into bundled Python"
+    echo "  Launcher may not work on clean systems without PyQt6"
+}
+echo "  $( ${PYTHON_DIR}/bin/python3 -c 'import PyQt6; print("PyQt6 OK")' 2>&1 || echo 'PyQt6 FAIL' )"
+
 # ---- Step 2: Copy project source ----
 echo "[2/6] Copying source files..."
 rsync -av --exclude='.git' \

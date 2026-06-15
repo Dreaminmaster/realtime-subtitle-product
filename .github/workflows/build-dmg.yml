@@ -164,6 +164,7 @@ jobs:
             echo "❌ Portable Python MISSING at $PORTABLE_PY"; exit 1
           fi
           "$PORTABLE_PY" --version && echo "  ✅ portable python --version" || { echo "❌ Portable Python broken"; exit 1; }
+          "$PORTABLE_PY" -c "import PyQt6" && echo "  ✅ bootstrap PyQt6 present" || { echo "❌ Bootstrap PyQt6 missing"; exit 1; }
 
           # requirements-core.txt must exist
           REQ_CORE="${APP}/Contents/Resources/requirements-core.txt"
