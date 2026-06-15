@@ -69,17 +69,25 @@ class SetupController:
             self._event_cb(event)
 
     def _pre_verify_completed(self):
-        """Re-validate completed stages. Remove any that fail."""
+        """Re-validate completed stages. Cascade: failing one clears all downstream."""
         removed = []
-        verifiers = {
-            SetupStage.CREATE_ENV: self._verify_env_exists,
-            SetupStage.INSTALL_DEPENDENCIES: self._verify_deps_importable,
-            SetupStage.DOWNLOAD_MODEL: self._verify_model_on_disk,
-        }
-        for stage, fn in verifiers.items():
-            if stage in self.sm.completed and not fn():
-                self.sm.completed.discard(stage)
-                removed.append(stage)
+        stage_order = list(self.EXECUTION_ORDER)
+        for i, stage in enumerate(stage_order):
+            if stage not in self.sm.completed:
+                continue
+            verifier = {
+                SetupStage.CREATE_ENV: self._verify_env_exists,
+                SetupStage.INSTALL_DEPENDENCIES: self._verify_deps_importable,
+                SetupStage.DOWNLOAD_MODEL: self._verify_model_on_disk,
+            }.get(stage)
+            if verifier and not verifier():
+                # Cascade: clear this stage and all subsequent
+                for j in range(i, len(stage_order)):
+                    s = stage_order[j]
+                    if s in self.sm.completed:
+                        self.sm.completed.discard(s)
+                        removed.append(s)
+                break
         return len(self.sm.completed), removed
 
     def _verify_env_exists(self):
@@ -97,7 +105,13 @@ class SetupController:
             return False
 
     def _verify_model_on_disk(self):
-        return True  # model_manager handles this during download
+        """Check model is on disk and loadable."""
+        try:
+            from model_manager import model_manager
+            models = model_manager.get_models('whisper')
+            return any(m['id'] == self.sm.model_id and m['downloaded'] for m in models)
+        except Exception:
+            return False
 
     def _step_check_system(self):
         return True

@@ -6,9 +6,28 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QLabel, QProgressBar, QMessageBox, QPushButton)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 
+class SetupWorker(QThread):
+    """Runs SetupController.resume() in background. Emits stage events."""
+    stage_event = pyqtSignal(object)
+    finished = pyqtSignal(bool)
+
+    def __init__(self, model_id="tiny", parent=None):
+        super().__init__(parent)
+        self._model_id = model_id
+
+    def run(self):
+        from setup_controller import SetupController
+        ctrl = SetupController(self._model_id, event_callback=self._on_event)
+        ok = ctrl.resume()
+        self.finished.emit(ok)
+
+    def _on_event(self, event):
+        self.stage_event.emit(event)
+
+
 class DependencyInstaller(QThread):
-    progress = pyqtSignal(str) # Log message
-    finished = pyqtSignal(bool) # Success/Fail
+    progress = pyqtSignal(str)
+    finished = pyqtSignal(bool)
 
     def run(self):
         self.progress.emit("Checking dependencies...")
@@ -107,11 +126,18 @@ class LauncherWindow(QMainWindow):
         QTimer.singleShot(500, self.start_check)
 
     def start_check(self):
-        self.installer = DependencyInstaller()
-        self.installer.progress.connect(self.update_log)
+        self.installer = SetupWorker("tiny")
+        self.installer.stage_event.connect(self._on_stage_event)
         self.installer.finished.connect(self.on_install_finished)
         self.installer.start()
 
+    def _on_stage_event(self, event):
+        self.log_label.setText(f"{event.stage}: {event.message}")
+        if event.percent is not None:
+            self.progress_bar.setValue(int(event.percent))
+        else:
+            self.progress_bar.setRange(0, 0)
+    
     def update_log(self, message):
         self.log_label.setText(message)
 
