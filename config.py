@@ -42,6 +42,9 @@ class Config:
             self.translation_mode = self._get("translation", "mode", "online")
         
         # Transcription settings
+        # Translation timeout (seconds)
+        self.translation_timeout = self._getfloat("translation", "timeout", 12.0)
+        
         self.asr_backend = self._get("transcription", "backend", "whisper").lower()
         self.whisper_model = self._get("transcription", "whisper_model", "base")
         self.funasr_model = self._get("transcription", "funasr_model", "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch")
