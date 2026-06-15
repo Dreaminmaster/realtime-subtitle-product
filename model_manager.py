@@ -13,7 +13,7 @@ import os
 import sys
 import json
 import shutil
-import threading
+import threading, glob
 from pathlib import Path
 
 # Model metadata
@@ -174,20 +174,50 @@ class ModelManager:
             print(f"[ModelManager] Failed to save cache: {e}")
     
     def get_model_path(self, model_id, backend="whisper"):
-        """Return the local model snapshot dir path, or None."""
-        from pathlib import Path
-        models = self.get_models(backend)
-        for m in models:
-            if m["id"] == model_id and m.get("downloaded"):
-                mp = m.get("path")
-                if mp:
-                    return mp
-                # Fallback: construct from data_dir
-                data = Path(self.data_dir)
-                base = data / "models" / backend / model_id
-                if base.exists():
-                    return str(base)
+        """Return the real locally-cached snapshot path, or None.
+        Uses huggingface_hub local_files_only to resolve without network."""
+        if backend == "whisper":
+            repo_id = f"Systran/faster-whisper-{model_id}"
+            try:
+                from huggingface_hub import snapshot_download
+                path = snapshot_download(
+                    repo_id=repo_id,
+                    local_files_only=True,
+                )
+                if path and self._is_valid_whisper_dir(path):
+                    return path
+            except Exception:
+                pass
+            # Fallback: manual HF cache resolution
+            from pathlib import Path
+            cache_base = Path.home() / ".cache" / "huggingface" / "hub" / \
+                         f"models--Systran--faster-whisper-{model_id}"
+            if cache_base.exists():
+                snaps = cache_base / "snapshots"
+                if snaps.is_dir():
+                    for snap in sorted(snaps.iterdir(), reverse=True):
+                        if self._is_valid_whisper_dir(str(snap)):
+                            return str(snap)
         return None
+
+    @staticmethod
+    def _is_valid_whisper_dir(path):
+        """Check that path contains at least config.json + model weights."""
+        import os
+        p = os.path
+        if not p.isdir(path):
+            return False
+        has_config = p.exists(p.join(path, "config.json"))
+        # Weight files: model.bin, *.safetensors, pytorch_model.bin
+        import glob
+        weights = glob.glob(p.join(path, "*.safetensors")) or \
+                  glob.glob(p.join(path, "model.bin")) or \
+                  glob.glob(p.join(path, "pytorch_model.bin"))
+        has_weights = any(os.path.getsize(w) > 10000 for w in weights)  # >10KB
+        has_vocab = p.exists(p.join(path, "vocabulary.json")) or \
+                    p.exists(p.join(path, "vocabulary.txt")) or \
+                    p.exists(p.join(path, "tokenizer.json"))
+        return has_config and has_weights and has_vocab
 
     def get_models(self, backend="whisper") -> list:
         """Get list of available models for a backend"""

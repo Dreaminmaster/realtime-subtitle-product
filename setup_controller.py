@@ -74,20 +74,42 @@ class SetupController:
         self._kill_active_process()
         self._emit(self.sm.cancel())
 
-    def _run_process(self, cmd, timeout=300):
+    def _run_process(self, cmd, timeout=300, parse_json=False):
+        """Execute via Popen with clean env. If parse_json=True, reads JSON lines and
+        emits progress events with the last error/fail message on failure."""
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 env=_child_env())
         with self._process_lock:
             self._active_process = proc
+        last_error = ""
         try:
-            try:
-                _out, _err = proc.communicate(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                self._kill_process(proc)
-                return False
+            if parse_json:
+                for line in proc.stdout:
+                    try:
+                        event = json.loads(line.decode().strip())
+                        t = event.get("type", "")
+                        if t in ("download_fail","verify_fail","error"):
+                            last_error = event.get("reason", t)
+                        elif t in ("progress","download_done","verify_pass"):
+                            pass  # handled if needed in future
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        pass
+                proc.wait(timeout=timeout)
+            else:
+                try:
+                    _out, _err = proc.communicate(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    self._kill_process(proc)
+                    return False
             if self._cancel_requested:
                 return False
-            return proc.returncode == 0
+            ok = proc.returncode == 0
+            if not ok and last_error:
+                self._emit(self.sm.fail_stage(last_error))
+            return ok
+        except subprocess.TimeoutExpired:
+            self._kill_process(proc)
+            return False
         except OSError:
             return False
         finally:
@@ -154,13 +176,13 @@ class SetupController:
         rt = os.path.join(RESOURCES,"setup_runtime.py")
         if not os.path.exists(rt) or not os.path.exists(VENV_PYTHON):
             return False
-        return self._run_process([VENV_PYTHON,rt,"download-model",self.sm.model_id],600)
+        return self._run_process([VENV_PYTHON,rt,"download-model",self.sm.model_id],600,parse_json=True)
 
     def _step_verify(self):
         rt = os.path.join(RESOURCES,"setup_runtime.py")
         if not os.path.exists(rt) or not os.path.exists(VENV_PYTHON):
             return False
-        return self._run_process([VENV_PYTHON,rt,"verify-model",self.sm.model_id],120)
+        return self._run_process([VENV_PYTHON,rt,"verify-model",self.sm.model_id],120,parse_json=True)
 
     def _pre_verify_completed(self):
         removed = []
@@ -178,7 +200,7 @@ class SetupController:
             elif stage == SetupStage.DOWNLOAD_MODEL:
                 rt = os.path.join(RESOURCES,"setup_runtime.py")
                 if os.path.exists(rt) and os.path.exists(VENV_PYTHON):
-                    fail = not self._run_process([VENV_PYTHON,rt,"verify-model",self.sm.model_id],30)
+                    fail = not self._run_process([VENV_PYTHON,rt,"verify-model",self.sm.model_id],30,parse_json=True)
             if fail:
                 for j in range(i,len(order)):
                     s = order[j]
