@@ -159,52 +159,36 @@ class SetupController:
             return False
 
     def _step_install_deps(self):
-        venv_dir = os.path.expanduser(
-            "~/Library/Application Support/RealtimeSubtitle/venv")
-        pip = os.path.join(venv_dir, "bin", "pip")
+        pip = os.path.join(VENV_DIR, "bin", "pip")
         req = os.path.join(RESOURCES, "requirements-core.txt")
         if not os.path.exists(req):
             return False
-        try:
-            subprocess.run([pip, "install", "--no-cache-dir", "--upgrade", "pip"],
-                           check=True, capture_output=True, timeout=60)
-            self._active_process = subprocess.Popen(
-                [pip, "install", "--no-cache-dir", "-r", req],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            _out, _err = self._active_process.communicate(timeout=300)
-            if self._active_process.returncode != 0:
-                return False
-            for pkg in CORE_PACKAGES:
-                subprocess.run([os.path.join(venv_dir, "bin", "python3"),
-                                "-c", f"import {pkg}"],
-                               check=True, capture_output=True, timeout=15)
-            return True
-        except subprocess.SubprocessError:
+        if not self._run_process([pip, "install", "--no-cache-dir", "--upgrade", "pip"], timeout=60):
             return False
-        finally:
-            self._active_process = None
+        if self._cancel_requested:
+            return False
+        if not self._run_process([pip, "install", "--no-cache-dir", "-r", req], timeout=600):
+            return False
+        for pkg in CORE_PACKAGES:
+            if not self._run_process([VENV_PYTHON, "-c", f"import {pkg}"], timeout=15):
+                return False
+            if self._cancel_requested:
+                return False
+        return True
 
     def _step_download_model(self):
-        from model_manager import model_manager
-        try:
-            model_manager.download_model_sync(
-                self.sm.model_id, "whisper", cancel_event=self._cancel_event)
-            success = model_manager.get_models("whisper")
-            ok = any(m["id"] == self.sm.model_id and m["downloaded"] for m in success)
-            return ok
-        except Exception:
+        runtime = os.path.join(RESOURCES, "setup_runtime.py")
+        if not os.path.exists(runtime) or not os.path.exists(VENV_PYTHON):
             return False
+        return self._run_process(
+            [VENV_PYTHON, runtime, "download-model", self.sm.model_id], timeout=600)
 
     def _step_verify(self):
-        venv_dir = os.path.expanduser(
-            "~/Library/Application Support/RealtimeSubtitle/venv")
-        py = os.path.join(venv_dir, "bin", "python3")
-        try:
-            subprocess.run([py, "-c", "import " + ", ".join(CORE_PACKAGES)],
-                           check=True, capture_output=True, timeout=10)
-            return True
-        except subprocess.SubprocessError:
+        runtime = os.path.join(RESOURCES, "setup_runtime.py")
+        if not os.path.exists(runtime) or not os.path.exists(VENV_PYTHON):
             return False
+        return self._run_process(
+            [VENV_PYTHON, runtime, "verify-model", self.sm.model_id], timeout=120)
 
     def _save(self):
         data = {"schema_version": 1,
