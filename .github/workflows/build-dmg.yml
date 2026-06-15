@@ -190,16 +190,20 @@ jobs:
           fi
           echo "  ✅ no pre-built venv"
 
-          # NO builder machine paths (exclude this workflow file itself)
+          # NO builder machine paths in our code or Resource/*.py
+          # NOTE: portable Python's own _sysconfigdata.py may contain /Users/runner
+          # because it's the Python-build-standalone prefix. We exclude python/ dir.
+          # Launcher overrides PYTHONHOME at runtime so this never affects users.
           if grep -RIl "/Users/runner" "${APP}/Contents" \
                --exclude='build-dmg.yml' --exclude='build_dmg.sh' \
                --exclude='*.md' --exclude='*.pyc' \
-               --exclude-dir='__pycache__' 2>/dev/null | grep -q .; then
-            echo "❌ Builder path /Users/runner found in bundle"; exit 1
+               --exclude-dir='__pycache__' --exclude-dir='python' \
+               2>/dev/null | grep -q .; then
+            echo "❌ Builder path /Users/runner found in our app code"
+            grep -RIl "/Users/runner" "${APP}/Contents" --exclude-dir='python' --exclude-dir='__pycache__' 2>/dev/null
+            exit 1
           fi
-          echo "  ✅ no builder paths"
-
-          echo "  ℹ️  /install in portable Python sysconfig is expected (overridden by launcher)"
+          echo "  ✅ no builder paths in app code"
 
           # ---- Simulated first-launch: install core deps ----
           echo ""
