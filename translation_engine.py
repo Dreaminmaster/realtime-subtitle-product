@@ -115,7 +115,8 @@ class OnlineAPITranslator(BaseTranslator):
             self._client = OpenAI(
                 api_key=self.api_key or os.getenv("OPENAI_API_KEY", "dummy-key"),
                 base_url=self.base_url or os.getenv("OPENAI_BASE_URL"),
-                http_client=http_client
+                http_client=http_client,
+                max_retries=0  # No SDK retry — we control timeout at httpx level
             )
         return self._client
     
@@ -197,9 +198,9 @@ class LocalLLMTranslator(OnlineAPITranslator):
     name = "Local LLM"
     
     def __init__(self, target_lang="Chinese", base_url="http://localhost:1234/v1", 
-                 api_key="not-needed", model="local-model"):
+                 api_key="not-needed", model="local-model", timeout=12.0):
         super().__init__(target_lang=target_lang, base_url=base_url, 
-                        api_key=api_key, model=model)
+                        api_key=api_key, model=model, timeout=timeout)
 
 
 class CustomAPITranslator(OnlineAPITranslator):
@@ -207,9 +208,9 @@ class CustomAPITranslator(OnlineAPITranslator):
     
     name = "Custom API"
     
-    def __init__(self, target_lang="Chinese", base_url=None, api_key=None, model=None):
+    def __init__(self, target_lang="Chinese", base_url=None, api_key=None, model=None, timeout=12.0):
         super().__init__(target_lang=target_lang, base_url=base_url,
-                        api_key=api_key, model=model or "gpt-3.5-turbo")
+                        api_key=api_key, model=model or "gpt-3.5-turbo", timeout=timeout)
 
 
 class NoopTranslator(BaseTranslator):
@@ -266,14 +267,16 @@ class TranslationEngine:
             self._translator = LocalLLMTranslator(
                 target_lang=self.target_lang,
                 base_url=kwargs.get("base_url", "http://localhost:1234/v1"),
-                model=kwargs.get("model", "local-model")
+                model=kwargs.get("model", "local-model"),
+                timeout=kwargs.get("timeout", 12.0)
             )
         elif mode == "custom":
             self._translator = CustomAPITranslator(
                 target_lang=self.target_lang,
                 base_url=kwargs.get("base_url"),
                 api_key=kwargs.get("api_key"),
-                model=kwargs.get("model")
+                model=kwargs.get("model"),
+                timeout=kwargs.get("timeout", 12.0)
             )
         
         self._translators[mode] = self._translator

@@ -43,7 +43,12 @@ class Config:
         
         # Transcription settings
         # Translation timeout (seconds)
-        self.translation_timeout = self._getfloat("translation", "timeout", 12.0)
+        try:
+            self.translation_timeout = self._getfloat("translation", "timeout", 12.0)
+            if self.translation_timeout <= 0 or self.translation_timeout > 120:
+                self.translation_timeout = 12.0
+        except (ValueError, TypeError):
+            self.translation_timeout = 12.0
         
         self.asr_backend = self._get("transcription", "backend", "whisper").lower()
         self.whisper_model = self._get("transcription", "whisper_model", "base")
