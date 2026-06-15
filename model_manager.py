@@ -173,6 +173,22 @@ class ModelManager:
         except Exception as e:
             print(f"[ModelManager] Failed to save cache: {e}")
     
+    def get_model_path(self, model_id, backend="whisper"):
+        """Return the local model snapshot dir path, or None."""
+        from pathlib import Path
+        models = self.get_models(backend)
+        for m in models:
+            if m["id"] == model_id and m.get("downloaded"):
+                mp = m.get("path")
+                if mp:
+                    return mp
+                # Fallback: construct from data_dir
+                data = Path(self.data_dir)
+                base = data / "models" / backend / model_id
+                if base.exists():
+                    return str(base)
+        return None
+
     def get_models(self, backend="whisper") -> list:
         """Get list of available models for a backend"""
         if backend == "mlx":

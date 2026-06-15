@@ -8,17 +8,28 @@ def emit(event):
 
 def verify_model(model_id="tiny"):
     """Verify model is on disk and loadable via faster-whisper."""
+    import glob
     try:
         from model_manager import model_manager
-        models = model_manager.get_models("whisper")
-        m = next((x for x in models if x["id"] == model_id), None)
-        if not m or not m.get("downloaded"):
-            emit({"type":"verify_fail","reason":"cache_not_downloaded"})
-            return False
         ckpt = model_manager.get_model_path(model_id, "whisper")
-        if not ckpt or not os.path.isdir(ckpt):
-            emit({"type":"verify_fail","reason":"path_missing"})
-            return False
+        if not ckpt:
+            models = model_manager.get_models("whisper")
+            m = next((x for x in models if x["id"] == model_id), None)
+            if not m or not m.get("downloaded"):
+                emit({"type":"verify_fail","reason":"cache_not_downloaded"})
+                return False
+            # Fallback: try known paths
+            candidates = [
+                os.path.join(model_manager.data_dir, "models", "whisper", model_id),
+                os.path.join(model_manager.data_dir, model_id),
+            ]
+            for cand in candidates:
+                if os.path.isdir(cand):
+                    ckpt = cand
+                    break
+            if not ckpt:
+                emit({"type":"verify_fail","reason":"path_missing"})
+                return False
         # Check that at least one model file > 1KB exists (not just .lock/.tmp)
         import glob
         files = glob.glob(os.path.join(ckpt, "**", "*"), recursive=True)
