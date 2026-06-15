@@ -169,6 +169,11 @@ jobs:
           echo "  ✅ purged __pycache__ from bundle"
 
           # Verify python
+          "$PORTABLE_PY" --version &&           # Purge __pycache__ AND dist-info (pip embeds runner paths)
+          find "${APP}/Contents" -type d \( -name '__pycache__' -o -name '*.dist-info' \) -exec rm -rf {} + 2>/dev/null || true
+          find "${APP}/Contents" -name '*.pyc' -delete 2>/dev/null || true
+          echo "  ✅ cleaned bundled Python metadata"
+          
           "$PORTABLE_PY" --version && echo "  ✅ portable python --version" || { echo "❌ Portable Python broken"; exit 1; }
           "$PORTABLE_PY" -c "import PyQt6" && echo "  ✅ bootstrap PyQt6 present" || { echo "❌ Bootstrap PyQt6 missing"; exit 1; }
 
