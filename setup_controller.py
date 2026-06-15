@@ -16,11 +16,12 @@ class SetupController:
                        SetupStage.VERIFY)
 
     def __init__(self, model_id="tiny", event_callback=None):
+        import threading
         self.sm = SetupStateMachine(model_id)
         self._event_cb = event_callback
         self._cancel_requested = False
         self._active_process = None
-        self._cancel_event = None  # threading.Event for model download cancel
+        self._cancel_event = threading.Event()  # for model download cancel
         self._stage_map = {
             SetupStage.CHECK_SYSTEM:          self._step_check_system,
             SetupStage.CREATE_ENV:            self._step_create_env,
@@ -55,12 +56,12 @@ class SetupController:
 
     def cancel(self):
         self._cancel_requested = True
+        self._cancel_event.set()
         if self._active_process and self._active_process.poll() is None:
             self._active_process.terminate()
-            try:
-                self._active_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self._active_process.kill()
+            try: self._active_process.wait(timeout=5)
+            except subprocess.TimeoutExpired: self._active_process.kill()
+        self._active_process = None
         self._emit(self.sm.cancel())
 
     # ---- internal ----
@@ -106,16 +107,41 @@ class SetupController:
             return False
 
     def _verify_model_on_disk(self):
-        """Check model is on disk and loadable."""
+        """Check model dir exists, has key files, and is loadable."""
         try:
             from model_manager import model_manager
             models = model_manager.get_models('whisper')
-            return any(m['id'] == self.sm.model_id and m['downloaded'] for m in models)
+            m = next((x for x in models if x['id'] == self.sm.model_id), None)
+            if not m or not m.get('downloaded'):
+                return False
+            ckpt = model_manager.get_model_path(self.sm.model_id, 'whisper')
+            if not ckpt or not os.path.isdir(ckpt):
+                return False
+            for _root, _dirs, files in os.walk(ckpt):
+                if files: return True
+            return False
         except Exception:
             return False
 
     def _step_check_system(self):
-        return True
+        """Verify minimum system requirements."""
+        import platform, shutil
+        try:
+            assert platform.system() == "Darwin", "macOS required"
+            assert platform.machine() in ("arm64","aarch64"), "Apple Silicon required"
+            bundled_py = os.path.join(RESOURCES, "python", "bin", "python3")
+            assert os.access(bundled_py, os.X_OK), f"Bundled Python not executable: {bundled_py}"
+            req_file = os.path.join(RESOURCES, "requirements-core.txt")
+            assert os.path.isfile(req_file), f"requirements-core.txt missing: {req_file}"
+            app_support = os.path.expanduser("~/Library/Application Support/RealtimeSubtitle")
+            os.makedirs(app_support, exist_ok=True)
+            assert os.access(app_support, os.W_OK), f"Application Support not writable: {app_support}"
+            free_gb = shutil.disk_usage(app_support).free / (1024**3)
+            assert free_gb > 1.0, f"Low disk space: {free_gb:.1f} GB free"
+            return True
+        except AssertionError as e:
+            self._emit(self.sm.fail_stage(str(e)))
+            return False
 
     def _step_create_env(self):
         venv_dir = os.path.expanduser(
@@ -161,8 +187,11 @@ class SetupController:
     def _step_download_model(self):
         from model_manager import model_manager
         try:
-            model_manager.download_model_sync(self.sm.model_id, "whisper")
-            return True
+            model_manager.download_model_sync(
+                self.sm.model_id, "whisper", cancel_event=self._cancel_event)
+            success = model_manager.get_models("whisper")
+            ok = any(m["id"] == self.sm.model_id and m["downloaded"] for m in success)
+            return ok
         except Exception:
             return False
 

@@ -72,14 +72,13 @@ echo "[3/6] Creating launcher..."
 cat > "${MACOS_DIR}/realtime-subtitle" << 'LAUNCHER'
 #!/bin/bash
 # =============================================================================
-# Realtime Subtitle Launcher
-# Uses bundled portable Python. Creates venv in user's Application Support
-# on first launch — NEVER pre-built on the build machine.
+# Realtime Subtitle Launcher (v2.3.1)
+# Bootstraps bundled Python → launcher.py → SetupController → Dashboard.
+# Shell does NOT create venv or install deps — SetupController handles that.
 # =============================================================================
 
 set -e
 
-# Resolve app directory
 while [ -h "$0" ]; do
     DIR="$(cd -P "$(dirname "$0")" && pwd)"
     SCRIPT="$(readlink "$0")"
@@ -88,10 +87,6 @@ done
 APP_DIR="$(cd -P "$(dirname "$0")/../.." && pwd)"
 RESOURCES="${APP_DIR}/Contents/Resources"
 BUNDLED_PYTHON="${RESOURCES}/python/bin/python3"
-
-# User runtime directories
-APP_SUPPORT="${HOME}/Library/Application Support/RealtimeSubtitle"
-VENV_DIR="${APP_SUPPORT}/venv"
 LOG_DIR="${HOME}/Library/Logs/RealtimeSubtitle"
 LOG_FILE="${LOG_DIR}/launcher.log"
 
@@ -101,120 +96,21 @@ exec 2>>"$LOG_FILE"
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG_FILE"; }
 alert() { osascript -e "display dialog \"$1\" buttons {\"OK\"} default button 1 with icon stop"; }
 
-log "=== Launcher started ==="
-log "APP_DIR: $APP_DIR"
-log "BUNDLED_PYTHON: $BUNDLED_PYTHON"
+log "=== Bootstrap started ==="
 
-# Check bundled Python
+# Verify bundled Python
 if [ ! -x "$BUNDLED_PYTHON" ]; then
-    log "ERROR: Bundled Python not found at $BUNDLED_PYTHON"
-    alert "App bundle is incomplete.\n\nBundled Python is missing.\nPlease re-download from GitHub Releases."
+    alert "App bundle is incomplete.\n\nBundled Python is missing.\nPlease re-download."
     exit 1
 fi
 log "Bundled Python: $($BUNDLED_PYTHON --version 2>&1)"
 
-# ---- First-launch or repair: create/verify venv in user directory ----
-VENV_PYTHON="${VENV_DIR}/bin/python3"
-SETUP_MARKER="${APP_SUPPORT}/.setup_complete"
-
-if [ ! -x "$VENV_PYTHON" ] || [ ! -f "$SETUP_MARKER" ]; then
-    # Venv exists but setup was incomplete (e.g. pip failed previously)
-    if [ -d "$VENV_DIR" ]; then
-        log "WARNING: Broken/incomplete venv detected, removing..."
-        rm -rf "$VENV_DIR"
-    fi
-    rm -f "$SETUP_MARKER"
-    log "=== First launch setup ==="
-    echo "============================================"
-    echo "  Realtime Subtitle — First Launch Setup"
-    echo "  Log: $LOG_FILE"
-    echo "============================================"
-    echo ""
-    
-    mkdir -p "$APP_SUPPORT"
-    
-    echo "→ Creating Python environment..."
-    log "Creating venv at $VENV_DIR"
-    "$BUNDLED_PYTHON" -m venv --copies "$VENV_DIR" 2>&1 | tee -a "$LOG_FILE"
-    if [ ${PIPESTATUS[0]} -ne 0 ]; then
-        log "ERROR: venv creation failed"
-        rm -rf "$VENV_DIR"
-        alert "Failed to create Python environment.\n\nCheck log:\n$LOG_FILE"
-        exit 1
-    fi
-    echo "  ✓ venv created"
-    
-    echo "→ Installing dependencies (this may take a few minutes)..."
-    echo "→ DO NOT close this window."
-    log "Upgrading pip..."
-    "$VENV_PYTHON" -m pip install --no-cache-dir --quiet --upgrade pip >> "$LOG_FILE" 2>&1 || true
-    
-    REQ_FILE="${RESOURCES}/requirements-core.txt"
-    SETUP_READY=false
-    if [ -f "$REQ_FILE" ]; then
-        log "Installing from requirements-core.txt"
-        "$VENV_PYTHON" -m pip install --no-cache-dir -r "$REQ_FILE" >> "$LOG_FILE" 2>&1
-        PIP_EXIT=$?
-        
-        if [ $PIP_EXIT -ne 0 ]; then
-            # Retry once for transient network errors
-            log "WARNING: pip install failed (exit $PIP_EXIT), retrying once..."
-            "$VENV_PYTHON" -m pip install --no-cache-dir -r "$REQ_FILE" 2>&1 | tee -a "$LOG_FILE"
-            PIP_EXIT=$?
-        fi
-
-        if [ $PIP_EXIT -eq 0 ]; then
-            # Verify core imports actually work
-            log "Verifying core imports..."
-            if "$VENV_PYTHON" -c "import PyQt6, numpy, sounddevice, httpx, openai, faster_whisper" 2>&1 >> "$LOG_FILE"; then
-                SETUP_READY=true
-                log "Core imports verified"
-            else
-                log "ERROR: core imports verification failed"
-            fi
-        else
-            log "ERROR: pip install failed (exit $PIP_EXIT)"
-        fi
-
-        if [ "$SETUP_READY" = true ]; then
-            echo "  ✓ Dependencies installed"
-            touch "${APP_SUPPORT}/.setup_complete"
-        else
-            echo "  ✗ Setup failed"
-            echo ""
-            log "ERROR: Setup incomplete. Removing broken venv."
-            rm -rf "$VENV_DIR"
-            rm -f "${APP_SUPPORT}/.setup_complete"
-            alert "Dependency installation failed.\n\nThis may be a network issue.\n\nPlease check your internet connection and try again.\n\nLog: $LOG_FILE"
-            exit 1
-        fi
-    else
-        log "ERROR: requirements-core.txt not found in app bundle"
-        alert "App bundle is incomplete.\n\nrequirements-core.txt is missing.\nPlease re-download from GitHub Releases."
-        exit 1
-    fi
-    
-    echo ""
-    echo "============================================"
-    echo "  Setup complete! Starting app..."
-    echo "============================================"
-    echo ""
-    log "=== Setup complete ==="
-fi
-
-# Final pre-launch check: PyQt6 must be importable
-if ! "$VENV_PYTHON" -c "import PyQt6" 2>/dev/null; then
-    log "ERROR: PyQt6 not importable — setup may be incomplete"
-    alert "PyQt6 is not installed.\n\nPlease run Repair Environment from Diagnostics,\nor delete:\n  $APP_SUPPORT\nand re-launch."
-    exit 1
-fi
-
-log "Launching: $VENV_PYTHON main.py"
+# Override portable Python's /install prefix
+export PYTHONHOME="${RESOURCES}/python"
 cd "$RESOURCES"
 
-# Override portable Python's built-in /install prefix with the actual bundle path
-export PYTHONHOME="${RESOURCES}/python"
-exec "$VENV_PYTHON" main.py "$@"
+# Launch the setup/dashboard UI — all setup logic lives in Python, not here.
+exec "$BUNDLED_PYTHON" launcher.py "$@"
 LAUNCHER
 
 chmod +x "${MACOS_DIR}/realtime-subtitle"
