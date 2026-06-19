@@ -79,6 +79,8 @@ class SetupController:
         emits progress events with the last error/fail message on failure."""
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 env=_child_env())
+        from diagnostic_logger import log_diagnostic
+        log_diagnostic("process", "spawned", command=" ".join(cmd[:4]), timeout=timeout)
         with self._process_lock:
             self._active_process = proc
         last_error = ""
@@ -211,6 +213,10 @@ class SetupController:
         return len(self.sm.completed), removed
 
     def _emit(self, event):
+        from diagnostic_logger import log_diagnostic
+        stage_name = str(getattr(event, 'stage', 'event'))
+        msg = str(getattr(event, 'message', ''))
+        log_diagnostic(stage_name, msg)
         if self._event_cb:
             self._event_cb(event)
 

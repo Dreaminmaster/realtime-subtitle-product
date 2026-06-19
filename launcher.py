@@ -1,5 +1,23 @@
 import sys
 import os
+
+# Handle CLI flags BEFORE PyQt6 import (avoids unnecessary GUI dependencies)
+if "--version" in sys.argv:
+    try:
+        from version import BUILD_VERSION, BUILD_COMMIT
+        print(f"Realtime Subtitle v{BUILD_VERSION} (commit {BUILD_COMMIT})")
+    except ImportError:
+        print("Realtime Subtitle (dev build)")
+    sys.exit(0)
+
+if "--diagnose" in sys.argv:
+    from diagnostic_logger import write_full_report, get_system_info
+    info = get_system_info()
+    info["app_version"] = "v2.3.1-rc9"
+    info["python"] = sys.version.split()[0]
+    print(write_full_report())
+    sys.exit(0)
+
 import subprocess
 import configparser
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
@@ -94,6 +112,15 @@ class LauncherWindow(QMainWindow):
         self.cancel_btn = QPushButton("Cancel")
         self.cancel_btn.clicked.connect(self._cancel_setup)
         btn_layout.addWidget(self.cancel_btn)
+        self.diag_btn = QPushButton("Copy Diagnostics")
+        self.diag_btn.setStyleSheet(self._btn_style("#f9e2af"))
+        self.diag_btn.clicked.connect(self._copy_diagnostics)
+        self.diag_btn.hide()
+        btn_layout.addWidget(self.diag_btn)
+        self.log_btn = QPushButton("Open Logs")
+        self.log_btn.clicked.connect(self._open_logs)
+        self.log_btn.hide()
+        btn_layout.addWidget(self.log_btn)
         self.layout.addLayout(btn_layout)
         
         self._setup_ctrl = None
@@ -103,18 +130,18 @@ class LauncherWindow(QMainWindow):
         self.installer.start()
 
     def _on_stage_event(self, event):
-        self.log_label.setText(f"{event.stage}: {event.message}")
-        if event.percent is not None:
-            self.progress_bar.setValue(int(event.percent))
+        from diagnostic_logger import log_diagnostic
+        log_diagnostic(str(getattr(event,'stage','unknown')), str(getattr(event,'message','')))
+        self._last_event = event
+        self.log_label.setText(f"{getattr(event,'stage','')}: {getattr(event,'message','')}")
+        if getattr(event,'percent',None) is not None:
+            self.progress_bar.setRange(0,100); self.progress_bar.setValue(int(event.percent))
         else:
-            self.progress_bar.setRange(0, 0)
-        # Enable retry on failure
-        if event.can_retry:
-            self.retry_btn.setEnabled(True)
-            self.cancel_btn.setEnabled(False)
-        if event.can_cancel:
-            self.cancel_btn.setEnabled(True)
-            self.retry_btn.setEnabled(False)
+            self.progress_bar.setRange(0,0)
+        if getattr(event,'can_retry',False):
+            self.retry_btn.setEnabled(True); self.cancel_btn.setEnabled(False); self.diag_btn.show()
+        if getattr(event,'can_cancel',False):
+            self.cancel_btn.setEnabled(True); self.retry_btn.setEnabled(False); self.diag_btn.hide()
     
     def _retry_setup(self):
         self.retry_btn.setEnabled(False)
@@ -127,6 +154,21 @@ class LauncherWindow(QMainWindow):
         self.installer.cancel()
         self.cancel_btn.setEnabled(False)
     
+    def _copy_diagnostics(self):
+        from diagnostic_logger import write_full_report
+        QApplication.clipboard().setText(write_full_report())
+        self.diag_btn.setText("Copied!")
+        QTimer.singleShot(1500, lambda: self.diag_btn.setText("Copy Diagnostics"))
+
+    def _open_logs(self):
+        log_dir = os.path.expanduser("~/Library/Logs/RealtimeSubtitle")
+        import subprocess
+        subprocess.Popen(["open", log_dir])
+
+    def _btn_style(self, color):
+        return (f"QPushButton {{ background: {color}; color: #1e1e2e; "
+                f"padding: 6px 14px; border-radius: 4px; font-weight: bold; }}")
+
     def _launch_dashboard(self):
         QApplication.quit()
         venv_py = os.path.expanduser(
@@ -163,14 +205,15 @@ class LauncherWindow(QMainWindow):
             self.label.setText("Initialization Failed")
             self.log_label.setStyleSheet("color: red;")
             self.retry_btn.setEnabled(True)
+            self.cancel_btn.setEnabled(False)
+            self.diag_btn.show()
+            self.log_btn.show()
 
 if __name__ == "__main__":
+    from diagnostic_logger import log_diagnostic
+    log_diagnostic("launcher", "Bootstrap started")
     app = QApplication(sys.argv)
-    
-    # Modern Styling for Launcher
     app.setStyle("Fusion")
-    
     launcher = LauncherWindow()
     launcher.show()
-    
     sys.exit(app.exec())
