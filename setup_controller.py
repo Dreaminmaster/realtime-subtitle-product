@@ -203,31 +203,72 @@ class SetupController:
         return self._run_process([bundled,"-m","venv","--copies",VENV_DIR],timeout=120)
 
     def _step_install_deps(self):
+        """Install pip dependencies in 4 sub-steps.
+        pip upgrade failure is non-blocking (warning, continue)."""
+        stage_label = "Install dependencies"
         req = os.path.join(RESOURCES, "requirements-core.txt")
         if not os.path.exists(req):
             self._last_error = "requirements-core.txt not found in app bundle"
             return False
-        
-        # Step 1: upgrade pip (use venv python3 -m pip, not bare pip binary)
+
+        # 1. Check pip — blocking
+        self._emit_progress(stage_label, "Check pip…")
+        self._last_error = None
         if not self._run_process(
-            [VENV_PYTHON, "-m", "pip", "install", "--no-cache-dir", "--upgrade", "pip"],
-            timeout=60
+            [VENV_PYTHON, "-m", "pip", "--version"],
+            timeout=30
         ):
-            self._last_error = "pip upgrade failed: " + (self._last_error or "unknown error")
+            self._last_error = "pip not available: " + (self._last_error or "unknown error")
             return False
+        self._emit_progress(stage_label, "Check pip ✓")
         if self._cancel_requested:
             return False
-        
-        # Step 2: install dependencies from requirements-core.txt
+
+        # 2. Optional pip upgrade — non-blocking, warn on failure
+        self._emit_progress(stage_label, "Optional pip upgrade…")
+        upgrade_ok = self._run_process(
+            [VENV_PYTHON, "-m", "pip", "install",
+             "--disable-pip-version-check", "--no-input",
+             "--upgrade", "pip"],
+            timeout=180
+        )
+        if not upgrade_ok:
+            warning = "pip upgrade failed: " + (self._last_error or "unknown error") + \
+                      ", continuing with existing pip"
+            self._emit_progress(stage_label, "⚠ " + warning)
+            self._last_error = None  # clear, don't propagate
+        else:
+            self._emit_progress(stage_label, "Optional pip upgrade ✓")
+        if self._cancel_requested:
+            return False
+
+        # 3. Install requirements-core.txt — blocking
+        self._emit_progress(stage_label, "Install requirements-core.txt…")
+        self._last_error = None
         if not self._run_process(
-            [VENV_PYTHON, "-m", "pip", "install", "--no-cache-dir", "-r", req],
+            [VENV_PYTHON, "-m", "pip", "install",
+             "--disable-pip-version-check", "--no-input",
+             "-r", req],
             timeout=600
         ):
             self._last_error = "dependency install failed: " + (self._last_error or "unknown error")
             return False
+        self._emit_progress(stage_label, "Install requirements-core.txt ✓")
         if self._cancel_requested:
             return False
-        
+
+        # 4. Verify critical imports — blocking
+        self._emit_progress(stage_label, "Verify imports…")
+        self._last_error = None
+        if not self._run_process(
+            [VENV_PYTHON, "-c",
+             "for m in ['faster_whisper','PyQt6','numpy','httpx']: __import__(m); print('OK')"],
+            timeout=60
+        ):
+            self._last_error = "import verification failed: " + (self._last_error or "critical modules not importable")
+            return False
+        self._emit_progress(stage_label, "Verify imports ✓")
+
         self._saved_requirements_hash = _requirements_fingerprint()
         return True
 
@@ -276,6 +317,21 @@ class SetupController:
         log_diagnostic(stage_name, msg)
         if self._event_cb:
             self._event_cb(event)
+
+    def _emit_progress(self, stage_label, message):
+        """Emit a sub-step progress event within the current stage."""
+        from progress_events import ProgressEvent
+        from setup_states import TOTAL_STAGES
+        idx = SetupStage.INSTALL_DEPENDENCIES.value
+        event = ProgressEvent(
+            task_id="setup",
+            stage=stage_label,
+            message=message,
+            stage_index=idx,
+            total_stages=TOTAL_STAGES,
+            can_cancel=True
+        )
+        self._emit(event)
 
     def _save(self):
         data = {"schema_version":1,
