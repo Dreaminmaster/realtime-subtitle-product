@@ -13,7 +13,7 @@ if "--version" in sys.argv:
 if "--diagnose" in sys.argv:
     from diagnostic_logger import write_full_report, get_system_info
     info = get_system_info()
-    info["app_version"] = "v2.3.1-rc9"
+    info["app_version"] = "v2.3.1-rc10"
     info["python"] = sys.version.split()[0]
     print(write_full_report())
     sys.exit(0)
@@ -130,8 +130,7 @@ class LauncherWindow(QMainWindow):
         self.installer.start()
 
     def _on_stage_event(self, event):
-        from diagnostic_logger import log_diagnostic
-        log_diagnostic(str(getattr(event,'stage','unknown')), str(getattr(event,'message','')))
+        # Diagnostic logging is handled by SetupController._emit — do not double-log
         self._last_event = event
         self.log_label.setText(f"{getattr(event,'stage','')}: {getattr(event,'message','')}")
         if getattr(event,'percent',None) is not None:

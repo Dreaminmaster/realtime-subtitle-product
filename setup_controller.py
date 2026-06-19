@@ -8,7 +8,6 @@ RESOURCES = os.path.dirname(os.path.abspath(__file__))
 APP_SUPPORT = os.path.expanduser("~/Library/Application Support/RealtimeSubtitle")
 VENV_DIR = os.path.join(APP_SUPPORT, "venv")
 VENV_PYTHON = os.path.join(VENV_DIR, "bin", "python3")
-CORE_PACKAGES = ("PyQt6","numpy","sounddevice","faster_whisper","httpx","openai")
 
 def _child_env():
     env = os.environ.copy()
@@ -39,6 +38,7 @@ class SetupController:
         self._process_lock = threading.Lock()
         self._cancel_event = threading.Event()
         self._saved_requirements_hash = None
+        self._last_error = None
         self._stage_map = {
             SetupStage.CHECK_SYSTEM: self._step_check_system,
             SetupStage.CREATE_ENV: self._step_create_env,
@@ -55,12 +55,14 @@ class SetupController:
                 continue
             if self._cancel_requested:
                 return False
+            self._last_error = None
             self._emit(self.sm.begin_stage(stage))
             ok = self._stage_map[stage]()
             if self._cancel_requested or self._cancel_event.is_set():
                 return False
             if not ok:
-                self._emit(self.sm.fail_stage("Stage failed"))
+                msg = self._last_error or f"{STAGE_LABELS.get(stage, stage)} failed"
+                self._emit(self.sm.fail_stage(msg))
                 return False
             self._emit(self.sm.complete_stage(stage))
             self.sm.completed.add(stage)
@@ -75,44 +77,87 @@ class SetupController:
         self._emit(self.sm.cancel())
 
     def _run_process(self, cmd, timeout=300, parse_json=False):
-        """Execute via Popen with clean env. If parse_json=True, reads JSON lines and
-        emits progress events with the last error/fail message on failure."""
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        """Execute via Popen with clean env. Captures stdout/stderr tail on failure.
+        Sets self._last_error on failure with returncode + stderr info.
+        Logs detailed spawn/completion/failure/timeout to diagnostic log.
+        Never emits stage events — caller (resume) handles that once."""
+        import time as _time
+        start = _time.time()
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 env=_child_env())
         from diagnostic_logger import log_diagnostic
-        log_diagnostic("process", "spawned", command=" ".join(cmd[:4]), timeout=timeout)
+        log_diagnostic("process", "spawned", command=" ".join(cmd), timeout=timeout)
         with self._process_lock:
             self._active_process = proc
+        
         last_error = ""
+        stdout_tail = ""
+        stderr_tail = ""
+        
         try:
             if parse_json:
+                # Drain stderr in background thread to prevent pipe buffer deadlock
+                import threading as _threading
+                def _drain_stderr():
+                    for _line in proc.stderr:
+                        pass
+                _threading.Thread(target=_drain_stderr, daemon=True).start()
+                out_lines = []
                 for line in proc.stdout:
+                    line_str = line.decode(errors='replace').strip()
+                    out_lines.append(line_str)
                     try:
-                        event = json.loads(line.decode().strip())
+                        event = json.loads(line_str)
                         t = event.get("type", "")
-                        if t in ("download_fail","verify_fail","error"):
-                            last_error = event.get("reason", t)
-                        elif t in ("progress","download_done","verify_pass"):
-                            pass  # handled if needed in future
+                        if t in ("download_fail", "verify_fail", "error"):
+                            last_error = event.get("reason", str(t))
                     except (json.JSONDecodeError, UnicodeDecodeError):
                         pass
                 proc.wait(timeout=timeout)
+                stdout_tail = "\n".join(out_lines[-20:])
             else:
-                try:
-                    _out, _err = proc.communicate(timeout=timeout)
-                except subprocess.TimeoutExpired:
-                    self._kill_process(proc)
-                    return False
+                _out, _err = proc.communicate(timeout=timeout)
+                stdout_tail = (_out or b"").decode(errors='replace')[-1000:]
+                stderr_tail = (_err or b"").decode(errors='replace')[-1000:]
+            
+            duration = _time.time() - start
+            
             if self._cancel_requested:
                 return False
+            
             ok = proc.returncode == 0
-            if not ok and last_error:
-                self._emit(self.sm.fail_stage(last_error))
+            if not ok:
+                # Build specific error from JSON-lines error or stderr
+                if last_error:
+                    error_msg = last_error
+                else:
+                    error_msg = f"exit code {proc.returncode}"
+                if stderr_tail.strip():
+                    error_msg = f"{error_msg}: {stderr_tail.strip()[-300:]}"
+                elif stdout_tail.strip() and not parse_json:
+                    error_msg = f"{error_msg}: {stdout_tail.strip()[-300:]}"
+                self._last_error = error_msg
+                log_diagnostic("process", "failed",
+                               returncode=proc.returncode,
+                               error=error_msg[:500],
+                               duration_ms=int(duration * 1000))
+            else:
+                log_diagnostic("process", "completed",
+                               returncode=0,
+                               duration_ms=int(duration * 1000))
             return ok
+            
         except subprocess.TimeoutExpired:
             self._kill_process(proc)
+            duration = _time.time() - start
+            self._last_error = f"timed out after {timeout}s"
+            log_diagnostic("process", "timeout",
+                           timeout=timeout,
+                           duration_ms=int(duration * 1000))
             return False
-        except OSError:
+        except OSError as e:
+            self._last_error = f"OS error: {e}"
+            log_diagnostic("process", "os_error", error=str(e)[:300])
             return False
         finally:
             with self._process_lock:
@@ -158,19 +203,31 @@ class SetupController:
         return self._run_process([bundled,"-m","venv","--copies",VENV_DIR],timeout=120)
 
     def _step_install_deps(self):
-        pip = os.path.join(VENV_DIR,"bin","pip")
-        req = os.path.join(RESOURCES,"requirements-core.txt")
+        req = os.path.join(RESOURCES, "requirements-core.txt")
         if not os.path.exists(req):
+            self._last_error = "requirements-core.txt not found in app bundle"
             return False
-        if not self._run_process([pip,"install","--no-cache-dir","--upgrade","pip"],60):
+        
+        # Step 1: upgrade pip (use venv python3 -m pip, not bare pip binary)
+        if not self._run_process(
+            [VENV_PYTHON, "-m", "pip", "install", "--no-cache-dir", "--upgrade", "pip"],
+            timeout=60
+        ):
+            self._last_error = "pip upgrade failed: " + (self._last_error or "unknown error")
             return False
-        if self._cancel_requested: return False
-        if not self._run_process([pip,"install","--no-cache-dir","-r",req],600):
+        if self._cancel_requested:
             return False
-        for pkg in CORE_PACKAGES:
-            if not self._run_process([VENV_PYTHON,"-c",f"import {pkg}"],15):
-                return False
-            if self._cancel_requested: return False
+        
+        # Step 2: install dependencies from requirements-core.txt
+        if not self._run_process(
+            [VENV_PYTHON, "-m", "pip", "install", "--no-cache-dir", "-r", req],
+            timeout=600
+        ):
+            self._last_error = "dependency install failed: " + (self._last_error or "unknown error")
+            return False
+        if self._cancel_requested:
+            return False
+        
         self._saved_requirements_hash = _requirements_fingerprint()
         return True
 
