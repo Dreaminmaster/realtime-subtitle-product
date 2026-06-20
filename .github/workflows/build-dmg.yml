@@ -228,17 +228,35 @@ jobs:
           MODEL_SIZE=$(du -sh "${BUNDLED_MODEL}" 2>/dev/null | cut -f1)
           echo "  ✅ bundled model tiny (${MODEL_SIZE})"
 
+          # ===================================================================
+          # rc15 EVIDENCE: Standalone --bootstrap-test (ZERO network simulation)
+          # ===================================================================
+          
+          # ---- [EVIDENCE 1] Bundled Model File Listing ----
+          echo ""
+          echo "=== [EVIDENCE 1] Bundled model file listing ==="
+          ls -la "${BUNDLED_MODEL}" 2>&1 | while IFS= read -r line; do echo "    $line"; done
+          for f in config.json model.bin tokenizer.json; do
+            SZ=$(wc -c < "${BUNDLED_MODEL}/${f}" | tr -d ' ')
+            echo "  ✅ $f: $SZ bytes"
+          done
+          [ -f "${BUNDLED_MODEL}/vocabulary.json" ] && \
+            echo "  ✅ vocabulary.json: $(wc -c < ${BUNDLED_MODEL}/vocabulary.json | tr -d ' ') bytes" || \
+            echo "  ⚠️  vocabulary.json: not present (optional, does not block bootstrap)"
+          echo "=== Model listing complete ==="
+          
           # ---- Simulated first-launch: install core deps from wheelhouse (offline) ----
           echo ""
           echo "--- Simulating first-launch dependency install (wheelhouse offline) ---"
           TMP_HOME=$(mktemp -d)
           export HOME="$TMP_HOME"
-          mkdir -p "$HOME/Library/Application Support/RealtimeSubtitle"
+          USER_DATA="$HOME/Library/Application Support/RealtimeSubtitle"
+          mkdir -p "$USER_DATA"
           
           echo "  Creating test venv..."
-          "$PORTABLE_PY" -m venv "$HOME/Library/Application Support/RealtimeSubtitle/venv" 2>&1 | tail -1
+          "$PORTABLE_PY" -m venv "$USER_DATA/venv" 2>&1 | tail -1
           
-          TEST_PY="$HOME/Library/Application Support/RealtimeSubtitle/venv/bin/python3"
+          TEST_PY="$USER_DATA/venv/bin/python3"
           echo "  Upgrading pip..."
           "$TEST_PY" -m pip install --no-cache-dir --quiet --upgrade pip 2>&1 | tail -1
           
@@ -260,31 +278,58 @@ jobs:
           echo "  dependency_source=wheelhouse"
           echo "  network_required=false"
 
-          # ---- Simulate prepare-default-model (copy bundled model) ----
+          # ---- [EVIDENCE 2-3] Direct prepare-default-model + verify-model ----
           echo ""
-          echo "--- Running --bootstrap-test ---"
+          echo "=== [EVIDENCE 2] prepare-default-model direct ==="
           RESOURCES="${APP}/Contents/Resources"
+          "$TEST_PY" "${RESOURCES}/setup_runtime.py" prepare-default-model tiny \
+            --resources-dir "${RESOURCES}" --user-data-dir "$USER_DATA" 2>&1
+          PREP_EXIT=$?
+          if [ $PREP_EXIT -ne 0 ]; then echo "❌ prepare-default-model FAILED"; exit 1; fi
+          echo "  ✅ prepare-default-model passed"
+
+          echo ""
+          echo "=== [EVIDENCE 3] verify-model direct (HF_HUB_OFFLINE=1) ==="
+          HF_HUB_OFFLINE=1 "$TEST_PY" "${RESOURCES}/setup_runtime.py" verify-model tiny \
+            --resources-dir "${RESOURCES}" --user-data-dir "$USER_DATA" 2>&1
+          VR_EXIT=$?
+          if [ $VR_EXIT -ne 0 ]; then echo "❌ verify-model FAILED"; exit 1; fi
+          echo "  ✅ verify-model passed"
+
+          # ---- [EVIDENCE 4-5] Full --bootstrap-test with metadata ----
+          echo ""
+          echo "=== [EVIDENCE 4] --bootstrap-test (clean HOME) ==="
           BT_EXIT=0
           "$TEST_PY" "${RESOURCES}/launcher.py" --bootstrap-test tiny > "$TMP_HOME/bootstrap_stdout.jsonl" 2>&1 || BT_EXIT=$?
           
-          echo "--- Bootstrap stdout (last 30 lines) ---"
-          tail -30 "$TMP_HOME/bootstrap_stdout.jsonl"
+          echo "--- Bootstrap stdout ---"
+          cat "$TMP_HOME/bootstrap_stdout.jsonl"
           
           echo ""
-          if [ $BT_EXIT -eq 0 ]; then
-            echo "  ✅ Bootstrap test: READY"
-            # Verify key metadata in JSON output
-            if grep -q '"status": "READY"' "$TMP_HOME/bootstrap_stdout.jsonl"; then
-              echo "  ✅ status=READY confirmed"
-            fi
-            if grep -q 'model_source' "$TMP_HOME/bootstrap_stdout.jsonl"; then
-              echo "  ✅ Metadata includes model_source"
-            fi
-          else
-            echo "  ❌ Bootstrap test: FAILED (exit=$BT_EXIT)"
-            # Show any error lines
-            grep -i 'error\|fail\|stderr\|traceback' "$TMP_HOME/bootstrap_stdout.jsonl" | tail -20
+          echo "=== [EVIDENCE 5] Metadata validation ==="
+          grep -q '"status"[[:space:]]*:[[:space:]]*"READY"' "$TMP_HOME/bootstrap_stdout.jsonl" && echo "  ✅ READY" || { echo "  ❌ NOT READY"; exit 1; }
+          grep -q '"dependency_source"' "$TMP_HOME/bootstrap_stdout.jsonl" && echo "  ✅ dependency_source present" || echo "  ⚠️ missing dependency_source"
+          grep -q '"network_required"[[:space:]]*:[[:space:]]*false' "$TMP_HOME/bootstrap_stdout.jsonl" && echo "  ✅ network_required=false" || { echo "  ❌ network_required != false"; exit 1; }
+          grep -q '"model_source"[[:space:]]*:[[:space:]]*"bundled"' "$TMP_HOME/bootstrap_stdout.jsonl" && echo "  ✅ model_source=bundled" || { echo "  ❌ model_source != bundled"; exit 1; }
+          grep -q '"model_id"[[:space:]]*:[[:space:]]*"tiny"' "$TMP_HOME/bootstrap_stdout.jsonl" && echo "  ✅ model_id=tiny" || echo "  ❌ model_id != tiny"
+          grep -q '"bootstrap_complete"' "$TMP_HOME/bootstrap_stdout.jsonl" && echo "  ✅ bootstrap_complete event" || echo "  ❌ missing bootstrap_complete"
+          
+          if [ $BT_EXIT -ne 0 ]; then
+            echo "  ❌ Bootstrap exit=$BT_EXIT"
+            echo "  --- Error/traceback lines ---"
+            grep -i 'error\|fail\|traceback' "$TMP_HOME/bootstrap_stdout.jsonl" | tail -20
+            exit 1
           fi
+          echo "  ✅ First launch: READY"
+
+          # ---- [EVIDENCE 6] Second launch skip verification ----
+          echo ""
+          echo "=== [EVIDENCE 6] Second launch (skip completed stages) ==="
+          "$TEST_PY" "${RESOURCES}/launcher.py" --bootstrap-test tiny > "$TMP_HOME/bootstrap_stdout2.jsonl" 2>&1
+          echo "--- Second bootstrap stdout ---"
+          cat "$TMP_HOME/bootstrap_stdout2.jsonl"
+          grep -q '"status"[[:space:]]*:[[:space:]]*"READY"' "$TMP_HOME/bootstrap_stdout2.jsonl" && echo "  ✅ Second launch: READY" || { echo "  ❌ Second launch NOT READY"; exit 1; }
+          echo "=== All EVIDENCE passed ==="
           
           # Print diagnostic log
           DIAG=$(find "$TMP_HOME" -name "bootstrap_test.log" 2>/dev/null | head -1)
