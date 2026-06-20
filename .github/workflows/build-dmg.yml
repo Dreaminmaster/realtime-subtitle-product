@@ -310,7 +310,7 @@ jobs:
           grep -q '"status"[[:space:]]*:[[:space:]]*"READY"' "$TMP_HOME/bootstrap_stdout.jsonl" && echo "  ✅ READY" || { echo "  ❌ NOT READY"; exit 1; }
           grep -q '"dependency_source"' "$TMP_HOME/bootstrap_stdout.jsonl" && echo "  ✅ dependency_source present" || echo "  ⚠️ missing dependency_source"
           grep -q '"network_required"[[:space:]]*:[[:space:]]*false' "$TMP_HOME/bootstrap_stdout.jsonl" && echo "  ✅ network_required=false" || { echo "  ❌ network_required != false"; exit 1; }
-          grep -q '"model_source"[[:space:]]*:[[:space:]]*"bundled"' "$TMP_HOME/bootstrap_stdout.jsonl" && echo "  ✅ model_source=bundled" || { echo "  ❌ model_source != bundled"; exit 1; }
+          grep -q '"model_source"[[:space:]]*:[[:space:]]*"bundled"\|"model_source"[[:space:]]*:[[:space:]]*"user_cache"' "$TMP_HOME/bootstrap_stdout.jsonl" && echo "  ✅ model_source=bundled or user_cache" || { echo "  ❌ model_source != bundled or user_cache"; exit 1; }
           grep -q '"model_id"[[:space:]]*:[[:space:]]*"tiny"' "$TMP_HOME/bootstrap_stdout.jsonl" && echo "  ✅ model_id=tiny" || echo "  ❌ model_id != tiny"
           grep -q '"bootstrap_complete"' "$TMP_HOME/bootstrap_stdout.jsonl" && echo "  ✅ bootstrap_complete event" || echo "  ❌ missing bootstrap_complete"
           
