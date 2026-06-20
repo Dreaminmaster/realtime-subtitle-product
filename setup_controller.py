@@ -366,6 +366,7 @@ class SetupController:
         return self._run_process([
             VENV_PYTHON, rt,
             "verify-model", self.sm.model_id,
+            "--resources-dir", RESOURCES,
             "--user-data-dir", APP_SUPPORT,
         ], 120, parse_json=True)
 

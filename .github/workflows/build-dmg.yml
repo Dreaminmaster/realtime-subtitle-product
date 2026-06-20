@@ -264,8 +264,8 @@ jobs:
           echo ""
           echo "--- Running --bootstrap-test ---"
           RESOURCES="${APP}/Contents/Resources"
-          "$TEST_PY" "${RESOURCES}/launcher.py" --bootstrap-test tiny > "$TMP_HOME/bootstrap_stdout.jsonl" 2>&1
-          BT_EXIT=$?
+          BT_EXIT=0
+          "$TEST_PY" "${RESOURCES}/launcher.py" --bootstrap-test tiny > "$TMP_HOME/bootstrap_stdout.jsonl" 2>&1 || BT_EXIT=$?
           
           echo "--- Bootstrap stdout (last 30 lines) ---"
           tail -30 "$TMP_HOME/bootstrap_stdout.jsonl"

@@ -189,7 +189,7 @@ class ModelManager:
     
     def _app_model_dir(self, model_id: str, backend: str = "whisper") -> str:
         """Return path to app-specific model directory under data dir."""
-        return os.path.join(self._get_app_data_dir(), "models", backend, model_id)
+        return os.path.join(str(self.data_dir), "models", backend, model_id)
     
     def get_model_path(self, model_id, backend="whisper"):
         """Return the real locally-cached snapshot path, or None.
