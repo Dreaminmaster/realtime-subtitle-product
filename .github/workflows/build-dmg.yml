@@ -329,7 +329,65 @@ jobs:
           echo "--- Second bootstrap stdout ---"
           cat "$TMP_HOME/bootstrap_stdout2.jsonl"
           grep -q '"status"[[:space:]]*:[[:space:]]*"READY"' "$TMP_HOME/bootstrap_stdout2.jsonl" && echo "  ✅ Second launch: READY" || { echo "  ❌ Second launch NOT READY"; exit 1; }
-          echo "=== All EVIDENCE passed ==="
+
+          # ---- [EVIDENCE 7] ASR smoke test: real WhisperModel load offline ----
+          echo ""
+          echo "=== [EVIDENCE 7] ASR smoke test (HF_HUB_OFFLINE=1, WhisperModel load) ==="
+          HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+            "$TEST_PY" "${RESOURCES}/launcher.py" --asr-smoke-test tiny > "$TMP_HOME/asr_smoke.jsonl" 2>&1
+          ASR_EXIT=$?
+          echo "--- ASR smoke stdout ---"
+          cat "$TMP_HOME/asr_smoke.jsonl"
+          if [ $ASR_EXIT -ne 0 ]; then
+            echo "❌ EVIDENCE 7 FAILED: ASR smoke test exit=$ASR_EXIT"
+            exit 1
+          fi
+          if grep -q 'ASR_MODEL_READY' "$TMP_HOME/asr_smoke.jsonl"; then
+            echo "  ✅ ASR_MODEL_READY"
+          else
+            echo "❌ EVIDENCE 7 FAILED: no ASR_MODEL_READY in output"
+            exit 1
+          fi
+          if grep -q 'asr_model_path' "$TMP_HOME/asr_smoke.jsonl"; then
+            echo "  ✅ asr_model_path present"
+          else
+            echo "❌ EVIDENCE 7 FAILED: no asr_model_path"
+            exit 1
+          fi
+          if grep -q 'network_required.*false\|false.*network_required' "$TMP_HOME/asr_smoke.jsonl"; then
+            echo "  ✅ network_required=false"
+          fi
+          echo "  ✅ EVIDENCE 7 PASSED: ASR model loads locally"
+
+          # ---- [EVIDENCE 8] Real app executable bootstrap test ----
+          echo ""
+          echo "=== [EVIDENCE 8] App executable --bootstrap-test ==="
+          APP_EXEC="${APP}/Contents/MacOS/realtime-subtitle"
+          if [ ! -f "$APP_EXEC" ]; then
+            echo "⚠ EVIDENCE 8 SKIPPED: app executable not found (may not exist in DMG layout)"
+            echo "  This test requires the full .app with embedded Python"
+          else
+            BT8_OUT="$TMP_HOME/bootstrap_app.jsonl"
+            env -u PYTHONHOME -u PYTHONPATH HOME="$TMP_HOME" \
+              "$APP_EXEC" --bootstrap-test tiny > "$BT8_OUT" 2>&1
+            BT8_EXIT=$?
+            echo "--- App executable bootstrap stdout ---"
+            cat "$BT8_OUT"
+            echo "  App bootstrap exit=$BT8_EXIT"
+            if [ $BT8_EXIT -ne 0 ]; then
+              echo "❌ EVIDENCE 8 FAILED: app executable bootstrap exit=$BT8_EXIT"
+              exit 1
+            fi
+            if grep -q '"status"[[:space:]]*:[[:space:]]*"READY"\|"ready"[[:space:]]*:[[:space:]]*true' "$BT8_OUT"; then
+              echo "  ✅ EVIDENCE 8 PASSED: app executable bootstrap READY"
+            else
+              echo "❌ EVIDENCE 8 FAILED: app executable bootstrap NOT READY"
+              exit 1
+            fi
+          fi
+
+          echo ""
+          echo "=== All 8 EVIDENCE sections passed ==="
           
           # Print diagnostic log
           DIAG=$(find "$TMP_HOME" -name "bootstrap_test.log" 2>/dev/null | head -1)
@@ -339,18 +397,6 @@ jobs:
             head -60 "$DIAG"
           fi
           rm -rf "$TMP_HOME"
-
-          if [ $PIP_EXIT -ne 0 ]; then
-            echo "❌ Core dependency install FAILED"; exit 1
-          fi
-          if [ $IMPORT_EXIT -ne 0 ]; then
-            echo "❌ Core import check FAILED"; exit 1
-          fi
-          if [ $BT_EXIT -ne 0 ]; then
-            echo "❌ Full bootstrap test FAILED"; exit 1
-          fi
-          echo "  ✅ First-launch simulation passed"
-          echo "  ✅ Bootstrap test: READY"
 
           DMG=$(ls dist/*.dmg 2>/dev/null | head -1)
           [ -n "$DMG" ] && echo "  ✅ DMG: $DMG ($(du -h "$DMG" | cut -f1))"

@@ -29,8 +29,13 @@ class Transcriber:
     def _init_whisper(self, model_size, device, compute_type):
         """Initialize faster-whisper backend"""
         from faster_whisper import WhisperModel
+        import os
         self.model = WhisperModel(model_size, device=device, compute_type=compute_type)
-        print(f"[Transcriber] Using faster-whisper (CPU/CUDA) with model: {model_size}")
+        is_local = os.path.isdir(model_size)
+        print(f"[Transcriber] Using faster-whisper (CPU/CUDA) with model: {model_size}"
+              f"{' (local path)' if is_local else ' (HF id)'}")
+        if is_local:
+            print(f"[Transcriber] asr_model_path={model_size}")
     
     def _init_mlx(self, model_size):
         """Initialize MLX Whisper backend for Apple Silicon"""

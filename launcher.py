@@ -84,6 +84,71 @@ if "--bootstrap-test" in sys.argv:
     
     sys.exit(0 if ok else 1)
 
+if "--asr-smoke-test" in sys.argv:
+    """Verify ASR model loads locally offline (no GUI). Prints JSON Lines.
+    
+    Usage: launcher.py --asr-smoke-test [model_id]
+    Requires HF_HUB_OFFLINE=1 for a real offline test.
+    Exits 0 if ASR_MODEL_READY, 1 if transcriber fails to initialize.
+    """
+    import json as _json
+    import os as _os
+    
+    model_id = sys.argv[sys.argv.index("--asr-smoke-test") + 1] \
+        if len(sys.argv) > sys.argv.index("--asr-smoke-test") + 1 \
+           and not sys.argv[sys.argv.index("--asr-smoke-test") + 1].startswith("--") \
+        else "tiny"
+    
+    print(_json.dumps({"type": "asr_smoke_start", "model_id": model_id,
+                       "HF_HUB_OFFLINE": _os.environ.get("HF_HUB_OFFLINE", "not set")}))
+    
+    # Ensure offline
+    _os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    _os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+    
+    try:
+        # Resolve model path
+        from model_manager import model_manager as _mm
+        model_path = _mm.get_model_path(model_id, "whisper")
+        if model_path:
+            print(_json.dumps({"type": "asr_model_path", "path": model_path,
+                               "model_source": "local"}))
+            if _os.path.isdir(model_path):
+                files = sorted(_os.listdir(model_path))
+                print(_json.dumps({"type": "asr_model_files", "count": len(files),
+                                   "files": files}))
+        else:
+            print(_json.dumps({"type": "asr_model_path", "path": None,
+                               "model_source": "unknown", "warning": "no local path resolved"}))
+            model_path = model_id
+        
+        # Initialize transcriber — this is the real WhisperModel load
+        # Override the module-level singleton config for the test model
+        import config as _cfgmod
+        _original_whisper_model = _cfgmod.config.whisper_model
+        _cfgmod.config.whisper_model = model_id
+        
+        from transcriber_pool import get_or_create_transcriber
+        t = get_or_create_transcriber()
+        if t is None:
+            print(_json.dumps({"type": "asr_smoke_fail", "error": "get_or_create_transcriber returned None"}))
+            sys.exit(1)
+        
+        print(_json.dumps({"type": "asr_model_ready", "asr_model_path": model_path,
+                           "model_id": model_id,
+                           "network_required": False,
+                           "model_source": "bundled" if model_path else "unknown"}))
+        print("ASR_MODEL_READY")
+        
+    except Exception as e:
+        import traceback as _tb
+        print(_json.dumps({"type": "asr_smoke_fail", "error_type": type(e).__name__,
+                           "message": str(e)}))
+        _tb.print_exc()
+        sys.exit(1)
+    
+    sys.exit(0)
+
 import subprocess
 import configparser
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,

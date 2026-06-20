@@ -19,12 +19,26 @@ def get_or_create_transcriber():
     from config import config
     
     asr_backend = config.asr_backend
-    model_size = config.whisper_model if asr_backend == "whisper" else config.funasr_model
+    model_name = config.whisper_model if asr_backend == "whisper" else config.funasr_model
     
-    log.info(f"Creating Transcriber: {asr_backend}/{model_size}")
+    # Resolve model to local path if available — critical for offline first-launch
+    resolved_model = model_name
+    if asr_backend == "whisper":
+        try:
+            from model_manager import model_manager as mm
+            path = mm.get_model_path(model_name, "whisper")
+            if path:
+                resolved_model = path
+                log.info(f"Resolved whisper model path: {model_name} → {path}")
+            else:
+                log.warning(f"No local path for model '{model_name}', will use as-is (may trigger HF download)")
+        except Exception as e:
+            log.warning(f"model_manager resolution skipped: {e}")
+    
+    log.info(f"Creating Transcriber: {asr_backend}/{model_name} (resolved={resolved_model})")
     _transcriber_singleton = Transcriber(
         backend=asr_backend,
-        model_size=model_size,
+        model_size=resolved_model,
         device=config.whisper_device,
         compute_type=config.whisper_compute_type,
         language=config.source_language
