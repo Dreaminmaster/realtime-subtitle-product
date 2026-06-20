@@ -12,7 +12,7 @@ Usage:
     --help
 
 All output is JSON Lines:
-    {"type":"prepare_model_ok"|"prepare_model_fail"|"verify_model_ok"|"verify_model_fail"|"download_model_ok"|"download_model_fail", ...}
+    {"type":"prepare_model_done"|"prepare_model_fail"|"verify_pass"|"verify_model_fail"|"download_model_ok"|"download_model_fail", ...}
 """
 
 import sys, os, json, shutil, argparse
@@ -104,8 +104,9 @@ def prepare_default_model(model_id="tiny"):
               "path": user_model_dir})
         mm = _get_model_manager()
         mm.register_model_path(model_id, user_model_dir, "whisper")
-        ok("prepare_model_ok", model_id=model_id, model_source="user_cache",
-           path=user_model_dir, network_required=False, action="already_present")
+        ok("prepare_model_done", model_id=model_id, model_source="user_cache",
+           path=user_model_dir, network_required=False, dependency_source="wheelhouse",
+           action="already_present")
 
     # 4. Copy bundled model to user model directory
     emit({"type": "prepare_model_progress", "phase": "copying",
@@ -140,9 +141,9 @@ def prepare_default_model(model_id="tiny"):
     mm = _get_model_manager()
     mm.register_model_path(model_id, user_model_dir, "whisper")
 
-    ok("prepare_model_ok", model_id=model_id, model_source="bundled",
-       path=user_model_dir, network_required=False, action="copied_from_bundle",
-       files_copied=copied)
+    ok("prepare_model_done", model_id=model_id, model_source="bundled",
+       path=user_model_dir, network_required=False, dependency_source="wheelhouse",
+       action="copied_from_bundle", files_copied=copied)
 
 # ── verify-model (LOCAL ONLY) ───────────────────────────────────────────
 def verify_model(model_id="tiny"):
@@ -196,8 +197,8 @@ def verify_model(model_id="tiny"):
              error_type=type(e).__name__, error=str(e)[:300],
              hint="The model files exist but are corrupt. Reinstall the app.")
 
-    ok("verify_model_ok", model_id=model_id, path=user_model_dir,
-       network_required=False, local_only=True)
+    ok("verify_pass", model_id=model_id, path=user_model_dir,
+       network_required=False, local_only=True, dependency_source="wheelhouse")
 
 # ── download-model (ONLINE — for additional models only) ─────────────────
 def download_model(model_id, backend="whisper"):

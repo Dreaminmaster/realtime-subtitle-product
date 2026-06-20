@@ -25,6 +25,29 @@ def _requirements_fingerprint():
         return "unknown"
 
 
+class _SubprocessEventWrapper:
+    """Thin wrapper so subprocess JSON events look like stage events to callbacks."""
+    def __init__(self, data):
+        self._data = data
+        self.stage = data.get("type", "?")
+        self.message = data.get("message", "")
+    @property
+    def data(self):
+        return self._data
+    def __repr__(self):
+        return f"<_SubprocessEventWrapper {self._data.get('type','?')}>"
+
+
+_BOOTSTRAP_EVIDENCE_KEYS = (
+    "dependency_source",
+    "network_required",
+    "model_source",
+    "model_id",
+    "path",
+    "error_type",
+)
+
+
 def _get_local_pip_version(venv_python):
     """Return (major, minor) tuple or None."""
     try:
@@ -58,6 +81,9 @@ class SetupController:
         self._cancel_event = threading.Event()
         self._saved_requirements_hash = None
         self._last_error = None
+        self._last_json_error = None
+        self._subprocess_events = []  # JSON Lines from child processes
+        self._bootstrap_evidence = {} # Accumulated evidence keys
         self._stage_map = {
             SetupStage.CHECK_SYSTEM: self._step_check_system,
             SetupStage.CREATE_ENV: self._step_create_env,
@@ -95,11 +121,14 @@ class SetupController:
         self._kill_active_process()
         self._emit(self.sm.cancel())
 
-    def _run_process(self, cmd, timeout=300, parse_json=False):
+    def _run_process(self, cmd, timeout=300, parse_json=False, forward_events=False):
         """Execute via Popen with clean env. Captures stdout/stderr tail on failure.
         Sets self._last_error on failure with returncode + stderr info.
         Logs detailed spawn/completion/failure/timeout to diagnostic log.
-        Never emits stage events — caller (resume) handles that once."""
+        When parse_json=True: all valid JSON Lines are saved to self._subprocess_events.
+        When forward_events=True: each parsed event is also emitted via event_callback.
+        Never emits stage events (in the state machine sense) — caller (resume) handles that.
+        Returns True/False."""
         import time as _time
         start = _time.time()
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -115,9 +144,8 @@ class SetupController:
         
         try:
             if parse_json:
-                # Collect stderr in background thread (don't discard!)
                 import threading as _threading
-                stderr_lines = []  # mutable list for thread-safe-ish capture
+                stderr_lines = []
                 def _collect_stderr():
                     try:
                         for line in proc.stderr:
@@ -134,18 +162,26 @@ class SetupController:
                     try:
                         event = json.loads(line_str)
                         t = event.get("type", "")
-                        # All known failure types from setup_runtime.py
+                        # Collect ALL valid JSON events
+                        self._subprocess_events.append(event)
+                        # Forward to parent callback if requested
+                        if forward_events and self._event_cb:
+                            wrapper = _SubprocessEventWrapper(event)
+                            try:
+                                self._event_cb(wrapper)
+                            except Exception:
+                                pass
+                        # Accumulate bootstrap evidence
+                        self._collect_evidence(event)
+                        # Track failures
                         if t.endswith("_fail") or t in ("error", "internal_error",
                             "usage_error", "import_error"):
                             last_error = event.get("message") or t
-                            # Save the full error event for display
                             self._last_json_error = event
                     except (json.JSONDecodeError, UnicodeDecodeError):
-                        # Non-JSON line — keep it in stdout_tail for diagnostics
                         pass
                 proc.wait(timeout=timeout)
                 stdout_tail = "\n".join(out_lines[-30:])
-                # Wait briefly for stderr thread to finish
                 _time.sleep(0.05)
                 if stderr_lines:
                     stderr_tail = "\n".join(stderr_lines[-40:])
@@ -218,6 +254,20 @@ class SetupController:
                 proc.kill()
                 try: proc.wait(timeout=5)
                 except subprocess.TimeoutExpired: pass
+
+    def _collect_evidence(self, event):
+        """Accumulate bootstrap evidence fields from subprocess JSON events."""
+        for key in _BOOTSTRAP_EVIDENCE_KEYS:
+            if key in event:
+                self._bootstrap_evidence[key] = event[key]
+
+    def evidence_summary(self) -> dict:
+        """Return the collected bootstrap evidence for CI verification."""
+        return dict(sorted(self._bootstrap_evidence.items()))
+
+    def subprocess_events_copy(self) -> list:
+        """Return a shallow copy of all collected subprocess JSON events."""
+        return list(self._subprocess_events)
 
     def _step_check_system(self):
         import platform, shutil
@@ -357,7 +407,7 @@ class SetupController:
             "prepare-default-model", self.sm.model_id,
             "--resources-dir", RESOURCES,
             "--user-data-dir", APP_SUPPORT,
-        ], 120, parse_json=True)
+        ], 120, parse_json=True, forward_events=True)
 
     def _step_verify(self):
         rt = os.path.join(RESOURCES,"setup_runtime.py")
@@ -368,7 +418,7 @@ class SetupController:
             "verify-model", self.sm.model_id,
             "--resources-dir", RESOURCES,
             "--user-data-dir", APP_SUPPORT,
-        ], 120, parse_json=True)
+        ], 120, parse_json=True, forward_events=True)
 
     def _pre_verify_completed(self):
         removed = []

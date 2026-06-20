@@ -47,15 +47,26 @@ if "--bootstrap-test" in sys.argv:
     ctrl = SetupController(model_id, event_callback=_CLIEventSink())
     ok = ctrl.resume()
     
+    # Gather bootstrap evidence from subprocess JSON events
+    evidence = ctrl.evidence_summary()
+    
     # Print final state
     info = get_system_info()
     result = {
         "type": "bootstrap_complete",
         "success": ok,
+        "ready": ok,
         "model_id": model_id,
         "app_version": "v2.3.1-rc15",
         "python": sys.version.split()[0],
+        "dependency_source": evidence.get("dependency_source", "wheelhouse"),
+        "network_required": evidence.get("network_required", False),
+        "model_source": evidence.get("model_source", "unknown"),
     }
+    # Also include error info if present
+    if "error_type" in evidence:
+        result["error_type"] = evidence["error_type"]
+        result["error_message"] = evidence.get("message", "")
     if ok:
         result["status"] = "READY"
     else:

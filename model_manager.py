@@ -187,9 +187,29 @@ class ModelManager:
         }
         self._save_cache()
     
-    def _app_model_dir(self, model_id: str, backend: str = "whisper") -> str:
-        """Return path to app-specific model directory under data dir."""
-        return os.path.join(str(self.data_dir), "models", backend, model_id)
+    def _user_model_dir(self, model_id: str, backend: str = "whisper") -> str:
+        """Path to user model directory under data dir.
+        
+        Example: ~/Library/Application Support/RealtimeSubtitle/models/whisper/tiny
+        (self.data_dir already ends in 'models/', so we append backend/model_id directly.)
+        """
+        return os.path.join(str(self.data_dir), backend, model_id)
+
+    @staticmethod
+    def _bundled_model_dir(model_id: str, backend: str = "whisper",
+                           resources_dir: str = None) -> str:
+        """Path to the bundled model inside the app's Resources directory.
+        
+        Example: /Applications/RealtimeSubtitle.app/Contents/Resources/models/whisper/tiny
+        
+        This is the model shipped inside the DMG — ready-only, never modified.
+        """
+        if resources_dir is None:
+            # Best-effort fallback for development
+            import __main__
+            main_dir = os.path.dirname(os.path.abspath(getattr(__main__, '__file__', __file__)))
+            resources_dir = os.path.join(main_dir, "Resources")
+        return os.path.join(resources_dir, "models", backend, model_id)
     
     def get_model_path(self, model_id, backend="whisper"):
         """Return the real locally-cached snapshot path, or None.
@@ -213,7 +233,7 @@ class ModelManager:
             except Exception:
                 pass
             # Check app-specific model directory (bundled/copied models)
-            app_dir = self._app_model_dir(model_id)
+            app_dir = self._user_model_dir(model_id)
             if self._is_valid_whisper_dir(app_dir):
                 return app_dir
             # Fallback: manual HF cache resolution
@@ -297,7 +317,7 @@ class ModelManager:
             return True
         
         # Also check app model directory (bundled/copied)
-        app_dir = self._app_model_dir(model_id)
+        app_dir = self._user_model_dir(model_id)
         if os.path.isdir(app_dir) and self._is_valid_whisper_dir(app_dir):
             return True
         
