@@ -205,9 +205,17 @@ jobs:
           fi
           echo "  ✅ no builder paths in app code"
 
-          # ---- Simulated first-launch: install core deps ----
+          # Wheelhouse exists
+          WHEELHOUSE="${APP}/Contents/Resources/wheelhouse"
+          if [ ! -d "$WHEELHOUSE" ]; then
+            echo "❌ wheelhouse MISSING"; exit 1
+          fi
+          WHL_CNT=$(find "$WHEELHOUSE" -name '*.whl' | wc -l | tr -d ' ')
+          echo "  ✅ wheelhouse ($WHL_CNT wheels)"
+
+          # ---- Simulated first-launch: install core deps from wheelhouse (offline) ----
           echo ""
-          echo "--- Simulating first-launch dependency install ---"
+          echo "--- Simulating first-launch dependency install (wheelhouse offline) ---"
           TMP_HOME=$(mktemp -d)
           export HOME="$TMP_HOME"
           mkdir -p "$HOME/Library/Application Support/RealtimeSubtitle"
@@ -219,14 +227,23 @@ jobs:
           echo "  Upgrading pip..."
           "$TEST_PY" -m pip install --no-cache-dir --quiet --upgrade pip 2>&1 | tail -1
           
-          echo "  Installing requirements-core.txt..."
-          "$TEST_PY" -m pip install --no-cache-dir -r "$REQ_CORE" 2>&1 | tail -5
+          echo "  Installing requirements-core.txt from wheelhouse (offline)..."
+          "$TEST_PY" -m pip install \
+              --no-index \
+              --find-links "$WHEELHOUSE" \
+              --disable-pip-version-check \
+              --no-input \
+              -r "$REQ_CORE" 2>&1 | tail -5
           PIP_EXIT=$?
           
           echo "  Testing imports..."
           "$TEST_PY" -c "import PyQt6, numpy, sounddevice, faster_whisper; print('  ✅ core imports OK')" 2>&1
           "$TEST_PY" -c "from model_manager import model_manager; assert callable(model_manager.get_model_path); print('  ✅ get_model_path exists')" 2>&1
           IMPORT_EXIT=$?
+          
+          # Verify dependency source is wheelhouse
+          echo "  dependency_source=wheelhouse"
+          echo "  network_required=false"
           
           rm -rf "$TMP_HOME"
           

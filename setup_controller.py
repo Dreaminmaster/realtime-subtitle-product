@@ -272,16 +272,46 @@ class SetupController:
         if self._cancel_requested:
             return False
 
-        # 3. Install requirements-core.txt — blocking
+        # 3. Install requirements-core.txt from bundled wheelhouse — blocking (offline)
+        wheelhouse = os.path.join(RESOURCES, "wheelhouse")
         self._emit_progress(stage_label, "Install requirements-core.txt…")
+
+        if os.path.isdir(wheelhouse) and os.listdir(wheelhouse):
+            whl_count = len([f for f in os.listdir(wheelhouse) if f.endswith(".whl")])
+            from diagnostic_logger import log_diagnostic
+            log_diagnostic("Install dependencies", "Install requirements-core.txt",
+                           dependency_source="wheelhouse", network_required=False,
+                           wheelhouse_path=wheelhouse, wheel_count=whl_count)
+        else:
+            self._last_error = (
+                "Bundled dependency packages are missing. "
+                "This app bundle is incomplete. Please re-download the DMG."
+            )
+            from diagnostic_logger import log_diagnostic
+            log_diagnostic("Install dependencies", "Install requirements-core.txt",
+                           dependency_source="wheelhouse", network_required=False,
+                           error="wheelhouse_missing")
+            return False
+
         self._last_error = None
         if not self._run_process(
             [VENV_PYTHON, "-m", "pip", "install",
+             "--no-index",
+             "--find-links", wheelhouse,
              "--disable-pip-version-check", "--no-input",
              "-r", req],
-            timeout=600
+            timeout=120
         ):
-            self._last_error = "dependency install failed: " + (self._last_error or "unknown error")
+            pip_error = self._last_error or "unknown"
+            self._last_error = (
+                "Could not install bundled dependencies. "
+                "The app bundle may be corrupted. Please re-download the DMG."
+            )
+            from diagnostic_logger import log_diagnostic
+            log_diagnostic("Install dependencies", "Install requirements-core.txt",
+                           dependency_source="wheelhouse", network_required=False,
+                           error="wheelhouse_install_failed",
+                           detail=str(pip_error)[:300])
             return False
         self._emit_progress(stage_label, "Install requirements-core.txt ✓")
         if self._cancel_requested:

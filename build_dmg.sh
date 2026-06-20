@@ -40,7 +40,7 @@ hdiutil detach "/Volumes/${APP_NAME}" 2>/dev/null || true
 mkdir -p "${MACOS_DIR}" "${RESOURCES}" "${DIST_DIR}"
 
 # ---- Step 1: Download & unpack portable Python ----
-echo "[1/6] Setting up portable Python..."
+echo "[1/7] Setting up portable Python..."
 if [ ! -f "${SCRIPT_DIR}/.python_cache/cpython-3.12.tar.gz" ]; then
     mkdir -p "${SCRIPT_DIR}/.python_cache"
     echo "  Downloading portable Python 3.12..."
@@ -52,7 +52,7 @@ tar xzf "${SCRIPT_DIR}/.python_cache/cpython-3.12.tar.gz" -C "${PYTHON_DIR}" --s
 echo "  Python: $(${PYTHON_BIN} --version 2>&1)"
 
 # ---- Step 1.5: Install PyQt6 into portable Python (bootstrap dependency) ----
-echo "[1.5/6] Installing bootstrap PyQt6 into portable Python..."
+echo "[1.5/7] Installing bootstrap PyQt6 into portable Python..."
 "${PYTHON_DIR}/bin/python3" -m pip install --no-cache-dir --quiet PyQt6 2>&1 || {
     echo "  ERROR: failed to install PyQt6 into bundled Python"
     exit 1
@@ -61,7 +61,7 @@ echo "[1.5/6] Installing bootstrap PyQt6 into portable Python..."
 echo "  ✅ PyQt6 OK in bundled Python"
 
 # ---- Step 2: Copy project source ----
-echo "[2/6] Copying source files..."
+echo "[2/7] Copying source files..."
 rsync -av --exclude='.git' \
       --exclude='__pycache__' \
       --exclude='*.pyc' \
@@ -73,11 +73,73 @@ rsync -av --exclude='.git' \
       --exclude='.python_cache' \
       --exclude='python' \
       --exclude='venv' \
+      --exclude='wheelhouse' \
       "${SCRIPT_DIR}/" "${RESOURCES}/" 2>/dev/null
 echo "  Done."
 
+# ---- Step 2.5: Build wheelhouse (offline dependency bundle) ----
+echo "[2.5/7] Building wheelhouse..."
+WHEELHOUSE_DIR="${RESOURCES}/wheelhouse"
+rm -rf "${WHEELHOUSE_DIR}"
+mkdir -p "${WHEELHOUSE_DIR}"
+
+# Download all wheels for requirements-core.txt (binary only, no source dists)
+echo "  Downloading wheels..."
+"${PYTHON_DIR}/bin/python3" -m pip download \
+    --dest "${WHEELHOUSE_DIR}" \
+    --only-binary=:all: \
+    -r "${RESOURCES}/requirements-core.txt" 2>&1 | tail -3
+
+WHL_COUNT=$(find "${WHEELHOUSE_DIR}" -name '*.whl' | wc -l | tr -d ' ')
+echo "  Downloaded ${WHL_COUNT} wheels"
+
+if [ "${WHL_COUNT}" -lt 8 ]; then
+    echo "  ❌ Too few wheels (${WHL_COUNT}), expected ≥8 — wheelhouse incomplete"
+    exit 1
+fi
+
+# Verify wheelhouse: clean venv → offline install → import check
+echo "  Verifying wheelhouse with clean venv..."
+TMP_VENV=$(mktemp -d)
+"${PYTHON_DIR}/bin/python3" -m venv "${TMP_VENV}" 2>&1 || {
+    echo "  ❌ Failed to create test venv"; exit 1
+}
+
+TMP_PY="${TMP_VENV}/bin/python3"
+"${TMP_PY}" -m pip install \
+    --no-index \
+    --find-links "${WHEELHOUSE_DIR}" \
+    --disable-pip-version-check \
+    --no-input \
+    -r "${RESOURCES}/requirements-core.txt" 2>&1 | tail -3
+
+INSTALL_EXIT=$?
+if [ $INSTALL_EXIT -ne 0 ]; then
+    echo "  ❌ Offline install from wheelhouse FAILED"
+    rm -rf "${TMP_VENV}"
+    exit 1
+fi
+
+# Verify critical imports
+IMPORT_CHECK=$("${TMP_PY}" -c "
+for m in ['PyQt6','numpy','sounddevice','httpx','openai','faster_whisper']:
+    __import__(m)
+    print(f'  ✅ {m}')
+" 2>&1)
+IMPORT_EXIT=$?
+
+rm -rf "${TMP_VENV}"
+
+if [ $IMPORT_EXIT -ne 0 ]; then
+    echo "  ❌ Import verification FAILED"
+    echo "${IMPORT_CHECK}"
+    exit 1
+fi
+echo "${IMPORT_CHECK}"
+echo "  ✅ wheelhouse verified (${WHL_COUNT} wheels, offline install OK)"
+
 # ---- Step 3: Create launcher (Plan A — user-local venv) ----
-echo "[3/6] Creating launcher..."
+echo "[3/7] Creating launcher..."
 cat > "${MACOS_DIR}/realtime-subtitle" << 'LAUNCHER'
 #!/bin/bash
 # =============================================================================
@@ -125,7 +187,7 @@ LAUNCHER
 chmod +x "${MACOS_DIR}/realtime-subtitle"
 
 # ---- Step 4: Info.plist ----
-echo "[4/6] Creating Info.plist..."
+echo "[4/7] Creating Info.plist..."
 cat > "${CONTENTS}/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -156,7 +218,7 @@ cat > "${CONTENTS}/Info.plist" << PLIST
 PLIST
 
 # ---- Step 5: DMG ----
-echo "[5/6] Building DMG..."
+echo "[5/7] Building DMG..."
 TMP_DMG_DIR="${BUILD_DIR}/dmg_layout"
 rm -rf "${TMP_DMG_DIR}"
 mkdir -p "${TMP_DMG_DIR}"
@@ -226,7 +288,7 @@ rm -f "${DIST_DIR}/tmp.dmg"
 
 # ---- Step 6: Verify ----
 echo ""
-echo "[6/6] Verifying..."
+echo "[6/7] Verifying..."
 FAIL=false
 
 # DMG exists
@@ -279,6 +341,18 @@ if [ ! -f "${APP_BUNDLE}/Contents/Resources/requirements.txt" ]; then
     echo "  ❌ requirements.txt missing"; FAIL=true
 else
     echo "  ✅ requirements.txt ($(wc -l < ${APP_BUNDLE}/Contents/Resources/requirements.txt) lines)"
+fi
+
+# Wheelhouse exists and has wheels
+if [ ! -d "${APP_BUNDLE}/Contents/Resources/wheelhouse" ]; then
+    echo "  ❌ wheelhouse missing"; FAIL=true
+else
+    WHL_VERIFY=$(find "${APP_BUNDLE}/Contents/Resources/wheelhouse" -name '*.whl' | wc -l | tr -d ' ')
+    if [ "${WHL_VERIFY}" -lt 8 ]; then
+        echo "  ❌ wheelhouse incomplete (${WHL_VERIFY} wheels)"; FAIL=true
+    else
+        echo "  ✅ wheelhouse (${WHL_VERIFY} wheels)"
+    fi
 fi
 
 if [ "$FAIL" = true ]; then
