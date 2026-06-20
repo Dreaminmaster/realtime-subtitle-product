@@ -262,26 +262,37 @@ jobs:
 
           # ---- Simulate prepare-default-model (copy bundled model) ----
           echo ""
-          echo "--- Simulating prepare-default-model ---"
+          echo "--- Running --bootstrap-test ---"
           RESOURCES="${APP}/Contents/Resources"
-          MODEL_SRC="${RESOURCES}/models/whisper/tiny"
-          MODEL_DST="$HOME/Library/Application Support/RealtimeSubtitle/models/whisper/tiny"
-          mkdir -p "$MODEL_DST"
-          for f in "$MODEL_SRC"/*; do
-              fn=$(basename "$f")
-              [ -f "$f" ] && cp "$f" "$MODEL_DST/$fn"
-          done
-          echo "  Copied $(ls -1 "$MODEL_DST" | wc -l | tr -d ' ') model files"
-
-          # Register model and verify local load
-          # (script in tools/ci_test_bundled_model.py — avoids YAML heredoc indent conflicts)
-          RESOURCES="${RESOURCES}" MODEL_DST="${MODEL_DST}" "$TEST_PY" "${APP}/Contents/Resources/tools/ci_test_bundled_model.py" 2>&1
-          MODEL_EXIT=$?
-
-          echo "  model_source=bundled"
-          echo "  network_required=false"
-          echo "  model_id=tiny"
-
+          "$TEST_PY" "${RESOURCES}/launcher.py" --bootstrap-test tiny > "$TMP_HOME/bootstrap_stdout.jsonl" 2>&1
+          BT_EXIT=$?
+          
+          echo "--- Bootstrap stdout (last 30 lines) ---"
+          tail -30 "$TMP_HOME/bootstrap_stdout.jsonl"
+          
+          echo ""
+          if [ $BT_EXIT -eq 0 ]; then
+            echo "  ✅ Bootstrap test: READY"
+            # Verify key metadata in JSON output
+            if grep -q '"status": "READY"' "$TMP_HOME/bootstrap_stdout.jsonl"; then
+              echo "  ✅ status=READY confirmed"
+            fi
+            if grep -q 'model_source' "$TMP_HOME/bootstrap_stdout.jsonl"; then
+              echo "  ✅ Metadata includes model_source"
+            fi
+          else
+            echo "  ❌ Bootstrap test: FAILED (exit=$BT_EXIT)"
+            # Show any error lines
+            grep -i 'error\|fail\|stderr\|traceback' "$TMP_HOME/bootstrap_stdout.jsonl" | tail -20
+          fi
+          
+          # Print diagnostic log
+          DIAG=$(find "$TMP_HOME" -name "bootstrap_test.log" 2>/dev/null | head -1)
+          if [ -n "$DIAG" ]; then
+            echo ""
+            echo "--- Bootstrap Diagnostic Log (first 60 lines) ---"
+            head -60 "$DIAG"
+          fi
           rm -rf "$TMP_HOME"
 
           if [ $PIP_EXIT -ne 0 ]; then
@@ -290,10 +301,11 @@ jobs:
           if [ $IMPORT_EXIT -ne 0 ]; then
             echo "❌ Core import check FAILED"; exit 1
           fi
-          if [ $MODEL_EXIT -ne 0 ]; then
-            echo "❌ Model prepare FAILED"; exit 1
+          if [ $BT_EXIT -ne 0 ]; then
+            echo "❌ Full bootstrap test FAILED"; exit 1
           fi
           echo "  ✅ First-launch simulation passed"
+          echo "  ✅ Bootstrap test: READY"
 
           DMG=$(ls dist/*.dmg 2>/dev/null | head -1)
           [ -n "$DMG" ] && echo "  ✅ DMG: $DMG ($(du -h "$DMG" | cut -f1))"

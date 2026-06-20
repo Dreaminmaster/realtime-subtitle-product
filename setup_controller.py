@@ -115,28 +115,40 @@ class SetupController:
         
         try:
             if parse_json:
-                # Drain stderr in background thread to prevent pipe buffer deadlock
+                # Collect stderr in background thread (don't discard!)
                 import threading as _threading
-                def _drain_stderr():
-                    for _line in proc.stderr:
+                stderr_lines = []  # mutable list for thread-safe-ish capture
+                def _collect_stderr():
+                    try:
+                        for line in proc.stderr:
+                            stderr_lines.append(line.decode(errors='replace').rstrip())
+                    except Exception:
                         pass
-                _threading.Thread(target=_drain_stderr, daemon=True).start()
+                _threading.Thread(target=_collect_stderr, daemon=True).start()
                 out_lines = []
                 for line in proc.stdout:
                     line_str = line.decode(errors='replace').strip()
+                    if not line_str:
+                        continue
                     out_lines.append(line_str)
                     try:
                         event = json.loads(line_str)
                         t = event.get("type", "")
-                        if t in ("download_fail", "verify_fail", "error"):
-                            last_error = (event.get("message") or
-                                         event.get("reason") or
-                                         event.get("error_type") or
-                                         str(t))
+                        # All known failure types from setup_runtime.py
+                        if t.endswith("_fail") or t in ("error", "internal_error",
+                            "usage_error", "import_error"):
+                            last_error = event.get("message") or t
+                            # Save the full error event for display
+                            self._last_json_error = event
                     except (json.JSONDecodeError, UnicodeDecodeError):
+                        # Non-JSON line — keep it in stdout_tail for diagnostics
                         pass
                 proc.wait(timeout=timeout)
-                stdout_tail = "\n".join(out_lines[-20:])
+                stdout_tail = "\n".join(out_lines[-30:])
+                # Wait briefly for stderr thread to finish
+                _time.sleep(0.05)
+                if stderr_lines:
+                    stderr_tail = "\n".join(stderr_lines[-40:])
             else:
                 _out, _err = proc.communicate(timeout=timeout)
                 stdout_tail = (_out or b"").decode(errors='replace')[-1000:]
@@ -149,15 +161,19 @@ class SetupController:
             
             ok = proc.returncode == 0
             if not ok:
-                # Build specific error from JSON-lines error or stderr
+                # Build the best error message available
                 if last_error:
                     error_msg = last_error
                 else:
                     error_msg = f"exit code {proc.returncode}"
+
+                # Append stderr if we have it (tracebacks, etc.)
                 if stderr_tail.strip():
-                    error_msg = f"{error_msg}: {stderr_tail.strip()[-300:]}"
+                    stderr_preview = stderr_tail.strip()[-500:]
+                    error_msg = f"{error_msg}\n--- stderr ---\n{stderr_preview}"
                 elif stdout_tail.strip() and not parse_json:
                     error_msg = f"{error_msg}: {stdout_tail.strip()[-300:]}"
+
                 self._last_error = error_msg
                 log_diagnostic("process", "failed",
                                returncode=proc.returncode,
@@ -336,13 +352,22 @@ class SetupController:
         rt = os.path.join(RESOURCES,"setup_runtime.py")
         if not os.path.exists(rt) or not os.path.exists(VENV_PYTHON):
             return False
-        return self._run_process([VENV_PYTHON,rt,"prepare-default-model",self.sm.model_id],120,parse_json=True)
+        return self._run_process([
+            VENV_PYTHON, rt,
+            "prepare-default-model", self.sm.model_id,
+            "--resources-dir", RESOURCES,
+            "--user-data-dir", APP_SUPPORT,
+        ], 120, parse_json=True)
 
     def _step_verify(self):
         rt = os.path.join(RESOURCES,"setup_runtime.py")
         if not os.path.exists(rt) or not os.path.exists(VENV_PYTHON):
             return False
-        return self._run_process([VENV_PYTHON,rt,"verify-model",self.sm.model_id],120,parse_json=True)
+        return self._run_process([
+            VENV_PYTHON, rt,
+            "verify-model", self.sm.model_id,
+            "--user-data-dir", APP_SUPPORT,
+        ], 120, parse_json=True)
 
     def _pre_verify_completed(self):
         removed = []
@@ -360,7 +385,7 @@ class SetupController:
             elif stage == SetupStage.PREPARE_DEFAULT_MODEL:
                 rt = os.path.join(RESOURCES,"setup_runtime.py")
                 if os.path.exists(rt) and os.path.exists(VENV_PYTHON):
-                    fail = not self._run_process([VENV_PYTHON,rt,"verify-model",self.sm.model_id],30,parse_json=True)
+                    fail = not self._run_process([VENV_PYTHON,rt,"verify-model",self.sm.model_id,"--resources-dir",RESOURCES,"--user-data-dir",APP_SUPPORT],30,parse_json=True)
             if fail:
                 for j in range(i,len(order)):
                     s = order[j]

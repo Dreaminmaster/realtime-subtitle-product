@@ -13,10 +13,65 @@ if "--version" in sys.argv:
 if "--diagnose" in sys.argv:
     from diagnostic_logger import write_full_report, get_system_info
     info = get_system_info()
-    info["app_version"] = "v2.3.1-rc14"
+    info["app_version"] = "v2.3.1-rc15"
     info["python"] = sys.version.split()[0]
     print(write_full_report())
     sys.exit(0)
+
+if "--bootstrap-test" in sys.argv:
+    """Run full bootstrap in CLI mode (no GUI). Prints JSON Lines.
+    
+    Usage: launcher.py --bootstrap-test [model_id]
+    Exits 0 if READY, 1 if any stage fails.
+    """
+    from diagnostic_logger import write_full_report, get_system_info
+    model_id = sys.argv[sys.argv.index("--bootstrap-test") + 1] \
+        if len(sys.argv) > sys.argv.index("--bootstrap-test") + 1 \
+           and not sys.argv[sys.argv.index("--bootstrap-test") + 1].startswith("--") \
+        else "tiny"
+    
+    import json as _json
+    
+    class _CLIEventSink:
+        def __call__(self, event):
+            stage = getattr(event, 'stage', '?')
+            msg = getattr(event, 'message', '')
+            pct = getattr(event, 'percent', None)
+            obj = {"type": "stage_event", "stage": str(stage), "message": msg}
+            if pct is not None:
+                obj["percent"] = pct
+            print(_json.dumps(obj))
+            sys.stdout.flush()
+    
+    from setup_controller import SetupController
+    ctrl = SetupController(model_id, event_callback=_CLIEventSink())
+    ok = ctrl.resume()
+    
+    # Print final state
+    info = get_system_info()
+    result = {
+        "type": "bootstrap_complete",
+        "success": ok,
+        "model_id": model_id,
+        "app_version": "v2.3.1-rc15",
+        "python": sys.version.split()[0],
+    }
+    if ok:
+        result["status"] = "READY"
+    else:
+        result["status"] = "FAILED"
+        result["error"] = ctrl._last_error or "unknown error"
+    print(_json.dumps(result))
+    
+    # Also write full diagnostic
+    diag = write_full_report()
+    diag_file = os.path.expanduser("~/Library/Logs/RealtimeSubtitle/bootstrap_test.log")
+    os.makedirs(os.path.dirname(diag_file), exist_ok=True)
+    with open(diag_file, "w") as f:
+        f.write(diag)
+    print(_json.dumps({"type": "diagnostic_log", "path": diag_file}))
+    
+    sys.exit(0 if ok else 1)
 
 import subprocess
 import configparser

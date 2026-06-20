@@ -179,11 +179,19 @@ for f in config.json model.bin tokenizer.json; do
         echo "  ❌ Missing: ${f}"; MISSING=true
     fi
 done
+if [ ! -f "${BUNDLED_MODEL}/vocabulary.json" ] && [ ! -f "${BUNDLED_MODEL}/vocab.json" ]; then
+    echo "  ⚠ No vocabulary file found (may be optional)"
+fi
 if $MISSING; then
-    echo "  ❌ Bundled model incomplete"; exit 1
+    echo "  ❌ Bundled model incomplete — BUILD FAILED"
+    echo "  Files present:"
+    ls -lah "${BUNDLED_MODEL}/"
+    exit 1
 fi
 MODEL_SIZE=$(du -sh "${BUNDLED_MODEL}" 2>/dev/null | cut -f1)
 echo "  ✅ Default model bundled (${MODEL_SIZE}, $(ls -1 "${BUNDLED_MODEL}" | wc -l | tr -d ' ') files)"
+echo "  Model files:"
+ls -lhS "${BUNDLED_MODEL}/"
 
 # ---- Step 3: Create launcher (Plan A — user-local venv) ----
 echo "[3/8] Creating launcher…"
@@ -409,13 +417,15 @@ if [ ! -d "${MODEL_DIR}" ]; then
 else
     BAD=false
     for f in config.json model.bin tokenizer.json; do
-        [ -f "${MODEL_DIR}/${f}" ] || BAD=true
+        [ -f "${MODEL_DIR}/${f}" ] || { echo "  ❌ Missing: ${f}"; BAD=true; }
     done
     if $BAD; then
         echo "  ❌ bundled model incomplete"; FAIL=true
     else
         MODEL_SIZE=$(du -sh "${MODEL_DIR}" 2>/dev/null | cut -f1)
         echo "  ✅ bundled model tiny (${MODEL_SIZE})"
+        echo "  Files:"
+        ls -lhS "${MODEL_DIR}/"
     fi
 fi
 
