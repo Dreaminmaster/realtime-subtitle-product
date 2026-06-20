@@ -40,7 +40,7 @@ hdiutil detach "/Volumes/${APP_NAME}" 2>/dev/null || true
 mkdir -p "${MACOS_DIR}" "${RESOURCES}" "${DIST_DIR}"
 
 # ---- Step 1: Download & unpack portable Python ----
-echo "[1/7] Setting up portable Python..."
+echo "[1/8] Setting up portable Python..."
 if [ ! -f "${SCRIPT_DIR}/.python_cache/cpython-3.12.tar.gz" ]; then
     mkdir -p "${SCRIPT_DIR}/.python_cache"
     echo "  Downloading portable Python 3.12..."
@@ -52,7 +52,7 @@ tar xzf "${SCRIPT_DIR}/.python_cache/cpython-3.12.tar.gz" -C "${PYTHON_DIR}" --s
 echo "  Python: $(${PYTHON_BIN} --version 2>&1)"
 
 # ---- Step 1.5: Install PyQt6 into portable Python (bootstrap dependency) ----
-echo "[1.5/7] Installing bootstrap PyQt6 into portable Python..."
+echo "[1.5/8] Installing bootstrap PyQt6 into portable Python..."
 "${PYTHON_DIR}/bin/python3" -m pip install --no-cache-dir --quiet PyQt6 2>&1 || {
     echo "  ERROR: failed to install PyQt6 into bundled Python"
     exit 1
@@ -61,7 +61,7 @@ echo "[1.5/7] Installing bootstrap PyQt6 into portable Python..."
 echo "  ✅ PyQt6 OK in bundled Python"
 
 # ---- Step 2: Copy project source ----
-echo "[2/7] Copying source files..."
+echo "[2/8] Copying source files…"
 rsync -av --exclude='.git' \
       --exclude='__pycache__' \
       --exclude='*.pyc' \
@@ -78,7 +78,7 @@ rsync -av --exclude='.git' \
 echo "  Done."
 
 # ---- Step 2.5: Build wheelhouse (offline dependency bundle) ----
-echo "[2.5/7] Building wheelhouse..."
+echo "[2.5/8] Building wheelhouse…"
 WHEELHOUSE_DIR="${RESOURCES}/wheelhouse"
 rm -rf "${WHEELHOUSE_DIR}"
 mkdir -p "${WHEELHOUSE_DIR}"
@@ -138,8 +138,55 @@ fi
 echo "${IMPORT_CHECK}"
 echo "  ✅ wheelhouse verified (${WHL_COUNT} wheels, offline install OK)"
 
+# ---- Step 2.7: Bundle default model ----
+echo "[2.7/8] Bundling default model (tiny)..."
+BUNDLED_MODEL="${RESOURCES}/models/whisper/tiny"
+rm -rf "${BUNDLED_MODEL}"
+mkdir -p "${BUNDLED_MODEL}"
+
+# Ensure huggingface_hub is available in portable Python for model download
+"${PYTHON_DIR}/bin/python3" -c "import huggingface_hub" 2>/dev/null || {
+    echo "  Installing huggingface-hub from wheelhouse..."
+    "${PYTHON_DIR}/bin/python3" -m pip install --no-index \
+        --find-links "${RESOURCES}/wheelhouse" \
+        --disable-pip-version-check --no-input \
+        huggingface-hub 2>&1 | tail -1
+}
+
+echo "  Downloading Systran/faster-whisper-tiny from Hugging Face..."
+MODEL_DL=$(cd "${WHEELHOUSE_DIR}" && HOME="${TMP_HOME:-/tmp}" \
+    "${PYTHON_DIR}/bin/python3" -c "
+import os, shutil
+os.environ['BUNDLED_MODEL'] = '${BUNDLED_MODEL}'
+from huggingface_hub import snapshot_download
+snap = snapshot_download('Systran/faster-whisper-tiny')
+dest = os.environ['BUNDLED_MODEL']
+count = 0
+for f in os.listdir(snap):
+    src = os.path.join(snap, f)
+    if os.path.isfile(src):
+        shutil.copy2(src, os.path.join(dest, f))
+        count += 1
+print(f'Copied {count} files')
+" 2>&1)
+
+echo "  ${MODEL_DL}"
+
+# Verify key files
+MISSING=false
+for f in config.json model.bin tokenizer.json; do
+    if [ ! -f "${BUNDLED_MODEL}/${f}" ]; then
+        echo "  ❌ Missing: ${f}"; MISSING=true
+    fi
+done
+if $MISSING; then
+    echo "  ❌ Bundled model incomplete"; exit 1
+fi
+MODEL_SIZE=$(du -sh "${BUNDLED_MODEL}" 2>/dev/null | cut -f1)
+echo "  ✅ Default model bundled (${MODEL_SIZE}, $(ls -1 "${BUNDLED_MODEL}" | wc -l | tr -d ' ') files)"
+
 # ---- Step 3: Create launcher (Plan A — user-local venv) ----
-echo "[3/7] Creating launcher..."
+echo "[3/8] Creating launcher…"
 cat > "${MACOS_DIR}/realtime-subtitle" << 'LAUNCHER'
 #!/bin/bash
 # =============================================================================
@@ -187,7 +234,7 @@ LAUNCHER
 chmod +x "${MACOS_DIR}/realtime-subtitle"
 
 # ---- Step 4: Info.plist ----
-echo "[4/7] Creating Info.plist..."
+echo "[4/8] Creating Info.plist…"
 cat > "${CONTENTS}/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -218,7 +265,7 @@ cat > "${CONTENTS}/Info.plist" << PLIST
 PLIST
 
 # ---- Step 5: DMG ----
-echo "[5/7] Building DMG..."
+echo "[5/8] Building DMG…"
 TMP_DMG_DIR="${BUILD_DIR}/dmg_layout"
 rm -rf "${TMP_DMG_DIR}"
 mkdir -p "${TMP_DMG_DIR}"
@@ -288,7 +335,7 @@ rm -f "${DIST_DIR}/tmp.dmg"
 
 # ---- Step 6: Verify ----
 echo ""
-echo "[6/7] Verifying..."
+echo "[6/8] Verifying..."
 FAIL=false
 
 # DMG exists
@@ -352,6 +399,23 @@ else
         echo "  ❌ wheelhouse incomplete (${WHL_VERIFY} wheels)"; FAIL=true
     else
         echo "  ✅ wheelhouse (${WHL_VERIFY} wheels)"
+    fi
+fi
+
+# Bundled model exists
+MODEL_DIR="${APP_BUNDLE}/Contents/Resources/models/whisper/tiny"
+if [ ! -d "${MODEL_DIR}" ]; then
+    echo "  ❌ bundled model missing"; FAIL=true
+else
+    BAD=false
+    for f in config.json model.bin tokenizer.json; do
+        [ -f "${MODEL_DIR}/${f}" ] || BAD=true
+    done
+    if $BAD; then
+        echo "  ❌ bundled model incomplete"; FAIL=true
+    else
+        MODEL_SIZE=$(du -sh "${MODEL_DIR}" 2>/dev/null | cut -f1)
+        echo "  ✅ bundled model tiny (${MODEL_SIZE})"
     fi
 fi
 

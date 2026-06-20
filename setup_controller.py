@@ -46,7 +46,7 @@ def _get_local_pip_version(venv_python):
 
 class SetupController:
     EXECUTION_ORDER = (SetupStage.CHECK_SYSTEM, SetupStage.CREATE_ENV,
-                       SetupStage.INSTALL_DEPENDENCIES, SetupStage.DOWNLOAD_MODEL,
+                       SetupStage.INSTALL_DEPENDENCIES, SetupStage.PREPARE_DEFAULT_MODEL,
                        SetupStage.VERIFY)
 
     def __init__(self, model_id="tiny", event_callback=None):
@@ -62,7 +62,7 @@ class SetupController:
             SetupStage.CHECK_SYSTEM: self._step_check_system,
             SetupStage.CREATE_ENV: self._step_create_env,
             SetupStage.INSTALL_DEPENDENCIES: self._step_install_deps,
-            SetupStage.DOWNLOAD_MODEL: self._step_download_model,
+            SetupStage.PREPARE_DEFAULT_MODEL: self._step_prepare_default_model,
             SetupStage.VERIFY: self._step_verify,
         }
         self._load()
@@ -332,11 +332,11 @@ class SetupController:
         self._saved_requirements_hash = _requirements_fingerprint()
         return True
 
-    def _step_download_model(self):
+    def _step_prepare_default_model(self):
         rt = os.path.join(RESOURCES,"setup_runtime.py")
         if not os.path.exists(rt) or not os.path.exists(VENV_PYTHON):
             return False
-        return self._run_process([VENV_PYTHON,rt,"download-model",self.sm.model_id],600,parse_json=True)
+        return self._run_process([VENV_PYTHON,rt,"prepare-default-model",self.sm.model_id],120,parse_json=True)
 
     def _step_verify(self):
         rt = os.path.join(RESOURCES,"setup_runtime.py")
@@ -357,7 +357,7 @@ class SetupController:
                 if self._saved_requirements_hash and \
                    self._saved_requirements_hash != _requirements_fingerprint():
                     fail = True
-            elif stage == SetupStage.DOWNLOAD_MODEL:
+            elif stage == SetupStage.PREPARE_DEFAULT_MODEL:
                 rt = os.path.join(RESOURCES,"setup_runtime.py")
                 if os.path.exists(rt) and os.path.exists(VENV_PYTHON):
                     fail = not self._run_process([VENV_PYTHON,rt,"verify-model",self.sm.model_id],30,parse_json=True)

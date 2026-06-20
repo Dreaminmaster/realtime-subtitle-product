@@ -10,7 +10,7 @@ class SetupStage(IntEnum):
     CHECK_SYSTEM = 0
     CREATE_ENV = auto()
     INSTALL_DEPENDENCIES = auto()
-    DOWNLOAD_MODEL = auto()
+    PREPARE_DEFAULT_MODEL = auto()
     VERIFY = auto()
     READY = auto()
     FAILED = auto()
@@ -21,7 +21,7 @@ STAGE_LABELS = {
     SetupStage.CHECK_SYSTEM: "Check system",
     SetupStage.CREATE_ENV: "Create environment",
     SetupStage.INSTALL_DEPENDENCIES: "Install dependencies",
-    SetupStage.DOWNLOAD_MODEL: "Download model",
+    SetupStage.PREPARE_DEFAULT_MODEL: "Prepare default model",
     SetupStage.VERIFY: "Verify model",
     SetupStage.READY: "Ready",
 }

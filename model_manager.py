@@ -173,6 +173,24 @@ class ModelManager:
         except Exception as e:
             print(f"[ModelManager] Failed to save cache: {e}")
     
+    def register_model_path(self, model_id: str, path: str, backend: str = "whisper") -> None:
+        """Explicitly register a model path in cache without network access.
+        
+        Used by setup to register models bundled in the app DMG.
+        """
+        self._cache[model_id] = {
+            "backend": backend,
+            "downloaded_at": str(__import__('datetime').datetime.now()),
+            "repo_id": f"Systran/faster-whisper-{model_id}" if backend == "whisper" else model_id,
+            "snapshot_path": path,
+            "source": "bundled",
+        }
+        self._save_cache()
+    
+    def _app_model_dir(self, model_id: str, backend: str = "whisper") -> str:
+        """Return path to app-specific model directory under data dir."""
+        return os.path.join(self._get_app_data_dir(), "models", backend, model_id)
+    
     def get_model_path(self, model_id, backend="whisper"):
         """Return the real locally-cached snapshot path, or None.
         Checks cache first, then resolves via huggingface_hub local_files_only."""
@@ -194,6 +212,10 @@ class ModelManager:
                     return path
             except Exception:
                 pass
+            # Check app-specific model directory (bundled/copied models)
+            app_dir = self._app_model_dir(model_id)
+            if self._is_valid_whisper_dir(app_dir):
+                return app_dir
             # Fallback: manual HF cache resolution
             from pathlib import Path
             cache_base = Path.home() / ".cache" / "huggingface" / "hub" / \
@@ -272,6 +294,11 @@ class ModelManager:
         # Also check whisper cache
         whisper_cache = os.path.expanduser("~/.cache/whisper")
         if os.path.exists(os.path.join(whisper_cache, f"{model_id}.pt")):
+            return True
+        
+        # Also check app model directory (bundled/copied)
+        app_dir = self._app_model_dir(model_id)
+        if os.path.isdir(app_dir) and self._is_valid_whisper_dir(app_dir):
             return True
         
         return model_id in self._cache

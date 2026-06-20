@@ -213,6 +213,21 @@ jobs:
           WHL_CNT=$(find "$WHEELHOUSE" -name '*.whl' | wc -l | tr -d ' ')
           echo "  ✅ wheelhouse ($WHL_CNT wheels)"
 
+          # Bundled model exists
+          BUNDLED_MODEL="${APP}/Contents/Resources/models/whisper/tiny"
+          if [ ! -d "$BUNDLED_MODEL" ]; then
+            echo "❌ Bundled model MISSING"; exit 1
+          fi
+          MODEL_OK=true
+          for f in config.json model.bin tokenizer.json; do
+            [ -f "${BUNDLED_MODEL}/${f}" ] || MODEL_OK=false
+          done
+          if ! $MODEL_OK; then
+            echo "❌ Bundled model INCOMPLETE"; exit 1
+          fi
+          MODEL_SIZE=$(du -sh "${BUNDLED_MODEL}" 2>/dev/null | cut -f1)
+          echo "  ✅ bundled model tiny (${MODEL_SIZE})"
+
           # ---- Simulated first-launch: install core deps from wheelhouse (offline) ----
           echo ""
           echo "--- Simulating first-launch dependency install (wheelhouse offline) ---"
@@ -244,14 +259,57 @@ jobs:
           # Verify dependency source is wheelhouse
           echo "  dependency_source=wheelhouse"
           echo "  network_required=false"
-          
+
+          # ---- Simulate prepare-default-model (copy bundled model) ----
+          echo ""
+          echo "--- Simulating prepare-default-model ---"
+          RESOURCES="${APP}/Contents/Resources"
+          MODEL_SRC="${RESOURCES}/models/whisper/tiny"
+          MODEL_DST="$HOME/Library/Application Support/RealtimeSubtitle/models/whisper/tiny"
+          mkdir -p "$MODEL_DST"
+          for f in "$MODEL_SRC"/*; do
+              fn=$(basename "$f")
+              [ -f "$f" ] && cp "$f" "$MODEL_DST/$fn"
+          done
+          echo "  Copied $(ls -1 "$MODEL_DST" | wc -l | tr -d ' ') model files"
+
+          # Register model and verify local load
+          "$TEST_PY" -c "
+import sys, os
+sys.path.insert(0, '${RESOURCES}')
+from model_manager import model_manager
+model_manager.register_model_path('tiny', '${MODEL_DST}', 'whisper')
+print('  ✅ model registered')
+path = model_manager.get_model_path('tiny', 'whisper')
+assert path, 'model path not found'
+print(f'  ✅ get_model_path(tiny) -> {path}')
+assert os.path.isdir(path), f'not a dir: {path}'
+for f in ['config.json', 'model.bin', 'tokenizer.json']:
+    assert os.path.isfile(os.path.join(path, f)), f'missing {f}'
+print('  ✅ all model files present')
+# Local-only load with faster-whisper
+from faster_whisper import WhisperModel
+import warnings
+warnings.filterwarnings('ignore')
+model = WhisperModel(str(path), device='cpu', compute_type='int8')
+print('  ✅ WhisperModel loaded (local-only)')
+" 2>&1
+          MODEL_EXIT=$?
+
+          echo "  model_source=bundled"
+          echo "  network_required=false"
+          echo "  model_id=tiny"
+
           rm -rf "$TMP_HOME"
-          
+
           if [ $PIP_EXIT -ne 0 ]; then
             echo "❌ Core dependency install FAILED"; exit 1
           fi
           if [ $IMPORT_EXIT -ne 0 ]; then
             echo "❌ Core import check FAILED"; exit 1
+          fi
+          if [ $MODEL_EXIT -ne 0 ]; then
+            echo "❌ Model prepare FAILED"; exit 1
           fi
           echo "  ✅ First-launch simulation passed"
 

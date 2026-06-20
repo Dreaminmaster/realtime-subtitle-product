@@ -13,7 +13,7 @@ if "--version" in sys.argv:
 if "--diagnose" in sys.argv:
     from diagnostic_logger import write_full_report, get_system_info
     info = get_system_info()
-    info["app_version"] = "v2.3.1-rc13"
+    info["app_version"] = "v2.3.1-rc14"
     info["python"] = sys.version.split()[0]
     print(write_full_report())
     sys.exit(0)
