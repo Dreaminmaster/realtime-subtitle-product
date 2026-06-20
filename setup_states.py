@@ -22,7 +22,7 @@ STAGE_LABELS = {
     SetupStage.CREATE_ENV: "Create environment",
     SetupStage.INSTALL_DEPENDENCIES: "Install dependencies",
     SetupStage.DOWNLOAD_MODEL: "Download model",
-    SetupStage.VERIFY: "Verify installation",
+    SetupStage.VERIFY: "Verify model",
     SetupStage.READY: "Ready",
 }
 

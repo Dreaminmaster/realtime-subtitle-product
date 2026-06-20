@@ -175,8 +175,14 @@ class ModelManager:
     
     def get_model_path(self, model_id, backend="whisper"):
         """Return the real locally-cached snapshot path, or None.
-        Uses huggingface_hub local_files_only to resolve without network."""
+        Checks cache first, then resolves via huggingface_hub local_files_only."""
         if backend == "whisper":
+            # Fast path: cached snapshot_path from a previous download
+            cached = self._cache.get(model_id, {})
+            cached_path = cached.get("snapshot_path")
+            if cached_path and os.path.isdir(cached_path) and self._is_valid_whisper_dir(cached_path):
+                return cached_path
+            
             repo_id = f"Systran/faster-whisper-{model_id}"
             try:
                 from huggingface_hub import snapshot_download
@@ -308,15 +314,21 @@ class ModelManager:
             progress_callback("starting", 0)
         if cancel_event and cancel_event.is_set():
             raise RuntimeError("Cancelled")
+        snapshot_path = None
+        repo_id = None
         if backend == "mlx":
             self._download_mlx_model(model_id, progress_callback)
+            repo_id = model_id
         elif backend == "funasr":
             self._download_funasr_model(model_id, progress_callback)
+            repo_id = model_id
         else:
-            self._download_whisper_model(model_id, progress_callback)
+            snapshot_path, repo_id = self._download_whisper_model(model_id, progress_callback)
         self._cache[model_id] = {
             "backend": backend,
-            "downloaded_at": str(__import__('datetime').datetime.now())
+            "downloaded_at": str(__import__('datetime').datetime.now()),
+            "repo_id": repo_id,
+            "snapshot_path": snapshot_path,
         }
         self._save_cache()
         if progress_callback:
@@ -343,20 +355,26 @@ class ModelManager:
         return thread
     
     def _download_whisper_model(self, model_id, progress_callback=None):
-        """Download faster-whisper model"""
+        """Download faster-whisper model via explicit snapshot_download.
+        Returns (snapshot_path, repo_id) on success."""
+        repo_id = f"Systran/faster-whisper-{model_id}"
         if progress_callback:
             progress_callback("downloading", 10)
         
-        from faster_whisper import WhisperModel
+        from huggingface_hub import snapshot_download
         
         if progress_callback:
-            progress_callback("loading", 50)
+            progress_callback("resolving", 30)
         
-        # Simply initializing downloads the model
-        model = WhisperModel(model_id, device="cpu", compute_type="int8")
+        snapshot_path = snapshot_download(
+            repo_id=repo_id,
+            local_files_only=False,
+        )
         
         if progress_callback:
             progress_callback("completed", 100)
+        
+        return snapshot_path, repo_id
     
     def _download_mlx_model(self, model_id, progress_callback=None):
         """Download MLX whisper model from HuggingFace"""

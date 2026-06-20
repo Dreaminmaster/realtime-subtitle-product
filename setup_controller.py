@@ -25,6 +25,25 @@ def _requirements_fingerprint():
         return "unknown"
 
 
+def _get_local_pip_version(venv_python):
+    """Return (major, minor) tuple or None."""
+    try:
+        proc = subprocess.run(
+            [venv_python, "-m", "pip", "--version"],
+            capture_output=True, text=True, timeout=15,
+            env=_child_env()
+        )
+        if proc.returncode == 0:
+            # "pip 24.0 from ..." — extract version
+            parts = proc.stdout.strip().split()
+            if len(parts) >= 2:
+                ver = parts[1].split(".")
+                return tuple(int(v) for v in ver[:2])
+    except Exception:
+        pass
+    return None
+
+
 class SetupController:
     EXECUTION_ORDER = (SetupStage.CHECK_SYSTEM, SetupStage.CREATE_ENV,
                        SetupStage.INSTALL_DEPENDENCIES, SetupStage.DOWNLOAD_MODEL,
@@ -110,7 +129,10 @@ class SetupController:
                         event = json.loads(line_str)
                         t = event.get("type", "")
                         if t in ("download_fail", "verify_fail", "error"):
-                            last_error = event.get("reason", str(t))
+                            last_error = (event.get("message") or
+                                         event.get("reason") or
+                                         event.get("error_type") or
+                                         str(t))
                     except (json.JSONDecodeError, UnicodeDecodeError):
                         pass
                 proc.wait(timeout=timeout)
@@ -224,21 +246,29 @@ class SetupController:
         if self._cancel_requested:
             return False
 
-        # 2. Optional pip upgrade — non-blocking, warn on failure
+        # 2. Optional pip upgrade — non-blocking, warn on failure.
+        # Check if pip is already recent enough to skip the lengthy upgrade.
         self._emit_progress(stage_label, "Optional pip upgrade…")
-        upgrade_ok = self._run_process(
-            [VENV_PYTHON, "-m", "pip", "install",
-             "--disable-pip-version-check", "--no-input",
-             "--upgrade", "pip"],
-            timeout=180
-        )
-        if not upgrade_ok:
-            warning = "pip upgrade failed: " + (self._last_error or "unknown error") + \
-                      ", continuing with existing pip"
-            self._emit_progress(stage_label, "⚠ " + warning)
-            self._last_error = None  # clear, don't propagate
+        local_pip_ver = _get_local_pip_version(VENV_PYTHON)
+        if local_pip_ver is not None and local_pip_ver >= (24, 0):
+            self._emit_progress(stage_label, "Optional pip upgrade ✓ (pip already recent)")
         else:
-            self._emit_progress(stage_label, "Optional pip upgrade ✓")
+            if local_pip_ver is not None:
+                self._emit_progress(stage_label,
+                    f"Optional pip upgrade… (pip {local_pip_ver[0]}.{local_pip_ver[1]}, upgrading to latest)")
+            upgrade_ok = self._run_process(
+                [VENV_PYTHON, "-m", "pip", "install",
+                 "--disable-pip-version-check", "--no-input",
+                 "--upgrade", "pip"],
+                timeout=180
+            )
+            if not upgrade_ok:
+                warning = "pip upgrade failed: " + (self._last_error or "unknown error") + \
+                          ", continuing with existing pip"
+                self._emit_progress(stage_label, "⚠ " + warning)
+                self._last_error = None  # clear, don't propagate
+            else:
+                self._emit_progress(stage_label, "Optional pip upgrade ✓")
         if self._cancel_requested:
             return False
 
