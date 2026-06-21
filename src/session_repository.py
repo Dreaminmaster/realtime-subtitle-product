@@ -12,6 +12,7 @@ import sqlite3
 import json
 import time
 import os
+import threading
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional
@@ -70,6 +71,7 @@ class SQLiteSessionRepository:
         self._timeout = timeout
         self._conn: sqlite3.Connection | None = None
         self._closed = False
+        self._lock = threading.Lock()
 
     # ── lifecycle ────────────────────────────────────────────────
     def initialize(self) -> None:
@@ -82,7 +84,7 @@ class SQLiteSessionRepository:
         if parent and self._db_path != ":memory:" and not os.path.exists(parent):
             os.makedirs(parent, exist_ok=True)
 
-        self._conn = sqlite3.connect(self._db_path, timeout=self._timeout)
+        self._conn = sqlite3.connect(self._db_path, timeout=self._timeout, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(SCHEMA_SQL)
@@ -114,27 +116,29 @@ class SQLiteSessionRepository:
         metadata: dict | None = None,
     ) -> None:
         now = time.time()
-        conn = self._ensure()
-        conn.execute(
-            """INSERT OR IGNORE INTO sessions
-               (session_id, created_at, updated_at, status, source_language, target_language, metadata_json)
-               VALUES (?, ?, ?, 'ACTIVE', ?, ?, ?)""",
-            (
-                session_id, now, now,
-                source_language, target_language,
-                json.dumps(metadata or {}),
-            ),
-        )
-        conn.commit()
+        with self._lock:
+            conn = self._ensure()
+            conn.execute(
+                """INSERT OR IGNORE INTO sessions
+                   (session_id, created_at, updated_at, status, source_language, target_language, metadata_json)
+                   VALUES (?, ?, ?, 'ACTIVE', ?, ?, ?)""",
+                (
+                    session_id, now, now,
+                    source_language, target_language,
+                    json.dumps(metadata or {}),
+                ),
+            )
+            conn.commit()
 
     def close_session(self, session_id: str) -> None:
         now = time.time()
-        conn = self._ensure()
-        conn.execute(
-            "UPDATE sessions SET closed_at = ?, updated_at = ?, status = 'CLOSED' WHERE session_id = ?",
-            (now, now, session_id),
-        )
-        conn.commit()
+        with self._lock:
+            conn = self._ensure()
+            conn.execute(
+                "UPDATE sessions SET closed_at = ?, updated_at = ?, status = 'CLOSED' WHERE session_id = ?",
+                (now, now, session_id),
+            )
+            conn.commit()
 
     def get_session(self, session_id: str) -> dict | None:
         conn = self._ensure()
@@ -165,20 +169,20 @@ class SQLiteSessionRepository:
         original_text: str,
     ) -> None:
         now = time.time()
-        conn = self._ensure()
-        conn.execute(
-            """INSERT OR REPLACE INTO segments
-               (session_id, segment_id, revision, status, original_text,
-                created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (session_id, segment_id, revision, status, original_text, now, now),
-        )
-        # Touch session updated_at
-        conn.execute(
-            "UPDATE sessions SET updated_at = ? WHERE session_id = ?",
-            (now, session_id),
-        )
-        conn.commit()
+        with self._lock:
+            conn = self._ensure()
+            conn.execute(
+                """INSERT OR REPLACE INTO segments
+                   (session_id, segment_id, revision, status, original_text,
+                    created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (session_id, segment_id, revision, status, original_text, now, now),
+            )
+            conn.execute(
+                "UPDATE sessions SET updated_at = ? WHERE session_id = ?",
+                (now, session_id),
+            )
+            conn.commit()
 
     def apply_translation(
         self,
@@ -189,30 +193,26 @@ class SQLiteSessionRepository:
         translated_text: str,
         translation_status: str = "DONE",
     ) -> bool:
-        """Apply translation to the LATEST revision. Returns True if applied,
-        False if stale (not the latest revision) or missing."""
-        conn = self._ensure()
-        now = time.time()
-
-        # Get the latest revision for this session+segment
-        latest = conn.execute(
-            "SELECT MAX(revision) FROM segments WHERE session_id = ? AND segment_id = ?",
-            (session_id, segment_id),
-        ).fetchone()
-        if latest is None or latest[0] is None:
-            return False
-        if revision != latest[0]:
-            return False
-
-        conn.execute(
-            """UPDATE segments SET
-               translated_text = ?, translation_status = ?,
-               translated_at = ?, updated_at = ?
-               WHERE session_id = ? AND segment_id = ? AND revision = ?""",
-            (translated_text, translation_status, now, now,
-             session_id, segment_id, revision),
-        )
-        conn.commit()
+        with self._lock:
+            conn = self._ensure()
+            now = time.time()
+            latest = conn.execute(
+                "SELECT MAX(revision) FROM segments WHERE session_id = ? AND segment_id = ?",
+                (session_id, segment_id),
+            ).fetchone()
+            if latest is None or latest[0] is None:
+                return False
+            if revision != latest[0]:
+                return False
+            conn.execute(
+                """UPDATE segments SET
+                   translated_text = ?, translation_status = ?,
+                   translated_at = ?, updated_at = ?
+                   WHERE session_id = ? AND segment_id = ? AND revision = ?""",
+                (translated_text, translation_status, now, now,
+                 session_id, segment_id, revision),
+            )
+            conn.commit()
         return True
 
     def mark_translation_failed(
@@ -223,26 +223,26 @@ class SQLiteSessionRepository:
         revision: int,
         error: str | None = None,
     ) -> bool:
-        conn = self._ensure()
-        now = time.time()
-        latest = conn.execute(
-            "SELECT MAX(revision) FROM segments WHERE session_id = ? AND segment_id = ?",
-            (session_id, segment_id),
-        ).fetchone()
-        if latest is None or latest[0] is None:
-            return False
-        if revision != latest[0]:
-            return False
-
-        conn.execute(
-            """UPDATE segments SET
-               translation_status = 'FAILED',
-               translated_text = ?,
-               updated_at = ?
-               WHERE session_id = ? AND segment_id = ? AND revision = ?""",
-            (error or "FAILED", now, session_id, segment_id, revision),
-        )
-        conn.commit()
+        with self._lock:
+            conn = self._ensure()
+            now = time.time()
+            latest = conn.execute(
+                "SELECT MAX(revision) FROM segments WHERE session_id = ? AND segment_id = ?",
+                (session_id, segment_id),
+            ).fetchone()
+            if latest is None or latest[0] is None:
+                return False
+            if revision != latest[0]:
+                return False
+            conn.execute(
+                """UPDATE segments SET
+                   translation_status = 'FAILED',
+                   translated_text = ?,
+                   updated_at = ?
+                   WHERE session_id = ? AND segment_id = ? AND revision = ?""",
+                (error or "FAILED", now, session_id, segment_id, revision),
+            )
+            conn.commit()
         return True
 
     def get_latest_segment(

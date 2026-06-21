@@ -30,19 +30,27 @@ from src.translation_scheduler import TranslationScheduler, TranslationStatus, T
 
 
 class TranslationAdapter:
-    """Thin bridge: pipeline events → scheduler → overlay signals."""
+    """Thin bridge: pipeline events → scheduler → overlay signals.
+
+    Optional repository: if provided and repository_enabled=True, FINAL
+    original text and translation results are persisted via the repository.
+    """
 
     def __init__(
         self,
         scheduler: TranslationScheduler,
         on_update_text: callable | None = None,
+        *,
+        repository=None,
+        repository_enabled: bool = False,
     ):
         self.scheduler = scheduler
         self._on_update_text = on_update_text
-        self._chunk_to_segment: dict[int, str] = {}  # chunk_id → segment_id
-        self._revision_by_segment: dict[str, int] = {}  # segment_id → next revision
+        self._repository = repository
+        self._repo_enabled = bool(repository_enabled and repository is not None)
+        self._chunk_to_segment: dict[int, str] = {}
+        self._revision_by_segment: dict[str, int] = {}
 
-        # Wire scheduler callbacks
         scheduler._on_result = self._on_result
         scheduler._on_error = self._on_error
 
@@ -59,17 +67,12 @@ class TranslationAdapter:
 
     # ── called from pipeline ───────────────────────────────────
     def on_final_text(self, text: str, chunk_id: int) -> None:
-        """Pipeline calls this when a FINAL utterance is recognized.
-
-        chunk_id is the utterance_id used by the existing pipeline.
-        """
         session_id = self.scheduler._session_id
         if session_id is None:
             return
         if not (text and text.strip()):
             return
 
-        # Maintain stable segment_id per chunk_id
         segment_id = self._chunk_to_segment.get(chunk_id)
         if segment_id is None:
             segment_id = str(uuid.uuid4())
@@ -77,6 +80,23 @@ class TranslationAdapter:
             self._revision_by_segment[segment_id] = 1
 
         revision = self._revision_by_segment.get(segment_id, 1)
+
+        # ── repository write (before scheduler, best-effort) ──
+        if self._repo_enabled:
+            try:
+                self._repository.create_session(session_id)
+                self._repository.upsert_original_segment(
+                    session_id=session_id,
+                    segment_id=segment_id,
+                    revision=revision,
+                    status="FINAL",
+                    original_text=text,
+                )
+            except Exception:
+                import logging
+                log = logging.getLogger("RealtimeSubtitle")
+                log.exception("Repository write error (original segment)")
+                # Do NOT block — continue to scheduler + overlay
 
         event = TranscriptEvent(
             session_id=session_id,
@@ -88,15 +108,31 @@ class TranslationAdapter:
             text_raw=text,
         )
         self.scheduler.submit(event)
-
-        # Bump revision for the next FINAL on this segment
         self._revision_by_segment[segment_id] = revision + 1
 
     # ── scheduler callbacks ────────────────────────────────────
     def _on_result(self, result: TranslationResult) -> None:
+        # Repository write-back with stale guard
+        if self._repo_enabled and result.status == TranslationStatus.COMPLETED:
+            try:
+                applied = self._repository.apply_translation(
+                    session_id=result.session_id,
+                    segment_id=result.segment_id,
+                    revision=result.revision,
+                    translated_text=result.translated_text or "",
+                )
+            except Exception:
+                import logging
+                log = logging.getLogger("RealtimeSubtitle")
+                log.exception("Repository write error (translation)")
+                applied = False
+            if not applied:
+                # Stale or rejected — do NOT update overlay
+                return
+
+        # Overlay update
         if self._on_update_text is None:
             return
-        # Map back to chunk_id for the existing signal signature
         chunk_id = None
         for cid, sid in self._chunk_to_segment.items():
             if sid == result.segment_id:
@@ -104,11 +140,19 @@ class TranslationAdapter:
                 break
         if chunk_id is None:
             return
-
         self._on_update_text(chunk_id, result.original_text, result.translated_text)
 
     def _on_error(self, job, result: TranslationResult) -> None:
-        # Phase 1e: log only, no UI change
+        if self._repo_enabled:
+            try:
+                self._repository.mark_translation_failed(
+                    session_id=result.session_id,
+                    segment_id=result.segment_id,
+                    revision=result.revision,
+                    error=result.error or "unknown",
+                )
+            except Exception:
+                pass
         import logging
         log = logging.getLogger("RealtimeSubtitle")
         log.warning(
