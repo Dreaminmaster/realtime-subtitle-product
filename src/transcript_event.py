@@ -77,7 +77,7 @@ class TranscriptEvent:
             raise InvalidTranscriptEvent("seq must be int >= 0")
         if not isinstance(self.phase, TranscriptPhase):
             raise InvalidTranscriptEvent(f"phase must be TranscriptPhase, got {type(self.phase)}")
-        if not self.text_raw and self.phase != TranscriptPhase.STABLE:
+        if not (self.text_raw and self.text_raw.strip()):
             raise InvalidTranscriptEvent("text_raw must not be empty")
         if self.start_time is not None and self.end_time is not None:
             if self.end_time < self.start_time:
@@ -106,8 +106,13 @@ class TranscriptEvent:
     def with_revision(self, new_revision: int, new_text: str | None = None) -> "TranscriptEvent":
         """Create the next revision of this segment.
 
+        new_revision must be strictly greater than self.revision.
         new_text becomes text_user_edited if provided.
         """
+        if new_revision <= self.revision:
+            raise InvalidTranscriptEvent(
+                f"new_revision ({new_revision}) must be > current revision ({self.revision})"
+            )
         updates: dict = {
             "revision": new_revision,
             "is_stale": False,
@@ -118,6 +123,8 @@ class TranscriptEvent:
         return replace(self, **updates)
 
     def with_translation(self, translated_text: str, target_lang: str | None = None) -> "TranscriptEvent":
+        if not (translated_text and translated_text.strip()):
+            raise InvalidTranscriptEvent("translated_text must not be empty")
         updates: dict = {"translated_text": translated_text}
         if target_lang is not None:
             updates["target_lang"] = target_lang

@@ -118,10 +118,27 @@ class TestValidation:
             TranscriptEvent(session_id=SID, segment_id=SEG, utterance_id=0,
                             phase=TranscriptPhase.FINAL, text_raw="")
 
+    def test_text_raw_empty_raises_for_stable(self):
+        """STABLE is not special — text_raw must not be empty for any phase."""
+        with pytest.raises(InvalidTranscriptEvent, match="text_raw"):
+            TranscriptEvent(session_id=SID, segment_id=SEG, utterance_id=0,
+                            phase=TranscriptPhase.STABLE, text_raw="")
+
+    def test_stable_with_non_empty_text_ok(self):
+        e = TranscriptEvent(session_id=SID, segment_id=SEG, utterance_id=0,
+                            phase=TranscriptPhase.STABLE, text_raw="maybe still going")
+        assert e.phase == TranscriptPhase.STABLE
+        assert e.text_raw == "maybe still going"
+
     def test_invalid_phase_raises(self):
         with pytest.raises(InvalidTranscriptEvent, match="phase"):
             TranscriptEvent(session_id=SID, segment_id=SEG, utterance_id=0,
                             phase="INVALID", text_raw="x")
+
+    def test_text_raw_whitespace_only_raises(self):
+        with pytest.raises(InvalidTranscriptEvent, match="text_raw"):
+            TranscriptEvent(session_id=SID, segment_id=SEG, utterance_id=0,
+                            phase=TranscriptPhase.PARTIAL, text_raw="   ")
 
 
 class TestSerialization:
@@ -216,6 +233,19 @@ class TestWithRevision:
         e2 = e.with_revision(2)  # no new_text
         assert e2.text_user_edited == "b"  # preserved from original
 
+    def test_with_revision_non_monotonic_raises(self):
+        """new_revision must be > current revision."""
+        e = _event(revision=2)
+        with pytest.raises(InvalidTranscriptEvent, match="new_revision"):
+            e.with_revision(2)  # equal
+        with pytest.raises(InvalidTranscriptEvent, match="new_revision"):
+            e.with_revision(1)  # less
+
+    def test_with_revision_monotonic_ok(self):
+        e = _event(revision=2)
+        e2 = e.with_revision(3)
+        assert e2.revision == 3
+
 
 class TestWithTranslation:
     def test_sets_translated_text(self):
@@ -234,6 +264,16 @@ class TestWithTranslation:
         e2 = e.with_translation("trans")
         assert e2.text_raw == "raw"
         assert e2.utterance_id == 5
+
+    def test_with_translation_rejects_empty(self):
+        e = _event()
+        with pytest.raises(InvalidTranscriptEvent, match="translated_text"):
+            e.with_translation("")
+
+    def test_with_translation_rejects_whitespace_only(self):
+        e = _event()
+        with pytest.raises(InvalidTranscriptEvent, match="translated_text"):
+            e.with_translation("   ")
 
 
 class TestRevisionIsolation:
