@@ -143,6 +143,7 @@ class MicrophoneSource(InputSource):
             ) from e
 
         self._running = True
+        self._stop_requested = False
         self._status_locked(ModuleStatus.RUNNING)
 
         def _pump():
@@ -153,12 +154,21 @@ class MicrophoneSource(InputSource):
                         break
                     self._emit_chunk(chunk)
             except Exception as e:
-                self._status_locked(ModuleStatus.ERROR)
+                # Stream failure → ERROR, not running
                 with self._lock:
                     self._last_error = e
+                    self._running = False
+                    self._status = ModuleStatus.ERROR
                 # Do NOT re-raise — the pump runs on a daemon thread and
-                # the main thread will never see a bare exception here.
-                # Callers should check self.last_error / self.status instead.
+                # the main thread will never see an exception here.
+                # Callers should check self.last_error / self.status.
+            else:
+                # Generator exhausted normally — set status to STOPPED.
+                # Keep _running=True so that stop() can do cleanup
+                # (e.g., capture.stop(), join pump thread, final status).
+                with self._lock:
+                    if self._status not in (ModuleStatus.ERROR, ModuleStatus.STOPPING, ModuleStatus.STOPPED):
+                        self._status = ModuleStatus.STOPPED
 
         self._pump_thread = threading.Thread(target=_pump, daemon=True, name="MicrophonePump")
         self._pump_thread.start()
@@ -167,9 +177,11 @@ class MicrophoneSource(InputSource):
         with self._lock:
             if not self._running:
                 return
-            self._set_status(ModuleStatus.STOPPING)
+            self._running = False
+            self._stop_requested = True
+            prev_status = self._status
+            self._status = ModuleStatus.STOPPING
 
-        self._running = False
         error_raised = False
         try:
             if self._capture is not None:
@@ -182,7 +194,10 @@ class MicrophoneSource(InputSource):
             ) from e
         finally:
             if not error_raised:
-                self._status_locked(ModuleStatus.STOPPED)
+                # Preserve ERROR if the pump already set it
+                with self._lock:
+                    if self._status != ModuleStatus.ERROR:
+                        self._status = ModuleStatus.STOPPED
 
         # Wait for the pump thread to finish
         t = self._pump_thread

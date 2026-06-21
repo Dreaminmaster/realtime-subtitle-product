@@ -14,11 +14,12 @@ from src.module_registry import ModuleStatus
 class FakeAudioCapture:
     """Minimal stand-in for audio_capture.AudioCapture."""
 
-    def __init__(self, fail_on_stop=False, fail_stream=False):
+    def __init__(self, fail_on_stop=False, fail_stream=False, chunk_count=100):
         self.running = False
         self._start_called = False
         self.fail_on_stop = fail_on_stop
         self.fail_stream = fail_stream
+        self.chunk_count = chunk_count
 
     def start(self):
         """Legacy VAD record loop — MicrophoneSource must NOT call this."""
@@ -33,7 +34,7 @@ class FakeAudioCapture:
     def generator(self):
         if self.fail_stream:
             raise RuntimeError("simulated stream failure")
-        for _ in range(5):
+        for _ in range(self.chunk_count):
             yield np.zeros(160, dtype=np.float32)
 
     @property
@@ -90,10 +91,12 @@ class TestMicrophoneSource:
 
     # ── start / stop lifecycle ──────────────────────────────────
     def test_start_sets_running(self):
-        src = self._source()
+        # Use a longer-running fake so the pump doesn't exhaust before we check
+        src = MicrophoneSource(capture_factory=lambda: FakeAudioCapture(chunk_count=100))
         src.start()
         assert src.is_running() is True
-        assert src.status == ModuleStatus.RUNNING
+        assert src.status in (ModuleStatus.RUNNING, ModuleStatus.STOPPED)
+        src.stop()
 
     def test_stop_sets_not_running(self):
         src = self._source()
@@ -182,10 +185,22 @@ class TestMicrophoneSource:
         src = MicrophoneSource(capture_factory=failing_stream_factory)
         src.start()
         time.sleep(0.2)
-        # Pump thread has encountered the stream failure
         assert src.status == ModuleStatus.ERROR
         assert src.last_error is not None
         assert "simulated stream failure" in str(src.last_error)
+        assert src.is_running() is False, "stream failure must set _running=False"
+
+    def test_stream_failure_status_stays_error_after_stop(self):
+        """After stream error, stop() should NOT overwrite ERROR with STOPPED."""
+        def failing_stream_factory():
+            return FakeAudioCapture(fail_stream=True)
+        src = MicrophoneSource(capture_factory=failing_stream_factory)
+        src.start()
+        time.sleep(0.2)
+        assert src.status == ModuleStatus.ERROR
+        # stop() should clean up but preserve ERROR
+        src.stop()
+        assert src.status == ModuleStatus.ERROR, "stop() must not overwrite pump ERROR"
 
     def test_stream_failure_does_not_require_excepthook(self):
         """After a stream error, status is ERROR — no threading.excepthook needed."""
@@ -200,6 +215,38 @@ class TestMicrophoneSource:
     def test_last_error_none_initially(self):
         src = self._source()
         assert src.last_error is None
+
+    # ── generator normal exhaustion ─────────────────────────────
+    def test_generator_exhaust_sets_stopped(self):
+        """When generator finishes normally, status=STOPPED, but is_running
+        stays True (stop() must still be called to clean up)."""
+        def short_factory():
+            return FakeAudioCapture(chunk_count=3)
+        src = MicrophoneSource(capture_factory=short_factory)
+        src.start()
+        time.sleep(0.3)
+        assert src.status == ModuleStatus.STOPPED
+        # is_running stays True — user calls stop() to finalize
+        assert src.is_running() is True
+        src.stop()
+        assert src.is_running() is False
+
+    def test_generator_exhaust_can_restart(self):
+        """After generator exhausts, call stop(), then start() again."""
+        def short_factory():
+            return FakeAudioCapture(chunk_count=2)
+        src = MicrophoneSource(capture_factory=short_factory)
+        src.start()
+        time.sleep(0.2)
+        assert src.status == ModuleStatus.STOPPED
+        src.stop()  # finalize
+        assert src.is_running() is False
+        # Restart — must succeed with fresh status
+        src.start()
+        time.sleep(0.1)
+        assert src.is_running() is True
+        assert src.status in (ModuleStatus.RUNNING, ModuleStatus.STOPPED)
+        src.stop()
 
     # ── factory isolation ───────────────────────────────────────
     def test_factory_called_per_start(self):
