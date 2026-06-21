@@ -125,6 +125,74 @@ class TestHealthCheck:
         r.mark_degraded("translation")
         assert r.has_errors() is False
 
+    def test_new_registry_all_uninitialized_not_ready(self):
+        """All modules UNINITIALIZED → all_ready() must be False."""
+        r = ModuleStatusRegistry()
+        assert r.all_ready() is False
+
+    def test_some_running_others_uninitialized_not_ready(self):
+        """Only audio/asr running, others UNINITIALIZED → all_ready() False."""
+        r = ModuleStatusRegistry()
+        r.mark_running("audio")
+        r.mark_running("asr")
+        # translation, overlay, storage are still UNINITIALIZED
+        assert r.all_ready() is False
+
+    def test_all_five_running_is_ready(self):
+        """All 5 default modules RUNNING → all_ready() True."""
+        r = ModuleStatusRegistry()
+        r.mark_running("audio")
+        r.mark_running("asr")
+        r.mark_running("translation")
+        r.mark_running("overlay")
+        r.mark_running("storage")
+        assert r.all_ready() is True
+
+    def test_translation_degraded_others_running_is_ready(self):
+        """translation DEGRADED, others RUNNING → all_ready() True."""
+        r = ModuleStatusRegistry()
+        r.mark_running("audio")
+        r.mark_running("asr")
+        r.mark_degraded("translation")
+        r.mark_running("overlay")
+        r.mark_running("storage")
+        assert r.all_ready() is True
+
+    def test_one_module_error_not_ready(self):
+        """asr ERROR → all_ready() False."""
+        r = ModuleStatusRegistry()
+        r.mark_running("audio")
+        r.mark_error("asr", "model crash")
+        r.mark_running("translation")
+        r.mark_running("overlay")
+        r.mark_running("storage")
+        assert r.all_ready() is False
+
+    def test_one_module_stopped_not_ready(self):
+        """overlay STOPPED → all_ready() False."""
+        r = ModuleStatusRegistry()
+        r.mark_running("audio")
+        r.mark_running("asr")
+        r.mark_running("translation")
+        r.set_status("overlay", ModuleStatus.STOPPED)
+        r.mark_running("storage")
+        assert r.all_ready() is False
+
+    def test_one_module_starting_not_ready(self):
+        """storage still STARTING → all_ready() False."""
+        r = ModuleStatusRegistry()
+        r.mark_running("audio")
+        r.mark_running("asr")
+        r.mark_running("translation")
+        r.mark_running("overlay")
+        r.set_status("storage", ModuleStatus.STARTING)
+        assert r.all_ready() is False
+
+    def test_empty_registry_not_ready(self):
+        """Empty registry (no modules) → all_ready() False."""
+        r = ModuleStatusRegistry(modules=[])
+        assert r.all_ready() is False
+
 
 class TestWaitForReady:
     def test_immediately_ready(self):

@@ -91,10 +91,16 @@ class ModuleStatusRegistry:
             return any(info.status.is_error for info in self._modules.values())
 
     def all_ready(self) -> bool:
-        """True if every module is RUNNING or DEGRADED."""
+        """True when every registered module is RUNNING or DEGRADED.
+
+        UNINITIALIZED / STARTING / STOPPING / STOPPED / ERROR all
+        count as NOT ready.  DEGRADED counts as ready (translation off
+        should not block the session).
+        """
         with self._lock:
-            return all(info.status.is_ok for info in self._modules.values()
-                       if info.status != ModuleStatus.UNINITIALIZED)
+            if not self._modules:
+                return False
+            return all(info.status.is_ok for info in self._modules.values())
 
     def wait_for_ready(self, names: list[str], timeout: float = 10.0) -> bool:
         """Block until every named module is ready or timeout expires."""
