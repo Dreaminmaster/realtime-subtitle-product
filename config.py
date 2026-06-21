@@ -103,6 +103,10 @@ class Config:
             os.getenv("REALTIME_SUBTITLE_USE_TRANSLATION_SCHEDULER", "false").lower() == "true"
             or self._get("v2.4", "use_translation_scheduler", "").lower() == "true"
         )
+        self.use_sqlite_session_repository = (
+            os.getenv("REALTIME_SUBTITLE_USE_SQLITE_SESSION_REPOSITORY", "false").lower() == "true"
+            or self._get("v2.4", "use_sqlite_session_repository", "").lower() == "true"
+        )
     
     def _get(self, section, key, fallback=""):
         try:
