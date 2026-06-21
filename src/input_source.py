@@ -87,8 +87,12 @@ class InputSource(ABC):
 class MicrophoneSource(InputSource):
     """Wraps existing AudioCapture without changing its internals.
 
-    AudioCapture is created via a factory (default: instantiate
-    AudioCapture directly) so tests can inject a FakeAudioCapture.
+    Phase 1c uses AudioCapture.generator() raw mode — the pump thread
+    iterates over yield'ed audio chunks and pushes them to the callback.
+
+    It does NOT call AudioCapture.start(), because that launches the
+    legacy VAD record loop.  Using generator() directly gives us raw
+    float32 audio chunks that match the existing real-time pipeline.
     """
 
     def __init__(self, capture_factory=None, source_id: str | None = None):
@@ -96,10 +100,17 @@ class MicrophoneSource(InputSource):
         self._capture_factory = capture_factory or self._default_factory
         self._capture = None
         self._running = False
+        self._pump_thread: threading.Thread | None = None
+        self._last_error: Exception | None = None
 
     @property
     def source_type(self) -> str:
         return "microphone"
+
+    @property
+    def last_error(self) -> Exception | None:
+        with self._lock:
+            return self._last_error
 
     @staticmethod
     def _default_factory():
@@ -118,21 +129,22 @@ class MicrophoneSource(InputSource):
                 raise InputSourceError(
                     "MicrophoneSource is already running", source_id=self._source_id
                 )
-            self._set_status(ModuleStatus.STARTING)  # inside lock
+            self._set_status(ModuleStatus.STARTING)
 
         try:
             self._capture = self._capture_factory()
-            self._capture.start()
+            # Do NOT call self._capture.start() — that launches the
+            # legacy VAD record loop.  We use generator() directly.
         except Exception as e:
             self._status_locked(ModuleStatus.ERROR)
             raise InputSourceError(
-                f"Failed to start microphone: {e}", source_id=self._source_id, cause=e
+                f"Failed to create microphone capture: {e}", source_id=self._source_id,
+                cause=e
             ) from e
 
         self._running = True
         self._status_locked(ModuleStatus.RUNNING)
 
-        # Start a background thread that pumps audio chunks
         def _pump():
             try:
                 gen = self._capture.generator()
@@ -142,9 +154,11 @@ class MicrophoneSource(InputSource):
                     self._emit_chunk(chunk)
             except Exception as e:
                 self._status_locked(ModuleStatus.ERROR)
-                raise InputSourceError(
-                    f"Microphone stream error: {e}", source_id=self._source_id, cause=e
-                ) from e
+                with self._lock:
+                    self._last_error = e
+                # Do NOT re-raise — the pump runs on a daemon thread and
+                # the main thread will never see a bare exception here.
+                # Callers should check self.last_error / self.status instead.
 
         self._pump_thread = threading.Thread(target=_pump, daemon=True, name="MicrophonePump")
         self._pump_thread.start()
@@ -152,8 +166,8 @@ class MicrophoneSource(InputSource):
     def stop(self) -> None:
         with self._lock:
             if not self._running:
-                return  # idempotent — nothing to stop
-            self._set_status(ModuleStatus.STOPPING)  # inside lock
+                return
+            self._set_status(ModuleStatus.STOPPING)
 
         self._running = False
         error_raised = False
@@ -169,6 +183,11 @@ class MicrophoneSource(InputSource):
         finally:
             if not error_raised:
                 self._status_locked(ModuleStatus.STOPPED)
+
+        # Wait for the pump thread to finish
+        t = self._pump_thread
+        if t is not None and t.is_alive():
+            t.join(timeout=1.0)
 
 
 # ── SystemAudioSource (NOT IMPLEMENTED in Phase 1c) ────────────────

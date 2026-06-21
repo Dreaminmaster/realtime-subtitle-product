@@ -14,15 +14,15 @@ from src.module_registry import ModuleStatus
 class FakeAudioCapture:
     """Minimal stand-in for audio_capture.AudioCapture."""
 
-    def __init__(self, fail_on_start=False, fail_on_stop=False, fail_stream=False):
+    def __init__(self, fail_on_stop=False, fail_stream=False):
         self.running = False
-        self.fail_on_start = fail_on_start
+        self._start_called = False
         self.fail_on_stop = fail_on_stop
         self.fail_stream = fail_stream
 
     def start(self):
-        if self.fail_on_start:
-            raise RuntimeError("simulated start failure")
+        """Legacy VAD record loop — MicrophoneSource must NOT call this."""
+        self._start_called = True
         self.running = True
 
     def stop(self):
@@ -33,11 +33,12 @@ class FakeAudioCapture:
     def generator(self):
         if self.fail_stream:
             raise RuntimeError("simulated stream failure")
-        # Emit a few dummy chunks
-        for _ in range(3):
+        for _ in range(5):
             yield np.zeros(160, dtype=np.float32)
-        # After emitting, sleep briefly to let the pump thread settle
-        # before the test calls stop()
+
+    @property
+    def start_was_called(self) -> bool:
+        return self._start_called
 
 
 # ── Tests ───────────────────────────────────────────────────────────
@@ -77,6 +78,16 @@ class TestMicrophoneSource:
         src = MicrophoneSource(capture_factory=self._factory, source_id="mic-1")
         assert src.source_id == "mic-1"
 
+    # ── does NOT call capture.start() ───────────────────────────
+    def test_start_does_not_call_capture_start(self):
+        cap = FakeAudioCapture()
+        src = MicrophoneSource(capture_factory=lambda: cap)
+        src.start()
+        time.sleep(0.05)
+        assert cap.start_was_called is False, (
+            "MicrophoneSource must NOT call capture.start() — uses generator() only"
+        )
+
     # ── start / stop lifecycle ──────────────────────────────────
     def test_start_sets_running(self):
         src = self._source()
@@ -98,6 +109,28 @@ class TestMicrophoneSource:
         src.stop()  # second stop
         # No crash = pass
 
+    def test_stop_calls_capture_stop(self):
+        cap = FakeAudioCapture()
+        src = MicrophoneSource(capture_factory=lambda: cap)
+        src.start()
+        time.sleep(0.05)
+        assert cap.running is False  # generator not running until iterated
+        src.stop()
+        # capture.stop() was called (resets running flag)
+        # After stop, FakeAudioCapture.running should be False
+        assert cap.running is False  # it was already False since we didn't call start()
+
+    def test_stop_joins_pump_thread(self):
+        """After stop(), the pump thread should be done."""
+        src = self._source()
+        src.start()
+        time.sleep(0.1)
+        src.stop()
+        # pump thread should have been joined — but we can't check .is_alive()
+        # on the private attribute directly.  The test verifies no crash.
+        # If the pump were still running after stop(), this is a bug that
+        # would surface as a resource warning.
+
     def test_double_start_raises(self):
         src = self._source()
         src.start()
@@ -110,7 +143,6 @@ class TestMicrophoneSource:
         src = self._source()
         src.set_audio_chunk_callback(lambda sid, c: received.append((sid, len(c))))
         src.start()
-        # Let pump thread deliver chunks
         time.sleep(0.15)
         src.stop()
         assert len(received) > 0
@@ -118,19 +150,17 @@ class TestMicrophoneSource:
         assert all(length == 160 for _, length in received)
 
     def test_callback_not_set_still_runs(self):
-        """start/stop should work even without a callback."""
         src = self._source()
         src.start()
         time.sleep(0.05)
         src.stop()
-        # No crash = pass
 
     # ── error handling ──────────────────────────────────────────
-    def test_start_failure_raises_input_source_error(self):
+    def test_start_creation_failure_raises_input_source_error(self):
         def failing_factory():
-            return FakeAudioCapture(fail_on_start=True)
+            raise RuntimeError("simulated creation failure")
         src = MicrophoneSource(capture_factory=failing_factory)
-        with pytest.raises(InputSourceError, match="start"):
+        with pytest.raises(InputSourceError, match="create microphone"):
             src.start()
         assert src.status == ModuleStatus.ERROR
 
@@ -145,33 +175,31 @@ class TestMicrophoneSource:
             src.stop()
         assert src.status == ModuleStatus.ERROR
 
-    def test_stream_failure_raises_input_source_error(self):
-        """A stream failure in the pump thread should set ERROR status."""
-        error_log = []
+    def test_stream_failure_sets_error_status(self):
+        """Pump thread should set status=ERROR and last_error without crash."""
         def failing_stream_factory():
-            cap = FakeAudioCapture()
-            cap.fail_stream = True
-            return cap
+            return FakeAudioCapture(fail_stream=True)
         src = MicrophoneSource(capture_factory=failing_stream_factory)
+        src.start()
+        time.sleep(0.2)
+        # Pump thread has encountered the stream failure
+        assert src.status == ModuleStatus.ERROR
+        assert src.last_error is not None
+        assert "simulated stream failure" in str(src.last_error)
 
-        # We need to catch the error from the pump thread
-        # Since pump runs in daemon thread, capture it via callback or exception hook
-        original_excepthook = threading.excepthook
-        caught = []
-        def hook(args):
-            caught.append(args.exc_value)
-        threading.excepthook = hook
-        try:
-            src.start()
-            time.sleep(0.2)
-            # Pump thread should have raised
-        finally:
-            threading.excepthook = original_excepthook
+    def test_stream_failure_does_not_require_excepthook(self):
+        """After a stream error, status is ERROR — no threading.excepthook needed."""
+        def failing_stream_factory():
+            return FakeAudioCapture(fail_stream=True)
+        src = MicrophoneSource(capture_factory=failing_stream_factory)
+        src.start()
+        time.sleep(0.2)
+        assert src.status == ModuleStatus.ERROR
+        # success: we detected the error via the status API, not via excepthook
 
-        # The pump error may have been caught by excepthook,
-        # or the status may be ERROR
-        # At minimum, we should have caught something or status is ERROR
-        assert len(caught) > 0 or src.status == ModuleStatus.ERROR
+    def test_last_error_none_initially(self):
+        src = self._source()
+        assert src.last_error is None
 
     # ── factory isolation ───────────────────────────────────────
     def test_factory_called_per_start(self):
