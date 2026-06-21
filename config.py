@@ -96,6 +96,13 @@ class Config:
         self.api_base_url = self.api_base_url or ""
         self.model = self.model or ""
         self.translation_mode = self.translation_mode or "off"
+
+        # v2.4 feature flags
+        # Temporarily controlled by config.ini [v2.4] section or env var.
+        self.use_translation_scheduler = (
+            os.getenv("REALTIME_SUBTITLE_USE_TRANSLATION_SCHEDULER", "false").lower() == "true"
+            or self._get("v2.4", "use_translation_scheduler", "").lower() == "true"
+        )
     
     def _get(self, section, key, fallback=""):
         try:

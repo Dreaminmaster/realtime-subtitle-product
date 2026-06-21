@@ -242,19 +242,23 @@ def create_pipeline():
             log.info(f"Pipeline: translation engine ({trans_mode}) initialized")
 
             # v2.4: TranslationAdapter bridges scheduler → pipeline
-            from src.translation_adapter import TranslationAdapter
-            from src.translation_scheduler import TranslationScheduler
-            self._translation_scheduler = TranslationScheduler(
-                translator=self.translation_engine.translate,
-                max_queue=30,
-                max_workers=2,
-            )
-            self.translation_adapter = TranslationAdapter(
-                scheduler=self._translation_scheduler,
-                on_update_text=self.signals.update_text.emit,
-            )
-            self.translation_adapter.start_session(str(id(self)))
-            log.info("Pipeline: v2.4 TranslationScheduler wired")
+            # Feature flag: REALTIME_SUBTITLE_USE_TRANSLATION_SCHEDULER
+            if getattr(config, 'use_translation_scheduler', False):
+                from src.translation_adapter import TranslationAdapter
+                from src.translation_scheduler import TranslationScheduler
+                self._translation_scheduler = TranslationScheduler(
+                    translator=self.translation_engine.translate,
+                    max_queue=30,
+                    max_workers=2,
+                )
+                self.translation_adapter = TranslationAdapter(
+                    scheduler=self._translation_scheduler,
+                    on_update_text=self.signals.update_text.emit,
+                )
+                self.translation_adapter.start_session(str(id(self)))
+                log.info("Pipeline: v2.4 TranslationScheduler wired (use_translation_scheduler=true)")
+            else:
+                log.info("Pipeline: using legacy translate_executor (use_translation_scheduler=false)")
         
         def start(self):
             self._stopping = False  # reset for new session
