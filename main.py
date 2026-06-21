@@ -240,6 +240,21 @@ def create_pipeline():
                 timeout=getattr(config, 'translation_timeout', 12.0)
             )
             log.info(f"Pipeline: translation engine ({trans_mode}) initialized")
+
+            # v2.4: TranslationAdapter bridges scheduler → pipeline
+            from src.translation_adapter import TranslationAdapter
+            from src.translation_scheduler import TranslationScheduler
+            self._translation_scheduler = TranslationScheduler(
+                translator=self.translation_engine.translate,
+                max_queue=30,
+                max_workers=2,
+            )
+            self.translation_adapter = TranslationAdapter(
+                scheduler=self._translation_scheduler,
+                on_update_text=self.signals.update_text.emit,
+            )
+            self.translation_adapter.start_session(str(id(self)))
+            log.info("Pipeline: v2.4 TranslationScheduler wired")
         
         def start(self):
             self._stopping = False  # reset for new session
@@ -262,6 +277,8 @@ def create_pipeline():
                     return False
             # Session invalidation ONLY after clean shutdown
             self._session_generation += 1
+            if hasattr(self, 'translation_adapter'):
+                self.translation_adapter.stop_session()
             log.info("Pipeline stopped — session invalidated")
             return True
         
@@ -662,7 +679,9 @@ def create_pipeline():
                     trans_active = self.translation_engine.current_mode != "off"
                     if trans_active:
                         self.signals.update_text.emit(chunk_id, text, "(translating...)")
-                        if translate_executor:
+                        if hasattr(self, 'translation_adapter'):
+                            self.translation_adapter.on_final_text(text, chunk_id)
+                        elif translate_executor:
                             translate_executor.submit(self._run_translation_safe, text, chunk_id, session_gen)
                     else:
                         self.signals.update_text.emit(chunk_id, text, "")
