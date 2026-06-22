@@ -278,7 +278,24 @@ def create_pipeline():
                 )
                 self.translation_adapter.start_session(str(id(self)))
                 log.info("Pipeline: v2.4 TranslationScheduler wired (use_translation_scheduler=true)")
+
+                # v2.4 Transcriber output bridge (opt-in, off by default)
+                try:
+                    from src.runtime_transcriber_bridge_adapter import build_transcriber_output_bridge_for_runtime
+                    self.transcriber_output_bridge = build_transcriber_output_bridge_for_runtime(
+                        self._runtime_decision,
+                        session_id=str(id(self)),
+                        translation_adapter=self.translation_adapter,
+                    )
+                    if self.transcriber_output_bridge is not None:
+                        log.info("Pipeline: transcriber output bridge wired")
+                    else:
+                        log.info("Pipeline: transcriber output bridge not enabled")
+                except Exception as exc:
+                    log.warning(f"Pipeline: transcriber bridge creation failed: {exc}")
+                    self.transcriber_output_bridge = None
             else:
+                self.transcriber_output_bridge = None
                 log.info("Pipeline: using legacy translate_executor (use_translation_scheduler=false)")
         
         def start(self):
@@ -313,6 +330,27 @@ def create_pipeline():
                 self._repository = None
             log.info("Pipeline stopped — session invalidated")
             return True
+        
+        def _handle_transcriber_output_via_bridge(self, raw_output) -> bool:
+            """v2.4 bridge hook — consumes raw transcriber output.
+
+            Returns:
+              True  = bridge path handled the output (caller should NOT use legacy)
+              False = bridge unavailable (caller should use legacy path)
+
+            Does NOT crash on any exception.
+            """
+            bridge = getattr(self, 'transcriber_output_bridge', None)
+            if bridge is None:
+                return False
+            try:
+                result = bridge.handle_raw_output(raw_output)
+                if result.ok:
+                    return True
+                log.debug(f"Bridge result: {result.message}")
+                return True  # handled even if invalid — legacy should not double-process
+            except Exception:
+                return False  # fallback to legacy on bridge exception
         
         def processing_loop(self):
             log.info("Pipeline: processing loop started (state-machine mode)")
