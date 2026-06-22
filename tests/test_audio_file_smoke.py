@@ -159,7 +159,86 @@ class TestConfigUntouched:
         assert config.config.use_sqlite_session_repository is False
 
 
-# ── 15. smoke result serializable ──────────────────────────────
+# ── 16. WAV bridge smoke complete ────────────────────────────
+class TestWavBridgeSmoke:
+    def test_full_chain(self, tmp_path, wav_path):
+        from src.session_repository import SQLiteSessionRepository
+        from src.segment_api import SegmentAPI
+        from src.translation_scheduler import TranslationScheduler
+        from src.translation_adapter import TranslationAdapter
+        from src.transcriber_output_bridge import TranscriberOutputBridge
+        from src.audio_file_smoke import WavFixtureFakeTranscriber, iter_wav_chunks
+        import uuid, time
+
+        repo_path = str(tmp_path / "wav_bridge.sqlite3")
+        repo = SQLiteSessionRepository(repo_path)
+        repo.initialize()
+        session_id = str(uuid.uuid4())
+
+        class FakeTranslator:
+            def translate(self, *a, **kw):
+                return "ZH:hello from wav fixture"
+
+        sched = TranslationScheduler(translator=FakeTranslator().translate, max_queue=10, max_workers=1)
+        adapter = TranslationAdapter(scheduler=sched, repository=repo, repository_enabled=True)
+        adapter.start_session(session_id)
+
+        # WAV → chunks → fake transcriber → raw output
+        chunks = iter_wav_chunks(wav_path, chunk_duration_seconds=0.25)
+        ft = WavFixtureFakeTranscriber(final_text="hello from wav fixture")
+        for c in chunks:
+            ft.consume_chunk(c)
+        raw_output = {"text": ft.finalize(), "status": "final", "segment_id": "wav-1"}
+
+        # Bridge
+        bridge = TranscriberOutputBridge(session_id=session_id, translation_adapter=adapter)
+        result = bridge.handle_raw_output(raw_output)
+
+        time.sleep(0.3)
+        adapter.stop_session()
+        sched.shutdown(wait=True)
+
+        assert result.ok is True
+        assert result.forwarded is True
+
+        api = SegmentAPI(repo)
+        segs = api.list_segments(session_id)
+        assert len(segs) >= 1
+
+        snap = api.get_session_snapshot(session_id)
+        assert "hello from wav fixture" in snap.original_text
+        assert "ZH:" in snap.translated_text
+
+        repo.close()
+
+
+# ── 17. partial/stable no translation ─────────────────────────
+class TestPartialStableNoTranslation:
+    def test_partial(self, tmp_path, wav_path):
+        from src.session_repository import SQLiteSessionRepository
+        from src.segment_api import SegmentAPI
+        from src.transcriber_output_bridge import TranscriberOutputBridge
+        import uuid
+
+        repo_path = str(tmp_path / "partial.sqlite3")
+        repo = SQLiteSessionRepository(repo_path)
+        repo.initialize()
+        session_id = str(uuid.uuid4())
+
+        called = []
+        class FakeAdapter:
+            def on_final_text(self, text, chunk_id):
+                called.append(text)
+
+        bridge = TranscriberOutputBridge(session_id=session_id, translation_adapter=FakeAdapter())
+        r = bridge.handle_raw_output({"text": "hel", "status": "partial"})
+        assert r.ok is True
+        assert r.forwarded is False
+        assert called == []
+        repo.close()
+
+
+# ── 15. serializable ──────────────────────────────────────────
 class TestSerializable:
     def test_json(self, wav_path, tmp_path):
         result = run_wav_file_smoke(wav_path, repository_path=tmp_path / "smoke.sqlite3")

@@ -65,7 +65,7 @@ class TranscriberOutputBridge:
             normalized = self.asr_adapter.normalize(raw_output)
         except Exception as e:
             new_stats = TranscriberBridgeStats(**{
-                **asdict(new_stats), "invalid": new_stats.invalid + 1,
+                **asdict(new_stats), "errors": new_stats.errors + 1,
             })
             self._stats = new_stats
             return TranscriberBridgeResult(ok=False, message=f"Normalize failed: {e}")

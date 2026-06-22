@@ -169,6 +169,68 @@ class TestRawNotMutated:
         assert raw == orig
 
 
+# ── 16. bridge catches ASR adapter exception ─────────────────────
+class TestBridgeCatchesAdapterException:
+    def test_safe(self):
+        class RaisingAdapter:
+            def normalize(self, raw):
+                raise RuntimeError("boom")
+        bridge = TranscriberOutputBridge(session_id="test", asr_adapter=RaisingAdapter())
+        r = bridge.handle_raw_output({"text": "hello", "status": "final"})
+        assert r.ok is False
+        assert r.forwarded is False
+        assert "normalize" in r.message.lower() or "boom" in r.message
+        assert bridge.get_stats().errors == 1
+
+
+# ── 17. bridge catches forward exception ─────────────────────────
+class TestBridgeCatchesForwardException:
+    def test_safe(self):
+        class FailingAdapter:
+            def on_final_text(self, text, chunk_id):
+                raise RuntimeError("boom")
+        bridge = TranscriberOutputBridge(session_id="test", translation_adapter=FailingAdapter())
+        r = bridge.handle_raw_output("hello")
+        assert r.ok is False
+        assert r.forwarded is False
+        assert "forward" in r.message.lower()
+        assert bridge.get_stats().errors == 1
+
+
+# ── 18. handle_many per-item errors ──────────────────────────────
+class TestHandleManyPerItemErrors:
+    def test_safe(self):
+        called = []
+        class GoodAdapter:
+            def on_final_text(self, text, chunk_id):
+                called.append(text)
+        bridge = TranscriberOutputBridge(session_id="test", translation_adapter=GoodAdapter())
+        results = bridge.handle_many([
+            {"text": "good1", "status": "final"},
+            None,
+            {"text": "good2", "status": "final"},
+            "",
+        ])
+        assert len(results) == 4
+        assert results[0].ok is True
+        assert results[1].ok is False
+        assert results[2].ok is True
+        assert results[3].ok is False
+        assert len(called) == 2
+
+
+# ── 19. no raw traceback ─────────────────────────────────────────
+class TestNoRawTraceback:
+    def test_no_traceback(self):
+        class RaisingAdapter:
+            def normalize(self, raw):
+                raise RuntimeError("some internal file.py:123 error")
+        bridge = TranscriberOutputBridge(session_id="test", asr_adapter=RaisingAdapter())
+        r = bridge.handle_raw_output("hello")
+        assert r.ok is False
+        assert "Traceback" not in r.message
+
+
 # ── 15. no side effects ──────────────────────────────────────────
 class TestNoSideEffects:
     def test_no_io(self, bridge):
