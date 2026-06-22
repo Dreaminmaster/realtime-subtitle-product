@@ -36,6 +36,7 @@ class RuntimeSettingsDecision:
     allow_segment_history: bool = False
     allow_segment_export: bool = False
     allow_segment_overlay: bool = False
+    allow_transcriber_output_bridge: bool = False
 
     should_fallback_to_legacy: bool = False
     reason: str = ""
@@ -59,7 +60,8 @@ class RuntimeSettingsGuard:
         allow_repo = result.ok and repo and scheduler  # repo requires scheduler
         allow_history = allow_repo and bool(eff.get("use_segment_api_for_history"))
         allow_export = allow_repo and bool(eff.get("use_segment_api_for_export"))
-        allow_overlay = bool(eff.get("use_segment_api_for_overlay")) and repo  # fallback to legacy if repo off
+        allow_overlay = bool(eff.get("use_segment_api_for_overlay")) and repo
+        allow_bridge = result.ok and scheduler and bool(eff.get("use_transcriber_output_bridge"))  # fallback to legacy if repo off
 
         # Mode
         if not result.ok:
@@ -103,6 +105,7 @@ class RuntimeSettingsGuard:
             allow_segment_history=allow_history,
             allow_segment_export=allow_export,
             allow_segment_overlay=allow_overlay,
+            allow_transcriber_output_bridge=allow_bridge,
             should_fallback_to_legacy=fallback,
             reason=reason,
         )
@@ -118,6 +121,7 @@ def settings_from_config(config_module_or_object: Any) -> dict[str, Any]:
         "use_segment_api_for_history",
         "use_segment_api_for_export",
         "use_segment_api_for_overlay",
+        "use_transcriber_output_bridge",
     ]
     result: dict[str, Any] = {}
     for k in keys:

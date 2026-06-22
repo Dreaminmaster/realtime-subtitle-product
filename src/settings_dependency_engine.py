@@ -16,6 +16,7 @@ KNOWN_KEYS = {
     "use_segment_api_for_history",
     "use_segment_api_for_export",
     "use_segment_api_for_overlay",
+    "use_transcriber_output_bridge",
 }
 
 
@@ -146,6 +147,19 @@ class SettingsDependencyEngine:
                         "Overlay will fall back to legacy signals.",
                 setting="use_segment_api_for_overlay",
                 depends_on=["use_sqlite_session_repository"],
+            ))
+
+        # 8. transcriber bridge requires scheduler
+        bridge = self._normalize_bool(settings.get("use_transcriber_output_bridge"))
+        effective["use_transcriber_output_bridge"] = bridge
+        if bridge and not scheduler:
+            issues.append(DependencyIssue(
+                code="transcriber_bridge_requires_scheduler",
+                severity="error",
+                message="Transcriber output bridge requires translation scheduler to be active.",
+                setting="use_transcriber_output_bridge",
+                depends_on=["use_translation_scheduler"],
+                recommended_changes={"use_translation_scheduler": True},
             ))
 
         # Build recommended_changes from errors only

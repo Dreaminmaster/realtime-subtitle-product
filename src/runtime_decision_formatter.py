@@ -32,6 +32,7 @@ def format_runtime_settings_decision_html(decision: RuntimeSettingsDecision) -> 
     lines.append(f"<li>Segment history: {_allowed(decision.allow_segment_history)}</li>")
     lines.append(f"<li>Segment export: {_allowed(decision.allow_segment_export)}</li>")
     lines.append(f"<li>Segment overlay: {_allowed(decision.allow_segment_overlay)}</li>")
+    lines.append(f"<li>Transcriber bridge: {_allowed(decision.allow_transcriber_output_bridge)}</li>")
     lines.append("</ul>")
 
     # Issues
