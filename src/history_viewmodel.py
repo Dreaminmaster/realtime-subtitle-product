@@ -75,12 +75,12 @@ class HistoryViewModelBuilder:
 
         sessions = [
             HistorySessionItem(
-                session_id=s.get("session_id", ""),
-                status=s.get("status", ""),
-                created_at=s.get("created_at", 0),
-                updated_at=s.get("updated_at", 0),
-                closed_at=s.get("closed_at"),
-                label=f"{s.get('session_id','')[:8]} ({s.get('status','')})",
+                session_id=_get(s, "session_id", ""),
+                status=_get(s, "status", ""),
+                created_at=_get(s, "created_at", 0),
+                updated_at=_get(s, "updated_at", 0),
+                closed_at=_get(s, "closed_at"),
+                label=f"{_get(s, 'session_id', '')[:8]} ({_get(s, 'status', '')})",
             )
             for s in sessions_raw
         ]
@@ -163,3 +163,14 @@ class HistoryViewModelBuilder:
 
         if messages != list(vm.messages):
             object.__setattr__(vm, "messages", messages)
+
+def _get(obj: Any, attr: str, default: Any = None) -> Any:
+    """Access attribute or dict key, returning default if missing."""
+    try:
+        return getattr(obj, attr)
+    except AttributeError:
+        pass
+    try:
+        return obj.get(attr, default)
+    except AttributeError:
+        return default

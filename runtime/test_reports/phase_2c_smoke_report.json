@@ -1,0 +1,76 @@
+{
+  "type": "v2.4_architecture_smoke",
+  "timestamp": 1782120265.482802,
+  "result": {
+    "ok": true,
+    "session_id": "ce2bbe68-3aa1-45fd-9077-9a2cccb65726",
+    "segment_count": 3,
+    "original_text": "Hello world, this is a test.\nThe quick brown fox jumps over the lazy dog.\nTesting the new architecture pipeline.",
+    "translated_text": "\u4f60\u597d\u4e16\u754c\uff0c\u8fd9\u662f\u4e00\u4e2a\u6d4b\u8bd5\u3002\n\u654f\u6377\u7684\u68d5\u8272\u72d0\u72f8\u8df3\u8fc7\u4e86\u61d2\u72d7\u3002\n\u6b63\u5728\u6d4b\u8bd5\u65b0\u67b6\u6784\u7ba1\u9053\u3002",
+    "bilingual_text": "Hello world, this is a test.\n\u4f60\u597d\u4e16\u754c\uff0c\u8fd9\u662f\u4e00\u4e2a\u6d4b\u8bd5\u3002\nThe quick brown fox jumps over the lazy dog.\n\u654f\u6377\u7684\u68d5\u8272\u72d0\u72f8\u8df3\u8fc7\u4e86\u61d2\u72d7\u3002\nTesting the new architecture pipeline.\n\u6b63\u5728\u6d4b\u8bd5\u65b0\u67b6\u6784\u7ba1\u9053\u3002",
+    "repo_path": "/tmp/tmpahf3iwj0/smoke.sqlite3",
+    "repo_closed": true,
+    "default_config_changed": false,
+    "default_runtime_touched": false,
+    "errors": [],
+    "steps": [
+      {
+        "step": "config_snapshot",
+        "ok": true,
+        "detail": "config defaults unchanged"
+      },
+      {
+        "step": "repo_init",
+        "ok": true,
+        "detail": "created at /tmp/tmpahf3iwj0/smoke.sqlite3"
+      },
+      {
+        "step": "segment_api",
+        "ok": true,
+        "detail": "SegmentAPI constructed"
+      },
+      {
+        "step": "data_write",
+        "ok": true,
+        "detail": "3 segments written"
+      },
+      {
+        "step": "api_read",
+        "ok": true,
+        "detail": "original=112 chars, translated=37 chars"
+      },
+      {
+        "step": "export",
+        "ok": true,
+        "detail": "TXT=238 chars, JSON valid"
+      },
+      {
+        "step": "scheduler",
+        "ok": true,
+        "detail": "scheduler + adapter round-trip OK"
+      },
+      {
+        "step": "history_vm",
+        "ok": true,
+        "detail": "session=ce2bbe68..."
+      },
+      {
+        "step": "formatter",
+        "ok": true,
+        "detail": "HTML output 1099 chars"
+      },
+      {
+        "step": "dashboard_adapter",
+        "ok": true,
+        "detail": "dashboard adapter read OK"
+      },
+      {
+        "step": "shutdown",
+        "ok": true,
+        "detail": "repo closed"
+      }
+    ],
+    "started_at": 1782120264.749922,
+    "finished_at": 1782120265.482721
+  }
+}
