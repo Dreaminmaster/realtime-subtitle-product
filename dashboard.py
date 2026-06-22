@@ -1368,6 +1368,18 @@ class Dashboard(QWidget):
         header = QLabel("🔍 System Diagnostics")
         header.setStyleSheet("font-size: 16px; font-weight: bold; color: #fab387;")
         layout.addWidget(header)
+
+        # Architecture status (v2.4)
+        self._arch_status = QLabel("")
+        self._arch_status.setWordWrap(True)
+        self._arch_status.setStyleSheet(
+            "color: #bac2de; background: #181825; border: 1px solid #313244; "
+            "border-radius: 4px; padding: 8px; font-size: 11px;"
+        )
+        layout.addWidget(self._arch_status)
+        self._refresh_arch_status()
+
+        # ─────────────────────────────────────────────────────
         
         # Run diagnostics button
         self.run_diag_btn = QPushButton("▶ Run Diagnostics")
@@ -1400,6 +1412,31 @@ class Dashboard(QWidget):
         self.tabs.addTab(tab, "🔍 Diag")
         self.tabs.setTabToolTip(self.tabs.count() - 1, "Diagnostics — check system, view logs")
     
+    def _refresh_arch_status(self):
+        """Update architecture status label from current config + SettingsDependencyEngine."""
+        try:
+            from src.settings_validation_viewmodel import build_settings_validation_viewmodel
+            settings = {
+                "use_translation_scheduler": getattr(config, "use_translation_scheduler", False),
+                "use_sqlite_session_repository": getattr(config, "use_sqlite_session_repository", False),
+            }
+            vm = build_settings_validation_viewmodel(settings)
+            lines = [f"<b>Architecture:</b> {vm.mode_label}"]
+            lines.append(f"<b>Summary:</b> {vm.summary}")
+            if vm.messages:
+                lines.append("<b>Issues:</b>")
+                for m in vm.messages:
+                    tag = m.severity.upper()
+                    color = "#f38ba8" if tag == "ERROR" else "#f9e2af" if tag == "WARNING" else "#89b4fa"
+                    lines.append(f'  <span style="color:{color};">[{tag}]</span> {m.message}')
+            if vm.recommended_changes:
+                lines.append("<b>Recommended:</b>")
+                for k, v in vm.recommended_changes.items():
+                    lines.append(f"  {k} = {v}")
+            self._arch_status.setText("<br>".join(lines))
+        except Exception as e:
+            self._arch_status.setText(f"<i>Architecture check unavailable: {e}</i>")
+
     def _run_diagnostics(self):
         """Run and display system diagnostics with pipeline state"""
         from diagnostics import diagnostics
