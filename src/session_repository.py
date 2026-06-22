@@ -93,6 +93,10 @@ class SQLiteSessionRepository:
     def close(self) -> None:
         if self._conn is not None:
             try:
+                self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except Exception:
+                pass
+            try:
                 self._conn.close()
             except Exception:
                 pass

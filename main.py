@@ -241,11 +241,28 @@ def create_pipeline():
             )
             log.info(f"Pipeline: translation engine ({trans_mode}) initialized")
 
-            # v2.4: TranslationAdapter bridges scheduler → pipeline
-            # Feature flag: REALTIME_SUBTITLE_USE_TRANSLATION_SCHEDULER
+            # v2.4: TranslationAdapter + optional SQLite repository
+            # Feature flags: REALTIME_SUBTITLE_USE_TRANSLATION_SCHEDULER
+            #                REALTIME_SUBTITLE_USE_SQLITE_SESSION_REPOSITORY
+            self._repository = None
+            self._repo_owned = False
             if getattr(config, 'use_translation_scheduler', False):
                 from src.translation_adapter import TranslationAdapter
                 from src.translation_scheduler import TranslationScheduler
+
+                # Repository (optional, only when both flags are on)
+                if getattr(config, 'use_sqlite_session_repository', False):
+                    try:
+                        from src.session_repository import SQLiteSessionRepository, get_default_database_path
+                        self._repository = SQLiteSessionRepository(get_default_database_path())
+                        self._repository.initialize()
+                        self._repo_owned = True
+                        log.info("Pipeline: SQLite repository initialized")
+                    except Exception as exc:
+                        log.error(f"Pipeline: repository init failed — running without persistence: {exc}")
+                        self._repository = None
+                        self._repo_owned = False
+
                 self._translation_scheduler = TranslationScheduler(
                     translator=self.translation_engine.translate,
                     max_queue=30,
@@ -254,6 +271,8 @@ def create_pipeline():
                 self.translation_adapter = TranslationAdapter(
                     scheduler=self._translation_scheduler,
                     on_update_text=self.signals.update_text.emit,
+                    repository=self._repository,
+                    repository_enabled=self._repository is not None,
                 )
                 self.translation_adapter.start_session(str(id(self)))
                 log.info("Pipeline: v2.4 TranslationScheduler wired (use_translation_scheduler=true)")
@@ -283,6 +302,13 @@ def create_pipeline():
             self._session_generation += 1
             if hasattr(self, 'translation_adapter'):
                 self.translation_adapter.stop_session()
+            if self._repo_owned and self._repository is not None:
+                try:
+                    self._repository.close()
+                except Exception as exc:
+                    log.warning(f"Pipeline: repository close error: {exc}")
+                self._repo_owned = False
+                self._repository = None
             log.info("Pipeline stopped — session invalidated")
             return True
         
