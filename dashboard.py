@@ -1379,6 +1379,17 @@ class Dashboard(QWidget):
         layout.addWidget(self._arch_status)
         self._refresh_arch_status()
 
+        # Runtime decision (v2.4)
+        self._runtime_decision_status = QLabel("")
+        self._runtime_decision_status.setTextFormat(Qt.TextFormat.RichText)
+        self._runtime_decision_status.setWordWrap(True)
+        self._runtime_decision_status.setStyleSheet(
+            "color: #bac2de; background: #181825; border: 1px solid #313244; "
+            "border-radius: 4px; padding: 8px; font-size: 11px;"
+        )
+        layout.addWidget(self._runtime_decision_status)
+        self._refresh_runtime_decision_status()
+
         # Transcript history (v2.4)
         self._history_status = QLabel("")
         self._history_status.setTextFormat(Qt.TextFormat.RichText)
@@ -1423,6 +1434,17 @@ class Dashboard(QWidget):
         self.tabs.addTab(tab, "🔍 Diag")
         self.tabs.setTabToolTip(self.tabs.count() - 1, "Diagnostics — check system, view logs")
     
+    def _refresh_runtime_decision_status(self):
+        """Update runtime decision label using guard + formatter."""
+        try:
+            from src.dashboard_runtime_decision_adapter import build_runtime_decision_html
+            html = build_runtime_decision_html(config)
+            self._runtime_decision_status.setText(html)
+        except Exception as e:
+            self._runtime_decision_status.setText(
+                f"<h3>Runtime Decision</h3><p><i>Unavailable: {e}</i></p>"
+            )
+
     def _refresh_arch_status(self):
         """Update architecture status label from current config + SettingsDependencyEngine."""
         try:
