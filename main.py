@@ -241,17 +241,19 @@ def create_pipeline():
             )
             log.info(f"Pipeline: translation engine ({trans_mode}) initialized")
 
-            # v2.4: TranslationAdapter + optional SQLite repository
+            # v2.4: Runtime settings guard evaluates feature flags
             # Feature flags: REALTIME_SUBTITLE_USE_TRANSLATION_SCHEDULER
             #                REALTIME_SUBTITLE_USE_SQLITE_SESSION_REPOSITORY
             self._repository = None
             self._repo_owned = False
-            if getattr(config, 'use_translation_scheduler', False):
+            from src.runtime_settings_guard import RuntimeSettingsGuard, settings_from_config
+            self._runtime_decision = RuntimeSettingsGuard().evaluate(settings_from_config(config))
+
+            if self._runtime_decision.allow_translation_scheduler:
                 from src.translation_adapter import TranslationAdapter
                 from src.translation_scheduler import TranslationScheduler
 
-                # Repository (optional, only when both flags are on)
-                if getattr(config, 'use_sqlite_session_repository', False):
+                if self._runtime_decision.allow_sqlite_repository:
                     try:
                         from src.session_repository import SQLiteSessionRepository, get_default_database_path
                         self._repository = SQLiteSessionRepository(get_default_database_path())
