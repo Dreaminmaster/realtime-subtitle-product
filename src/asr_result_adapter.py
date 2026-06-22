@@ -153,13 +153,18 @@ def forward_normalized_asr_to_translation_adapter(
     result: NormalizedASRResult,
     translation_adapter,
 ) -> bool:
-    """Bridge: FINAL → adapter.on_final_text. PARTIAL/STABLE → noop."""
+    """Bridge: FINAL → adapter.on_final_text. PARTIAL/STABLE → noop.
+
+    Does NOT catch exceptions — let the caller decide error handling.
+    """
     if result is None:
         return False
     if result.status != "FINAL":
         return False
-    try:
-        translation_adapter.on_final_text(result.text, int(result.segment_id.rsplit("-", 1)[-1]) if result.segment_id.startswith("seg-") else hash(result.segment_id) % 100000)
-        return True
-    except Exception:
-        return False
+    # Compute chunk_id from segment_id
+    if result.segment_id.startswith("seg-"):
+        chunk_id = int(result.segment_id.rsplit("-", 1)[-1])
+    else:
+        chunk_id = hash(result.segment_id) % 100000
+    translation_adapter.on_final_text(result.text, chunk_id)
+    return True

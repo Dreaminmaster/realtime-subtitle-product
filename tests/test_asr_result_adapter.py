@@ -168,7 +168,9 @@ class TestExceptionSafe:
         class FailingAdapter:
             def on_final_text(self, text, chunk_id):
                 raise RuntimeError("boom")
-        assert forward_normalized_asr_to_translation_adapter(r, FailingAdapter()) is False
+        # forward now raises — caller should catch it
+        with pytest.raises(RuntimeError, match="boom"):
+            forward_normalized_asr_to_translation_adapter(r, FailingAdapter())
 
 
 # ── 19. result serializable ───────────────────────────────────────
