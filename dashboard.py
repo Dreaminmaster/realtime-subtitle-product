@@ -1379,6 +1379,17 @@ class Dashboard(QWidget):
         layout.addWidget(self._arch_status)
         self._refresh_arch_status()
 
+        # Transcript history (v2.4)
+        self._history_status = QLabel("")
+        self._history_status.setTextFormat(Qt.TextFormat.RichText)
+        self._history_status.setWordWrap(True)
+        self._history_status.setStyleSheet(
+            "color: #bac2de; background: #181825; border: 1px solid #313244; "
+            "border-radius: 4px; padding: 8px; font-size: 11px;"
+        )
+        layout.addWidget(self._history_status)
+        self._refresh_history_status()
+
         # ─────────────────────────────────────────────────────
         
         # Run diagnostics button
@@ -1436,6 +1447,20 @@ class Dashboard(QWidget):
             self._arch_status.setText("<br>".join(lines))
         except Exception as e:
             self._arch_status.setText(f"<i>Architecture check unavailable: {e}</i>")
+
+    def _refresh_history_status(self):
+        """Refresh transcript history preview from SQLite repository.
+        Only opens the database if use_sqlite_session_repository is True."""
+        try:
+            from src.dashboard_history_adapter import build_history_viewmodel_for_dashboard
+            from src.history_dashboard_formatter import format_history_viewmodel_html
+            vm = build_history_viewmodel_for_dashboard(config)
+            html = format_history_viewmodel_html(vm)
+            self._history_status.setText(html)
+        except Exception as e:
+            self._history_status.setText(
+                f"<h3>Transcript History</h3><p><i>Unavailable: {e}</i></p>"
+            )
 
     def _run_diagnostics(self):
         """Run and display system diagnostics with pipeline state"""
