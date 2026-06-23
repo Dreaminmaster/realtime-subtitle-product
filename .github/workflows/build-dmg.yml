@@ -409,11 +409,25 @@ jobs:
           path: dist/*.dmg
           if-no-files-found: error
 
+      - name: Generate SHA256 checksum
+        run: |
+          DMG=$(ls dist/*.dmg | head -1)
+          shasum -a 256 "$DMG" > "$DMG.sha256"
+          cat "$DMG.sha256"
+          echo "checksum=$(cut -d' ' -f1 "$DMG.sha256")" >> $GITHUB_ENV
+
+      - name: Upload SHA256 checksum artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RealtimeSubtitle-DMG-SHA256
+          path: dist/*.dmg.sha256
+          if-no-files-found: error
+
       - name: Create Release and Upload DMG
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ github.event.inputs.version }}
-          name: Realtime Subtitle v${{ github.event.inputs.version }}
+          tag_name: ${{ github.event.inputs.version }}
+          name: Realtime Subtitle ${{ github.event.inputs.version }}
           body: |
 
             # Realtime Subtitle v${{ github.event.inputs.version }}
