@@ -1497,7 +1497,7 @@ class Dashboard(QWidget):
         # Add pipeline runtime state
         try:
             from version import BUILD_VERSION, BUILD_COMMIT, BUILD_TIME
-            report += f"\n\nApp: v{BUILD_VERSION} (commit {BUILD_COMMIT})"
+            report += f"\n\nApp: {BUILD_VERSION} (commit {BUILD_COMMIT})"
         except ImportError:
             report += f"\n\nApp: dev build"
         

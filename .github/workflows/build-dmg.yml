@@ -103,11 +103,14 @@ jobs:
       - name: Build DMG
         run: |
           # Inject build identity into version.py BEFORE build
-          GIT_SHA=$(git rev-parse HEAD | cut -c1-10)
-          BUILD_TS=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          RAW_VERSION="${{ github.event.inputs.version }}"
+          VERSION_NO_V="${RAW_VERSION#v}"
+          BUILD_VERSION="v${VERSION_NO_V}"
+          BUILD_COMMIT="$(git rev-parse HEAD | cut -c1-10)"
+          BUILD_TS="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           cat > version.py <<EOF
-          BUILD_VERSION = "${{ github.event.inputs.version }}"
-          BUILD_COMMIT = "${GIT_SHA}"
+          BUILD_VERSION = "${BUILD_VERSION}"
+          BUILD_COMMIT = "${BUILD_COMMIT}"
           BUILD_TIME = "${BUILD_TS}"
           EOF
           bash build_dmg.sh "${{ github.event.inputs.version }}"
@@ -431,7 +434,7 @@ jobs:
           name: Realtime Subtitle ${{ github.event.inputs.version }}
           body: |
 
-            # Realtime Subtitle v${{ github.event.inputs.version }}
+            # Realtime Subtitle ${{ github.event.inputs.version }}
 
             macOS 实时字幕翻译工具 — 无需用户额外安装 Python。App 已内置 portable Python 运行环境。
 
