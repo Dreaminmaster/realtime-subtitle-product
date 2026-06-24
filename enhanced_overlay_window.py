@@ -110,9 +110,10 @@ class SubtitleBubble(QFrame):
         self.leaveEvent = lambda e: self.copy_btn.hide()
     
     def update_translated(self, text):
+        show_trans = self.parent_style.get("show_translation", True)
         if text:
             self.translated_label.setText(text)
-            self.translated_label.setVisible(True)
+            self.translated_label.setVisible(show_trans)
         else:
             self.translated_label.setVisible(False)
     
@@ -254,6 +255,8 @@ class EnhancedOverlayWindow(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.setWindowTitle("")  # prevent macOS title bar text
         
         self.setWindowOpacity(self.subtitle_style.get("window_opacity", 0.85))
         self.setMouseTracking(True)
