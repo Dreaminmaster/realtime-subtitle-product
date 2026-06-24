@@ -158,14 +158,22 @@ class OnlineAPITranslator(BaseTranslator):
                 max_tokens=500,
                 timeout=self.timeout
             )
-            result = response.choices[0].message.content.strip()
+            choice = response.choices[0] if response and hasattr(response, 'choices') and response.choices else None
+            if choice is None or not hasattr(choice, 'message'):
+                return "[Translation Failed: empty response from server]"
+            content = choice.message.content
+            if content is None:
+                return "[Translation Failed: empty content from model]"
+            result = content.strip()
             result = re.sub(r'<think>.*?</think>', '', result, flags=re.DOTALL).strip()
+            if not result:
+                return "[Translation Failed: empty translation result]"
             
             self.previous_text = text
             self.previous_translation = result
             return result
             
-        except Exception as e:
+        except BaseException as e:
             import logging
             log = logging.getLogger("RealtimeSubtitle")
             err_str = str(e)
