@@ -108,7 +108,7 @@ class Dashboard(QWidget):
     model_download_status = pyqtSignal(str, str, int)
     model_download_done = pyqtSignal(str, int, object, int)  # (model_id, terminal_state, error, attempt)
     progress_event = pyqtSignal(object)  # ProgressEvent — update ProgressPanel
-    translation_test_finished = pyqtSignal(bool, str)
+    translation_test_finished = pyqtSignal(int, bool, str)
     model_list_finished = pyqtSignal(bool, object, str)
 
     FORCE_QUIT = "force_quit"
@@ -155,9 +155,26 @@ class Dashboard(QWidget):
                 return True
     
     def closeEvent(self, event):
-        """Close window only after clean stop + cancel downloads."""
+        """Hide the control center during a session; quit only on a real app exit."""
         import logging
         log = logging.getLogger("RealtimeSubtitle")
+
+        # On macOS the red traffic-light button closes a window, not
+        # necessarily the application.  While captions are running, treating
+        # that action as Stop is surprising: keep the overlay alive and hide
+        # only this control-center window.  QApplication.quit()/Cmd-Q sends a
+        # non-spontaneous close event and still follows the cleanup path below.
+        session_active = getattr(self, "pipeline", None) is not None
+        startup_active = (
+            hasattr(self, "startup_worker")
+            and self.startup_worker is not None
+            and self.startup_worker.isRunning()
+        )
+        if event.spontaneous() and (session_active or startup_active):
+            log.info("Control center closed during active session — hiding only")
+            event.ignore()
+            self._hide_control_center_for_session()
+            return
 
         # Cancel all active downloads
         if hasattr(self, '_active_downloads'):
@@ -186,6 +203,9 @@ class Dashboard(QWidget):
         self.setStyleSheet(STYLESHEET)
         self.ui_language = normalize_language(getattr(config, "ui_language", "en"))
         self._did_fit_to_screen = False
+        self._control_center_hidden_for_session = False
+        self._translation_test_generation = 0
+        self._translation_test_fingerprint = None
         
         # Main Layout
         self.layout = QVBoxLayout()
@@ -1063,13 +1083,13 @@ class Dashboard(QWidget):
         self.api_key = QLineEdit(config.api_key)
         self.api_key.setEchoMode(QLineEdit.EchoMode.Password)
         self.api_key.setPlaceholderText("sk-...")
-        self.api_key.textChanged.connect(self.update_translation_mode_label)
+        self.api_key.textChanged.connect(self._on_translation_settings_changed)
         layout.addRow("API Key:", self.api_key)
         
         self.base_url = QLineEdit(config.api_base_url or "")
         self.base_url.setPlaceholderText("https://api.openai.com/v1")
         self.base_url.setToolTip("Must start with http:// or https://. Example: http://localhost:1234/v1")
-        self.base_url.textChanged.connect(self.update_translation_mode_label)
+        self.base_url.textChanged.connect(self._on_translation_settings_changed)
         layout.addRow("Base URL:", self.base_url)
         
         # Model selection with refresh button
@@ -1078,7 +1098,7 @@ class Dashboard(QWidget):
         self.model.setEditable(True)
         self.model.addItem(config.model)
         self.model.setToolTip("Model name. Use 'Fetch' to pull from server.")
-        self.model.currentTextChanged.connect(self.update_translation_mode_label)
+        self.model.currentTextChanged.connect(self._on_translation_settings_changed)
         model_layout.addWidget(self.model)
         
         self.refresh_models_btn = QPushButton("Fetch")
@@ -1098,6 +1118,7 @@ class Dashboard(QWidget):
             self.target_lang.setCurrentIndex(target_index)
         else:
             self.target_lang.setCurrentText(config.target_lang)
+        self.target_lang.currentTextChanged.connect(self._on_translation_settings_changed)
         layout.addRow("Target Language:", self.target_lang)
         
         # Test Translation button
@@ -1147,6 +1168,7 @@ class Dashboard(QWidget):
         self.update_translation_mode_label()
 
     def _on_provider_changed(self, *_):
+        self._invalidate_translation_test()
         mode = self.translation_mode.currentData() or "off"
         if mode == "online":
             if not self.base_url.text().strip() or "127.0.0.1" in self.base_url.text() or "localhost" in self.base_url.text():
@@ -1159,6 +1181,42 @@ class Dashboard(QWidget):
             if not self.model.currentText().strip() or self.model.currentText() == "agnes-2.0-flash":
                 self.model.setCurrentText("qwen2.5-coder-14b-instruct-mlx")
         self.update_translation_mode_label()
+
+    def _translation_settings_snapshot(self):
+        """Return the exact settings identity covered by a connection test."""
+        return (
+            self.translation_mode.currentData() or "off",
+            self.api_key.text().strip(),
+            self.base_url.text().strip().rstrip("/"),
+            self.model.currentText().strip(),
+            str(self.target_lang.currentData() or self.target_lang.currentText()).strip(),
+        )
+
+    def _on_translation_settings_changed(self, *_):
+        self._invalidate_translation_test()
+        self.update_translation_mode_label()
+
+    def _invalidate_translation_test(self, *, show_message=True):
+        """Invalidate both visible and in-flight results after any setting change."""
+        self._translation_test_generation += 1
+        self._translation_test_fingerprint = None
+        if hasattr(self, "trans_test_result"):
+            if show_message:
+                self.trans_test_result.setText(
+                    "尚未测试当前设置" if self.ui_language == "zh-Hans"
+                    else "Current settings have not been tested"
+                )
+            else:
+                self.trans_test_result.clear()
+            self.trans_test_result.setStyleSheet(
+                "color: #8f8a82; font-size: 12px; padding-top: 5px;"
+            )
+        if hasattr(self, "test_trans_btn"):
+            endpoint_mode = (self.translation_mode.currentData() or "off") in {
+                "online", "local", "custom",
+            }
+            self.test_trans_btn.setEnabled(endpoint_mode)
+            self._set_localized_text(self.test_trans_btn, "Test Connection")
         
     def update_translation_mode_label(self, *_):
         mode = self.translation_mode.currentData() or "off"
@@ -1215,6 +1273,9 @@ class Dashboard(QWidget):
             self.base_url.setText(base_url)
         model = self.model.currentText().strip()
         target_lang = self.target_lang.currentData() or self.target_lang.currentText()
+        self._translation_test_generation += 1
+        request_generation = self._translation_test_generation
+        self._translation_test_fingerprint = self._translation_settings_snapshot()
 
         if mode == "off":
             self.trans_test_result.setText(
@@ -1274,21 +1335,29 @@ class Dashboard(QWidget):
                 if sample and not sample.startswith("[Translation Failed:"):
                     prefix = "连接成功" if self.ui_language == "zh-Hans" else "Connected"
                     self.translation_test_finished.emit(
-                        True, f"{prefix} · {model}\n{sample[:120]}"
+                        request_generation, True, f"{prefix} · {model}\n{sample[:120]}"
                     )
                 else:
                     hint = ""
                     if is_local:
                         hint = "\nCheck that the local server and selected model are running."
-                    self.translation_test_finished.emit(False, f"{sample or 'Empty response'}{hint}")
+                    self.translation_test_finished.emit(
+                        request_generation, False, f"{sample or 'Empty response'}{hint}"
+                    )
             except Exception as e:
                 log.error(f"Translation test: {e}")
-                self.translation_test_finished.emit(False, f"{type(e).__name__}: {str(e)[:160]}")
+                self.translation_test_finished.emit(
+                    request_generation, False, f"{type(e).__name__}: {str(e)[:160]}"
+                )
         
         import threading
         threading.Thread(target=_do_test, daemon=True).start()
 
-    def _on_translation_test_finished(self, ok: bool, message: str):
+    def _on_translation_test_finished(self, generation: int, ok: bool, message: str):
+        if generation != self._translation_test_generation:
+            return
+        if self._translation_test_fingerprint != self._translation_settings_snapshot():
+            return
         self.trans_test_result.setText(("✅ " if ok else "❌ ") + message)
         color = "#a6e3a1" if ok else "#f38ba8"
         self.trans_test_result.setStyleSheet(f"color: {color}; font-size: 12px;")
@@ -1925,6 +1994,7 @@ class Dashboard(QWidget):
         if hasattr(self, "model_list_layout"):
             self._refresh_model_list()
         if hasattr(self, "trans_mode_label"):
+            self._invalidate_translation_test()
             self.update_translation_mode_label()
 
     def _save_ui_language(self):
@@ -2219,6 +2289,7 @@ class Dashboard(QWidget):
                 "visible_subtitles": self.visible_subtitles.value(),
                 "history_limit": getattr(config, "subtitle_history_limit", 250),
                 "display_mode": self.display_mode.currentData() or "bilingual",
+                "ui_language": self.ui_language,
             }
             self.overlay_window = create_and_show_overlay(
                 pipeline, signals, start_pipeline=False, subtitle_style=style
@@ -2232,6 +2303,8 @@ class Dashboard(QWidget):
                 self.overlay_window.stop_requested.connect(self.on_stop)
             if hasattr(self.overlay_window, 'style_changed'):
                 self.overlay_window.style_changed.connect(self._on_style_changed)
+            if hasattr(self.overlay_window, 'control_center_requested'):
+                self.overlay_window.control_center_requested.connect(self._show_control_center)
             
             # Connect lifecycle signals BEFORE pipeline.start()
             if hasattr(signals, 'pipeline_failed'):
@@ -2271,6 +2344,7 @@ class Dashboard(QWidget):
         self.status_label.setStyleSheet("font-size: 18px; color: #f38ba8;")
         self.start_btn.setEnabled(True)
         self._set_localized_text(self.start_btn, "Start Live Subtitles")
+        self._show_control_center()
         
         from PyQt6.QtWidgets import QMessageBox
         QMessageBox.critical(self, "Launch Failed",
@@ -2288,7 +2362,7 @@ class Dashboard(QWidget):
         self.start_btn.show()
         self.start_btn.setEnabled(False)
         self._set_localized_text(self.start_btn, "Cleaning up…")
-        self.showNormal()
+        self._show_control_center()
     
     def _on_pipeline_cleanup_finished(self, success, message):
         """ASR worker and executors have shut down (or not). Safe to clean UI only if success."""
@@ -2322,7 +2396,20 @@ class Dashboard(QWidget):
         self.status_label.setStyleSheet("font-size: 18px; color: #a6e3a1;")
         self.stop_btn.show()
         self.stop_btn.setEnabled(True)
-        self.showMinimized()
+        self._hide_control_center_for_session()
+
+    def _hide_control_center_for_session(self):
+        """Keep the caption overlay running without a minimized main window."""
+        self._control_center_hidden_for_session = True
+        self.setWindowState(self.windowState() & ~Qt.WindowState.WindowMinimized)
+        self.hide()
+
+    def _show_control_center(self):
+        """Explicit user path back from the overlay to the main controls."""
+        self._control_center_hidden_for_session = False
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
     
     def _on_audio_failed(self, message):
         """Audio device failure. Show error, disable Retry until cleanup."""
@@ -2336,7 +2423,7 @@ class Dashboard(QWidget):
         self.start_btn.show()
         self.start_btn.setEnabled(False)  # disabled until cleanup_finished
         self._set_localized_text(self.start_btn, "Wait…")
-        self.showNormal()
+        self._show_control_center()
     
     def _on_startup_timeout(self):
         """Pipeline never confirmed start."""
@@ -2350,6 +2437,7 @@ class Dashboard(QWidget):
         self.start_btn.show()
         self.start_btn.setEnabled(True)
         self._set_localized_text(self.start_btn, "Retry Start")
+        self._show_control_center()
     
     def _on_style_changed(self, style):
         """Sync style changes back to the style tab"""
@@ -2410,7 +2498,7 @@ class Dashboard(QWidget):
         self.start_btn.show()
         self.start_btn.setEnabled(True)
         self._set_localized_text(self.start_btn, "Start Live Subtitles")
-        self.showNormal()
+        self._show_control_center()
         if hasattr(self, "history_list"):
             self._refresh_history()
         return True

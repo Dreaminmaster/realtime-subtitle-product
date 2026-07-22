@@ -213,6 +213,7 @@ class EnhancedOverlayWindow(QWidget):
     
     stop_requested = pyqtSignal()
     style_changed = pyqtSignal(dict)
+    control_center_requested = pyqtSignal()
     
     def __init__(self, subtitle_style=None):
         super().__init__()
@@ -236,6 +237,7 @@ class EnhancedOverlayWindow(QWidget):
             "history_limit": 250,
             "border_width": 0,
             "border_color": "rgba(255,255,255,50)",
+            "ui_language": "en",
         }
         
         if subtitle_style:
@@ -400,6 +402,19 @@ class EnhancedOverlayWindow(QWidget):
         self.save_btn.setStyleSheet(self._control_btn_style())
         self.save_btn.clicked.connect(self._save_transcript)
         control_bar.addWidget(self.save_btn)
+
+        self.control_center_btn = QPushButton(
+            "主界面" if self.subtitle_style.get("ui_language") == "zh-Hans" else "Controls"
+        )
+        self.control_center_btn.setToolTip(
+            "显示主界面" if self.subtitle_style.get("ui_language") == "zh-Hans"
+            else "Show Control Center"
+        )
+        self.control_center_btn.setFixedSize(58, 28)
+        self.control_center_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.control_center_btn.setStyleSheet(self._control_btn_style())
+        self.control_center_btn.clicked.connect(self.control_center_requested.emit)
+        control_bar.addWidget(self.control_center_btn)
         
         # Stop button
         self.stop_btn = QPushButton("■")

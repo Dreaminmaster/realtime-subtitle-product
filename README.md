@@ -8,14 +8,14 @@
 
 ## 下载 / Download
 
-当前稳定版：**v2.5.1** · macOS 13 Ventura 或更高版本
+当前稳定版：**v2.5.2** · macOS 13 Ventura 或更高版本
 
-Current stable release: **v2.5.1** · macOS 13 Ventura or later
+Current stable release: **v2.5.2** · macOS 13 Ventura or later
 
 | Mac | 安装包 / Installer | 适用设备 / Hardware |
 |---|---|---|
-| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.5.1-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
-| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.5.1-macos-x86_64.dmg) | Intel-based Macs |
+| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.5.2-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
+| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.5.2-macos-x86_64.dmg) | Intel-based Macs |
 
 [查看全部版本 / View all releases](https://github.com/Dreaminmaster/realtime-subtitle-product/releases)
 
@@ -36,6 +36,8 @@ Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本�
 - 可自定义屏幕上同时显示的字幕条数；向上滚动可查看本次会话的过往字幕。
 - 默认把每次字幕保存为本机会话，像聊天记录一样回看、导出或删除；也可在开始前切换为不留记录的临时会话。
 - 应用界面支持全局中文/English 即时切换，入口位于 **System**。
+- 开始字幕后控制中心会完全隐藏，只保留悬浮字幕；字幕工具条中的 **主界面** 可随时恢复控制中心。
+- 运行时点击控制中心红色关闭按钮只隐藏窗口，不会中断字幕；点击字幕工具条停止按钮会结束会话，`⌘Q` 会完全退出 App。
 - 在线 API、本地 LLM、OpenAI-compatible 自定义 API，以及完全关闭翻译。
 - 翻译服务通过单一 Provider 选择器配置：Agnes AI、LM Studio 或任意 OpenAI-compatible 服务。
 - 麦克风输入与 BlackHole 系统音频输入。
@@ -78,6 +80,8 @@ brew install blackhole-2ch
 `agnes-2.0-flash`；选择 **LM Studio / 本地服务** 会使用
 `http://127.0.0.1:1234/v1`。缺失的协议和本地 `/v1` 路径会自动补全。API Key 不会写入仓库，只在你保存设置后进入本机用户配置。
 
+连接测试结果只对当前服务、API Key、地址、模型和目标语言有效。切换服务或修改任一字段后，旧的成功状态会立即变为“尚未测试当前设置”；旧请求稍后返回也不会覆盖新状态。
+
 语音只在本机识别。只有启用在线翻译时，识别出的文本才会发送到你配置的服务；音频不会由本项目上传。
 
 ### 数据与隐私
@@ -114,6 +118,8 @@ Realtime Subtitle is a native-feeling macOS control center with an always-on-top
 - Instant app-wide English / Simplified Chinese switching under **System**.
 - Online, local-LLM, custom OpenAI-compatible, or disabled translation.
 - A single provider selector for Agnes AI, LM Studio, and custom OpenAI-compatible endpoints.
+- The control center hides completely after a session starts; use **Controls** in the caption bar to bring it back.
+- Closing the control-center window during a live session hides that window without stopping captions. Use the overlay Stop button to end the session, or `⌘Q` to quit the app completely.
 - Context-aware phrase revisions join likely unfinished speech after a short pause and retranslate the same caption instead of leaving fragmented lines.
 - Strict quoted-speech prompting, automatic retry, and response screening prevent local models from answering spoken questions as a chat assistant.
 - Microphone and BlackHole system-audio input.
@@ -151,6 +157,10 @@ Missing schemes and the local `/v1` path are normalized automatically.
 Credentials are never committed to this repository; saving them writes only to
 the current user's local configuration.
 
+Connection results are scoped to the exact provider, credential, endpoint,
+model, and target language. Editing any of them immediately invalidates the old
+result, and a late response from an earlier test cannot reappear as success.
+
 ## 从源码运行 / Run from source
 
 Python 3.10–3.12 is recommended.
@@ -186,17 +196,17 @@ Build a native DMG on a matching Mac:
 
 ```bash
 # Apple Silicon host
-bash build_dmg.sh 2.5.1 arm64
+bash build_dmg.sh 2.5.2 arm64
 
 # Intel host, or Apple Silicon with Rosetta installed
-bash build_dmg.sh 2.5.1 x86_64
+bash build_dmg.sh 2.5.2 x86_64
 ```
 
 Outputs:
 
 ```text
-dist/RealtimeSubtitle-2.5.1-macos-arm64.dmg
-dist/RealtimeSubtitle-2.5.1-macos-x86_64.dmg
+dist/RealtimeSubtitle-2.5.2-macos-arm64.dmg
+dist/RealtimeSubtitle-2.5.2-macos-x86_64.dmg
 ```
 
 The GitHub Actions release workflow builds `arm64` on an Apple Silicon runner and `x86_64` on an Intel runner, verifies the embedded architecture and app icon, creates SHA-256 checksums, and publishes both DMGs to one release.

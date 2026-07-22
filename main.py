@@ -127,6 +127,9 @@ def main():
     app = QApplication.instance()
     if not app:
         app = QApplication(sys.argv)
+    # The control center may be hidden while the subtitle overlay remains
+    # active.  Window closure is handled explicitly by Dashboard.closeEvent.
+    app.setQuitOnLastWindowClosed(False)
     try:
         from PyQt6.QtGui import QIcon
         icon_path = os.path.join(
