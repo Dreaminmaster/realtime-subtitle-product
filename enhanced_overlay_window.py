@@ -214,8 +214,8 @@ class EnhancedOverlayWindow(QWidget):
             "original_font_size": 20,
             "translation_font_size": 17,
             "original_color": "#ffffff",
-            "translation_color": "#9db5ff",
-            "bubble_bg": "rgba(8, 12, 24, 225)",
+            "translation_color": "#d99a69",
+            "bubble_bg": "rgba(24, 23, 21, 232)",
             "bubble_radius": 14,
             "show_translation": True,
             "show_original": True,
@@ -223,13 +223,18 @@ class EnhancedOverlayWindow(QWidget):
             "font_family": "Helvetica Neue",
             "display_mode": "bilingual",  # bilingual, original_only, translation_only
             "auto_scroll": True,
-            "max_bubbles": 2,
+            "visible_subtitles": 3,
+            "history_limit": 250,
             "border_width": 0,
             "border_color": "rgba(255,255,255,50)",
         }
         
         if subtitle_style:
             self.subtitle_style.update(subtitle_style)
+        # Older settings used max_bubbles as a destructive history cap.  Keep
+        # its display intent while retaining actual scrollback history.
+        if subtitle_style and "max_bubbles" in subtitle_style and "visible_subtitles" not in subtitle_style:
+            self.subtitle_style["visible_subtitles"] = subtitle_style["max_bubbles"]
         self._sync_display_mode_flags()
         
         self.items = []  # [(chunk_id, widget)]
@@ -297,9 +302,11 @@ class EnhancedOverlayWindow(QWidget):
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         self.scroll_area.setStyleSheet("""
             QScrollArea { background: transparent; border: none; }
-            QScrollBar:vertical { width: 0px; }
+            QScrollBar:vertical { background: transparent; width: 7px; margin: 3px 0; }
+            QScrollBar::handle:vertical { background: rgba(220,215,204,90); border-radius: 3px; min-height: 24px; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
         """)
-        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         
         # Container
@@ -309,7 +316,7 @@ class EnhancedOverlayWindow(QWidget):
         self.container_layout.setContentsMargins(5, 5, 5, 5)
         self.container_layout.setSpacing(0)
         self.container_layout.setAlignment(Qt.AlignmentFlag.AlignBottom)  # Push latest to bottom
-        self.container_layout.addStretch()  # Spacer above that pushes everything down
+        self.container_layout.addStretch()  # Spacer above pushes the newest rows down.
         self.container.setLayout(self.container_layout)
         
         self.scroll_area.setWidget(self.container)
@@ -320,8 +327,8 @@ class EnhancedOverlayWindow(QWidget):
         self.control_frame = QFrame()
         self.control_frame.setObjectName("ControlDock")
         self.control_frame.setStyleSheet(
-            "QFrame#ControlDock { background: rgba(12,18,34,220); "
-            "border: 1px solid rgba(145,165,215,48); border-radius: 18px; }"
+            "QFrame#ControlDock { background: rgba(30,29,27,230); "
+            "border: 1px solid rgba(235,225,210,42); border-radius: 18px; }"
         )
         self.control_frame.setFixedHeight(40)
         control_bar = QHBoxLayout(self.control_frame)
@@ -407,7 +414,8 @@ class EnhancedOverlayWindow(QWidget):
         
         # Initial size and position — bottom-centered like standard subtitles
         w = self.subtitle_style.get("window_width", 620)
-        h = self.subtitle_style.get("window_height", 220)
+        h = self._height_for_visible_rows()
+        self.subtitle_style["window_height"] = h
         self.resize(w, h)
         
         screen = QApplication.primaryScreen().availableGeometry()
@@ -429,10 +437,16 @@ class EnhancedOverlayWindow(QWidget):
     
     def _control_btn_style(self):
         return (
-            "QPushButton { background: transparent; color: #d8e1fb; "
+            "QPushButton { background: transparent; color: #e5dfd5; "
             "border-radius: 14px; border: none; font-size: 11px; } "
-            "QPushButton:hover { background: rgba(125,156,255,55); color: white; }"
+            "QPushButton:hover { background: rgba(217,130,70,70); color: white; }"
         )
+
+    def _height_for_visible_rows(self):
+        rows = max(1, min(8, int(self.subtitle_style.get("visible_subtitles", 3))))
+        # SubtitleBubble has a 70 px floor; include its layout spacing plus the
+        # compact 40 px control dock so the chosen count is visually honest.
+        return max(140, 46 + (rows * 78))
     
     def _toggle_display_mode(self):
         modes = ["bilingual", "original_only", "translation_only"]
@@ -487,6 +501,8 @@ class EnhancedOverlayWindow(QWidget):
         self.subtitle_style.update(style_dict)
         self._sync_display_mode_flags()
         self.setWindowOpacity(self.subtitle_style.get("window_opacity", 0.85))
+        if "visible_subtitles" in style_dict or "display_mode" in style_dict:
+            self.subtitle_style["window_height"] = self._height_for_visible_rows()
         self.resize(
             int(self.subtitle_style.get("window_width", self.width())),
             int(self.subtitle_style.get("window_height", self.height())),
@@ -495,9 +511,12 @@ class EnhancedOverlayWindow(QWidget):
         self.style_changed.emit(self.subtitle_style.copy())
     
     def update_text(self, chunk_id, original_text, translated_text=""):
-        """Update or add a subtitle bubble — latest always visible at bottom."""
+        """Update or add a row while preserving user-controlled scrollback."""
         if not original_text and not translated_text:
             return
+
+        scroll_bar = self.scroll_area.verticalScrollBar()
+        was_near_bottom = scroll_bar.maximum() - scroll_bar.value() <= 24
         
         # Store data
         if chunk_id not in self.transcript_data:
@@ -525,19 +544,19 @@ class EnhancedOverlayWindow(QWidget):
             if translated_text:
                 existing.update_translated(translated_text)
         else:
-            # Create new bubble, append to items list, insert before stretch spacer
+            # The stretch remains above the rows so short transcripts sit at
+            # the bottom, while long transcripts naturally become scrollable.
             timestamp = self.transcript_data[chunk_id]['timestamp']
             bubble = SubtitleBubble(
                 chunk_id, timestamp, original_text, translated_text,
                 parent_style=self.subtitle_style
             )
             self.items.append((chunk_id, bubble))
-            spacer_idx = self.container_layout.count() - 1  # before the stretch
-            self.container_layout.insertWidget(spacer_idx, bubble)
+            self.container_layout.addWidget(bubble)
         
-        # Keep the overlay subtitle-like instead of turning it into a log view.
-        max_bubbles = int(self.subtitle_style.get("max_bubbles", 2))
-        while len(self.items) > max_bubbles:
+        # Bound memory without conflating retention with the visible row count.
+        history_limit = max(20, int(self.subtitle_style.get("history_limit", 250)))
+        while len(self.items) > history_limit:
             old_id, old_widget = self.items.pop(0)
             self.container_layout.removeWidget(old_widget)
             old_widget.deleteLater()
@@ -545,7 +564,7 @@ class EnhancedOverlayWindow(QWidget):
                 del self.transcript_data[old_id]
         
         # Auto-scroll to latest
-        if self.subtitle_style.get("auto_scroll", True):
+        if self.subtitle_style.get("auto_scroll", True) and was_near_bottom:
             QTimer.singleShot(10, self._scroll_to_bottom)
     
     def _scroll_to_bottom(self):

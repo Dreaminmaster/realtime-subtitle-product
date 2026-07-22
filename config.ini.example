@@ -1,3 +1,6 @@
+[app]
+language = en
+
 [api]
 # Leave blank until a translation backend is configured in the app.
 base_url =
@@ -14,6 +17,14 @@ threads = 4
 display_duration = 10
 window_width = 800
 window_height = 120
+visible_subtitles = 3
+history_limit = 250
+original_font_size = 20
+translation_font_size = 17
+original_color = #ffffff
+translation_color = #d99a69
+window_opacity = 0.94
+display_mode = bilingual
 
 [transcription]
 backend = whisper

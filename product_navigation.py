@@ -52,25 +52,15 @@ class ProductNavigation(QFrame):
 
         self.sidebar = QFrame()
         self.sidebar.setObjectName("Sidebar")
-        self.sidebar.setFixedWidth(184)
+        self.sidebar.setFixedWidth(164)
         sidebar_layout = QVBoxLayout(self.sidebar)
-        sidebar_layout.setContentsMargins(14, 18, 14, 18)
-        sidebar_layout.setSpacing(6)
-
-        label = QLabel("CONTROL CENTER")
-        label.setObjectName("SidebarEyebrow")
-        sidebar_layout.addWidget(label)
-        sidebar_layout.addSpacing(8)
+        sidebar_layout.setContentsMargins(10, 14, 10, 14)
+        sidebar_layout.setSpacing(4)
 
         self.button_group = QButtonGroup(self)
         self.button_group.setExclusive(True)
         self._button_layout = sidebar_layout
         sidebar_layout.addStretch()
-
-        privacy = QLabel("LOCAL-FIRST\nAudio stays on this Mac")
-        privacy.setObjectName("PrivacyNote")
-        privacy.setWordWrap(True)
-        sidebar_layout.addWidget(privacy)
 
         self.stack = QStackedWidget()
         self.stack.setObjectName("ProductStack")
@@ -103,8 +93,8 @@ class ProductNavigation(QFrame):
         )
         self.button_group.addButton(button)
 
-        # Insert before the stretch and privacy note.
-        self._button_layout.insertWidget(self._button_layout.count() - 2, button)
+        # Insert before the stretch.
+        self._button_layout.insertWidget(self._button_layout.count() - 1, button)
         self._section_buttons[section_key] = button
         self._section_widgets[section_key] = section_widget
         return section_widget, button

@@ -8,14 +8,14 @@
 
 ## 下载 / Download
 
-当前稳定版：**v2.4.0** · macOS 13 Ventura 或更高版本
+当前稳定版：**v2.5.0** · macOS 13 Ventura 或更高版本
 
-Current stable release: **v2.4.0** · macOS 13 Ventura or later
+Current stable release: **v2.5.0** · macOS 13 Ventura or later
 
 | Mac | 安装包 / Installer | 适用设备 / Hardware |
 |---|---|---|
-| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.4.0-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
-| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.4.0-macos-x86_64.dmg) | Intel-based Macs |
+| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.5.0-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
+| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.5.0-macos-x86_64.dmg) | Intel-based Macs |
 
 [查看全部版本 / View all releases](https://github.com/Dreaminmaster/realtime-subtitle-product/releases)
 
@@ -31,7 +31,10 @@ Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本�
 
 - 本地实时语音识别，内置 `faster-whisper tiny` 模型，安装后即可开始。
 - 悬浮字幕窗始终置顶，支持拖动、缩放、双语/仅原文/仅翻译显示。
+- 可自定义屏幕上同时显示的字幕条数；向上滚动可查看本次会话的过往字幕。
+- 应用界面支持全局中文/English 即时切换，入口位于 **System**。
 - 在线 API、本地 LLM、OpenAI-compatible 自定义 API，以及完全关闭翻译。
+- 内置 Agnes AI 与 LM Studio 快速配置，仍可手动填写任意兼容服务。
 - 麦克风输入与 BlackHole 系统音频输入。
 - 模型管理、权限引导、运行诊断和本地字幕记录。
 - Apple Silicon 与 Intel 分架构原生安装包。
@@ -68,6 +71,10 @@ brew install blackhole-2ch
 | Local LLM | LM Studio、Ollama 等本地 OpenAI-compatible 服务 |
 | Custom API | 自定义 Base URL、模型与 API Key |
 
+点击 **Use Agnes AI** 会填入官方接口 `https://apihub.agnes-ai.com/v1` 与
+`agnes-2.0-flash`；点击 **Use LM Studio** 会填入本地地址
+`http://127.0.0.1:1234/v1`。API Key 不会写入仓库，只在你保存设置后进入本机用户配置。
+
 语音只在本机识别。只有启用在线翻译时，识别出的文本才会发送到你配置的服务；音频不会由本项目上传。
 
 ### 数据与隐私
@@ -98,7 +105,10 @@ Realtime Subtitle is a native-feeling macOS control center with an always-on-top
 
 - Local live transcription with a bundled `faster-whisper tiny` model.
 - Draggable, resizable bilingual overlay with original-only and translation-only modes.
+- Adjustable visible-row count with in-session scrollback for older captions.
+- Instant app-wide English / Simplified Chinese switching under **System**.
 - Online, local-LLM, custom OpenAI-compatible, or disabled translation.
+- One-click Agnes AI and LM Studio presets, plus fully custom endpoints.
 - Microphone and BlackHole system-audio input.
 - Model management, guided permissions, diagnostics, and local transcripts.
 - Separate native downloads for Apple Silicon and Intel Macs.
@@ -127,6 +137,11 @@ Select it under **Audio → System Audio**. Create a Multi-Output Device in Audi
 ### Translation and privacy
 
 Audio is transcribed locally. When online translation is enabled, only recognized text is sent to the provider configured by the user; this project does not upload the audio. Select **Off** for a fully local transcription path.
+
+The Agnes AI preset uses `https://apihub.agnes-ai.com/v1` with
+`agnes-2.0-flash`. The LM Studio preset uses `http://127.0.0.1:1234/v1`.
+Credentials are never committed to this repository; saving them writes only to
+the current user's local configuration.
 
 ## 从源码运行 / Run from source
 
@@ -163,17 +178,17 @@ Build a native DMG on a matching Mac:
 
 ```bash
 # Apple Silicon host
-bash build_dmg.sh 2.4.0 arm64
+bash build_dmg.sh 2.5.0 arm64
 
 # Intel host, or Apple Silicon with Rosetta installed
-bash build_dmg.sh 2.4.0 x86_64
+bash build_dmg.sh 2.5.0 x86_64
 ```
 
 Outputs:
 
 ```text
-dist/RealtimeSubtitle-2.4.0-macos-arm64.dmg
-dist/RealtimeSubtitle-2.4.0-macos-x86_64.dmg
+dist/RealtimeSubtitle-2.5.0-macos-arm64.dmg
+dist/RealtimeSubtitle-2.5.0-macos-x86_64.dmg
 ```
 
 The GitHub Actions release workflow builds `arm64` on an Apple Silicon runner and `x86_64` on an Intel runner, verifies the embedded architecture and app icon, creates SHA-256 checksums, and publishes both DMGs to one release.

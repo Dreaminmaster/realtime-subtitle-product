@@ -65,10 +65,35 @@ def test_set_style_updates_mode_visibility(app):
     window.close()
 
 
-def test_overlay_keeps_only_two_recent_subtitles(app):
+def test_overlay_keeps_history_beyond_visible_row_count(app):
     window = EnhancedOverlayWindow()
     for chunk_id in range(1, 4):
         window.update_text(chunk_id, f"Line {chunk_id}", f"第 {chunk_id} 行")
 
-    assert [chunk_id for chunk_id, _ in window.items] == [2, 3]
+    assert [chunk_id for chunk_id, _ in window.items] == [1, 2, 3]
+    assert set(window.transcript_data) == {1, 2, 3}
+    window.close()
+
+
+def test_visible_row_count_changes_height_without_deleting_history(app):
+    window = EnhancedOverlayWindow({"visible_subtitles": 2})
+    initial_height = window.height()
+    for chunk_id in range(1, 8):
+        window.update_text(chunk_id, f"Line {chunk_id}", f"第 {chunk_id} 行")
+
+    window.set_style({"visible_subtitles": 5})
+
+    assert window.height() > initial_height
+    assert len(window.items) == 7
+    assert len(window.transcript_data) == 7
+    window.close()
+
+
+def test_history_limit_is_a_safety_cap_not_visible_count(app):
+    window = EnhancedOverlayWindow({"visible_subtitles": 1, "history_limit": 20})
+    for chunk_id in range(25):
+        window.update_text(chunk_id, str(chunk_id), str(chunk_id))
+
+    assert len(window.items) == 20
+    assert [chunk_id for chunk_id, _ in window.items][:2] == [5, 6]
     window.close()

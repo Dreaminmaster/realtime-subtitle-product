@@ -7,85 +7,68 @@ from PyQt6.QtCore import Qt, QSize, pyqtSignal, QThread, QTimer
 from PyQt6.QtGui import QFont, QIcon, QColor, QPixmap
 import sys
 import os
-from pathlib import Path
 import sounddevice as sd
 from config import config
+from localization import apply_language, normalize_language, translate as ui_translate
 from product_navigation import ProductNavigation
 
 # Modern QSS Styles
 STYLESHEET = """
 QWidget {
-    background-color: #0b1020;
-    color: #e8edff;
-    font-family: 'Helvetica Neue', Arial;
+    background-color: #171716;
+    color: #ece9e2;
+    font-family: -apple-system, 'Helvetica Neue', Arial;
     font-size: 13px;
 }
-QFrame#AppHeader { background: #0d1427; border-bottom: 1px solid #202b45; }
-QLabel#BrandTitle { color: #f7f9ff; font-size: 22px; font-weight: 700; }
-QLabel#BrandSubtitle { color: #8792ad; font-size: 12px; }
-QLabel#BuildPill {
-    color: #aebcff; background: #18213a; border: 1px solid #2a3b69;
-    border-radius: 11px; padding: 4px 10px; font-size: 10px; font-weight: 600;
-}
-QFrame#Sidebar { background: #0d1427; border-right: 1px solid #202b45; }
-QLabel#SidebarEyebrow { color: #596681; font-size: 9px; font-weight: 700; }
-QLabel#PrivacyNote {
-    color: #68748e; background: #111a30; border: 1px solid #202b45;
-    border-radius: 10px; padding: 10px; font-size: 10px;
-}
+QFrame#Sidebar { background: #1e1e1c; border-right: 1px solid #34332f; }
 QPushButton#NavButton {
-    text-align: left; color: #919cb6; background: transparent;
-    border: none; border-radius: 9px; padding: 9px 13px; font-weight: 600;
+    text-align: left; color: #aaa69d; background: transparent;
+    border: none; border-radius: 8px; padding: 9px 12px; font-weight: 600;
 }
-QPushButton#NavButton:hover { background: #141e35; color: #dce4ff; }
-QPushButton#NavButton:checked {
-    background: #1c2948; color: #9bb5ff; border-left: 3px solid #7d9cff;
-}
-QStackedWidget#ProductStack { background: #0b1020; }
-QTabWidget#SectionTabs::pane { border: none; background: #0b1020; top: -1px; }
+QPushButton#NavButton:hover { background: #2a2926; color: #f4f1ea; }
+QPushButton#NavButton:checked { background: #34312b; color: #ffb36a; }
+QStackedWidget#ProductStack { background: #171716; }
+QTabWidget#SectionTabs::pane { border: none; background: #171716; top: -1px; }
 QTabWidget#SectionTabs QTabBar::tab {
-    background: transparent; color: #74809b; padding: 11px 18px;
+    background: transparent; color: #928e86; padding: 10px 16px;
     border: none; border-bottom: 2px solid transparent; font-weight: 600;
 }
-QTabWidget#SectionTabs QTabBar::tab:hover { color: #c7d2ee; }
-QTabWidget#SectionTabs QTabBar::tab:selected { color: #9bb5ff; border-bottom-color: #7d9cff; }
+QTabWidget#SectionTabs QTabBar::tab:hover { color: #dedad1; }
+QTabWidget#SectionTabs QTabBar::tab:selected { color: #ffb36a; border-bottom-color: #d67a36; }
 QLabel { font-size: 13px; background: transparent; }
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
-    background-color: #141d31; border: 1px solid #293550; border-radius: 8px;
-    padding: 8px 10px; min-height: 20px; color: #e8edff;
-    selection-background-color: #425a9c;
+    background-color: #262522; border: 1px solid #44413b; border-radius: 7px;
+    padding: 7px 9px; min-height: 20px; color: #f0ede6;
+    selection-background-color: #9b572d;
 }
-QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {
-    border: 1px solid #7897ff;
-}
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus { border: 1px solid #d8874d; }
 QPushButton {
-    background-color: #7d9cff; color: #091022; border: none;
-    padding: 9px 16px; border-radius: 8px; font-weight: 700;
+    background-color: #d98246; color: #1d1712; border: none;
+    padding: 8px 15px; border-radius: 7px; font-weight: 650;
 }
-QPushButton:hover { background-color: #9eb4ff; }
-QPushButton:disabled { background: #25304a; color: #66718a; }
-QPushButton#SecondaryButton { background: #18233b; color: #c9d4ef; border: 1px solid #2b3957; }
-QPushButton#SecondaryButton:hover { background: #22304d; }
-QPushButton#DangerButton { background: #4a2537; color: #ffb1c4; border: 1px solid #744159; }
-QFrame#HeroCard, QFrame#SummaryCard {
-    background: #111a2e; border: 1px solid #23304b; border-radius: 16px;
+QPushButton:hover { background-color: #eda267; }
+QPushButton:disabled { background: #33312d; color: #77736b; }
+QPushButton#SecondaryButton { background: #292824; color: #ddd8ce; border: 1px solid #46433d; }
+QPushButton#SecondaryButton:hover { background: #34322e; }
+QPushButton#DangerButton { background: #4b2c29; color: #f1b7aa; border: 1px solid #6c3e37; }
+QFrame#HeroCard, QFrame#SummaryCard, QFrame#SettingsCard {
+    background: #22211f; border: 1px solid #3a3833; border-radius: 12px;
 }
-QLabel#HeroEyebrow { color: #7d9cff; font-size: 10px; font-weight: 700; }
-QLabel#HeroTitle { color: #f7f9ff; font-size: 27px; font-weight: 700; }
-QLabel#HeroCopy { color: #8792ad; font-size: 13px; }
+QLabel#HeroTitle { color: #f6f2e9; font-size: 24px; font-weight: 700; }
+QLabel#HeroCopy, QLabel#Muted { color: #9d988f; font-size: 12px; }
 QLabel#StatusPill {
-    color: #8fe7c0; background: #102b28; border: 1px solid #1e5147;
-    border-radius: 12px; padding: 5px 12px; font-size: 11px; font-weight: 700;
+    color: #b9dfc0; background: #243329; border: 1px solid #395340;
+    border-radius: 10px; padding: 4px 10px; font-size: 11px; font-weight: 650;
 }
-QLabel#SummaryLabel { color: #68748e; font-size: 10px; font-weight: 700; }
-QLabel#SummaryValue { color: #e8edff; font-size: 14px; font-weight: 600; }
+QLabel#SummaryLabel { color: #858078; font-size: 10px; font-weight: 700; }
+QLabel#SummaryValue { color: #ece9e2; font-size: 14px; font-weight: 600; }
 QScrollArea { background: transparent; border: none; }
-QTextEdit {
-    background: #0a0f1d; color: #dfe6fb; border: 1px solid #293550;
-    border-radius: 10px; padding: 10px;
-}
-QGroupBox { border: 1px solid #293550; border-radius: 10px; margin-top: 12px; padding-top: 12px; }
-QGroupBox::title { subcontrol-origin: margin; padding: 0 7px; color: #9bb5ff; }
+QScrollBar:vertical { background: transparent; width: 8px; margin: 2px; }
+QScrollBar::handle:vertical { background: #514d46; border-radius: 4px; min-height: 28px; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+QTextEdit { background: #121211; color: #dedad1; border: 1px solid #3f3c37; border-radius: 8px; padding: 9px; }
+QGroupBox { border: 1px solid #3f3c37; border-radius: 9px; margin-top: 12px; padding-top: 12px; }
+QGroupBox::title { subcontrol-origin: margin; padding: 0 7px; color: #d99a69; }
 """
 
 class Dashboard(QWidget):
@@ -156,7 +139,7 @@ class Dashboard(QWidget):
             event.accept()
             QApplication.quit()
             return
-        self.status_label.setText("Stopping...")
+        self._set_localized_text(self.status_label, "Stopping…")
         if self._attempt_close_after_stop():
             log.info("Clean stop before close — quitting")
             event.accept()
@@ -166,10 +149,12 @@ class Dashboard(QWidget):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Realtime Subtitle — Control Center")
-        self.setMinimumSize(860, 600)
-        self.resize(1080, 720)
+        self.setWindowTitle("Realtime Subtitle")
+        self.setMinimumSize(760, 520)
+        self.resize(980, 680)
         self.setStyleSheet(STYLESHEET)
+        self.ui_language = normalize_language(getattr(config, "ui_language", "en"))
+        self._did_fit_to_screen = False
         
         # Main Layout
         self.layout = QVBoxLayout()
@@ -188,49 +173,6 @@ class Dashboard(QWidget):
         self.progress_panel.retry_clicked.connect(self._retry_progress_model)
         self.progress_panel.cancel_clicked.connect(self._cancel_progress_model)
         self.progress_panel.dismiss_clicked.connect(self._dismiss_progress_panel)
-        
-        # Product header
-        header = QFrame()
-        header.setObjectName("AppHeader")
-        header.setFixedHeight(82)
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(24, 14, 24, 14)
-        header_layout.setSpacing(13)
-
-        icon_label = QLabel()
-        icon_path = Path(__file__).resolve().parent / "assets" / "icon" / "realtime-subtitle-icon.png"
-        if icon_path.exists():
-            icon_label.setPixmap(
-                QPixmap(str(icon_path)).scaled(
-                    50,
-                    50,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-            )
-        icon_label.setFixedSize(52, 52)
-        header_layout.addWidget(icon_label)
-
-        brand = QVBoxLayout()
-        brand.setSpacing(2)
-        brand_title = QLabel("Realtime Subtitle")
-        brand_title.setObjectName("BrandTitle")
-        brand_subtitle = QLabel("Live captions, translated as you speak")
-        brand_subtitle.setObjectName("BrandSubtitle")
-        brand.addWidget(brand_title)
-        brand.addWidget(brand_subtitle)
-        header_layout.addLayout(brand)
-        header_layout.addStretch()
-
-        try:
-            from version import BUILD_VERSION
-            build_label = str(BUILD_VERSION).replace("-dev", "")
-        except ImportError:
-            build_label = "Development"
-        build_pill = QLabel(f"LOCAL-FIRST  ·  {build_label}")
-        build_pill.setObjectName("BuildPill")
-        header_layout.addWidget(build_pill)
-        self.layout.addWidget(header)
         
         # Five product sections; related settings are grouped internally.
         self.tabs = ProductNavigation()
@@ -253,25 +195,37 @@ class Dashboard(QWidget):
         self.progress_event.connect(self.progress_panel.set_progress)
         self.translation_test_finished.connect(self._on_translation_test_finished)
         self.model_list_finished.connect(self._on_model_list_finished)
+        apply_language(self, self.ui_language)
 
-        # Persistent footer actions
-        footer_frame = QFrame()
-        footer_frame.setObjectName("AppHeader")
-        footer = QHBoxLayout(footer_frame)
-        footer.setContentsMargins(24, 11, 24, 11)
-        footer_note = QLabel("Changes are stored locally on this Mac")
-        footer_note.setObjectName("BrandSubtitle")
-        footer.addWidget(footer_note)
-        self.save_btn = QPushButton("Save Settings")
-        self.save_btn.clicked.connect(self.save_config)
-        footer.addStretch()
-        footer.addWidget(self.save_btn)
-        self.layout.addWidget(footer_frame)
+    def _set_localized_text(self, widget, source):
+        """Set dynamic text while retaining a reversible source string."""
+        widget.setProperty("i18n_source_text", source)
+        widget.setText(ui_translate(source, self.ui_language))
+
+    def showEvent(self, event):
+        """Fit the first launch to the current display without clipping."""
+        super().showEvent(event)
+        if not self._did_fit_to_screen:
+            self._did_fit_to_screen = True
+            QTimer.singleShot(0, self._fit_to_screen)
+
+    def _fit_to_screen(self):
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        width = min(max(760, self.width()), max(760, int(available.width() * 0.92)))
+        height = min(max(520, self.height()), max(520, int(available.height() * 0.90)))
+        self.resize(width, height)
+        self.move(
+            available.x() + max(0, (available.width() - width) // 2),
+            available.y() + max(0, (available.height() - height) // 2),
+        )
 
     def init_home_tab(self):
         tab = QWidget()
         layout = QVBoxLayout()
-        layout.setContentsMargins(30, 28, 30, 28)
+        layout.setContentsMargins(26, 24, 26, 24)
         layout.setSpacing(18)
 
         hero = QFrame()
@@ -280,17 +234,12 @@ class Dashboard(QWidget):
         hero_layout.setContentsMargins(30, 28, 30, 28)
         hero_layout.setSpacing(12)
 
-        eyebrow = QLabel("LIVE WORKSPACE")
-        eyebrow.setObjectName("HeroEyebrow")
-        hero_layout.addWidget(eyebrow)
-
-        title = QLabel("Bring every word into view.")
+        title = QLabel("Live subtitles")
         title.setObjectName("HeroTitle")
         hero_layout.addWidget(title)
 
         copy = QLabel(
-            "Private on-device speech recognition with an always-on-top subtitle window. "
-            "Add translation only when you need it."
+            "Choose an input, then start. The subtitle window stays above your other apps."
         )
         copy.setObjectName("HeroCopy")
         copy.setWordWrap(True)
@@ -310,7 +259,7 @@ class Dashboard(QWidget):
         self.stop_btn.hide()
         action_row.addWidget(self.stop_btn)
 
-        self.status_label = QLabel("READY")
+        self.status_label = QLabel("Ready")
         self.status_label.setObjectName("StatusPill")
         action_row.addWidget(self.status_label)
         action_row.addStretch()
@@ -348,13 +297,6 @@ class Dashboard(QWidget):
             summaries.addWidget(card, 1)
         layout.addLayout(summaries)
 
-        tip = QLabel(
-            "Tip: once started, the Control Center minimizes automatically. "
-            "Drag the subtitle window anywhere on screen and use its compact controls on hover."
-        )
-        tip.setObjectName("BrandSubtitle")
-        tip.setWordWrap(True)
-        layout.addWidget(tip)
         layout.addStretch()
 
         tab.setLayout(layout)
@@ -372,8 +314,8 @@ class Dashboard(QWidget):
         layout.addWidget(self.device_combo, 0, 1)
         
         # Refresh Button
-        refresh_btn = QPushButton("🔄")
-        refresh_btn.setFixedWidth(40)
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.setFixedWidth(80)
         refresh_btn.clicked.connect(self.populate_devices)
         layout.addWidget(refresh_btn, 0, 2)
         
@@ -401,7 +343,7 @@ class Dashboard(QWidget):
         layout.setRowStretch(4, 1) # Push to top
         
         tab.setLayout(layout)
-        self.tabs.addTab(tab, "🎤 Audio")
+        self.tabs.addTab(tab, "Audio")
 
     def init_device_manager_tab(self):
         """Audio Device Manager - Create/Manage Multi-Output Devices"""
@@ -437,11 +379,11 @@ class Dashboard(QWidget):
         # Buttons
         btn_layout = QHBoxLayout()
         
-        self.refresh_devices_btn = QPushButton("🔄 Refresh Devices")
+        self.refresh_devices_btn = QPushButton("Refresh Devices")
         self.refresh_devices_btn.clicked.connect(self.refresh_audio_devices)
         btn_layout.addWidget(self.refresh_devices_btn)
         
-        self.create_multi_output_btn = QPushButton("➕ Create Multi-Output Device")
+        self.create_multi_output_btn = QPushButton("Create Multi-Output Device")
         self.create_multi_output_btn.setStyleSheet("""
             background-color: #a6e3a1; color: #1e1e2e; font-weight: bold;
         """)
@@ -451,7 +393,7 @@ class Dashboard(QWidget):
         layout.addLayout(btn_layout)
         
         # Set as Default Button
-        self.set_default_btn = QPushButton("🔊 Set Selected as Default Output")
+        self.set_default_btn = QPushButton("Set Selected as Default Output")
         self.set_default_btn.clicked.connect(self.set_default_output_device)
         layout.addWidget(self.set_default_btn)
         
@@ -479,7 +421,7 @@ class Dashboard(QWidget):
         layout.addStretch()
         
         tab.setLayout(layout)
-        self.tabs.addTab(tab, "🔧 Devices")
+        self.tabs.addTab(tab, "Devices")
         self.tabs.setTabToolTip(self.tabs.count() - 1, "Devices — multi-output setup")
         
         # Initial population
@@ -572,7 +514,7 @@ class Dashboard(QWidget):
         layout = QVBoxLayout()
         
         # Title
-        title = QLabel("📋 Step-by-Step Guide")
+        title = QLabel("Step-by-Step Guide")
         title.setStyleSheet("font-size: 18px; font-weight: bold; color: #89b4fa; padding: 10px;")
         layout.addWidget(title)
         
@@ -644,7 +586,7 @@ class Dashboard(QWidget):
         layout.addWidget(instructions)
         
         # Close button
-        close_btn = QPushButton("✅ Got it!")
+        close_btn = QPushButton("Got it")
         close_btn.setFixedHeight(40)
         close_btn.setStyleSheet("""
             QPushButton {
@@ -852,7 +794,7 @@ class Dashboard(QWidget):
         self._on_backend_changed(config.asr_backend)
         
         tab.setLayout(layout)
-        self.tabs.addTab(tab, "📝 Transcript")
+        self.tabs.addTab(tab, "Transcript")
         self.tabs.setTabToolTip(self.tabs.count() - 1, "Transcript — ASR backend & model")
     
     def _on_backend_changed(self, backend):
@@ -919,6 +861,18 @@ class Dashboard(QWidget):
         tab = QWidget()
         layout = QFormLayout()
 
+        preset_row = QHBoxLayout()
+        agnes_btn = QPushButton("Use Agnes AI")
+        agnes_btn.setObjectName("SecondaryButton")
+        agnes_btn.clicked.connect(self._use_agnes_preset)
+        preset_row.addWidget(agnes_btn)
+        local_btn = QPushButton("Use LM Studio")
+        local_btn.setObjectName("SecondaryButton")
+        local_btn.clicked.connect(self._use_lm_studio_preset)
+        preset_row.addWidget(local_btn)
+        preset_row.addStretch()
+        layout.addRow(preset_row)
+
         self.translation_mode = QComboBox()
         self.translation_mode.addItem("Off — original subtitles only", "off")
         self.translation_mode.addItem("Online API — hosted OpenAI-compatible", "online")
@@ -960,19 +914,19 @@ class Dashboard(QWidget):
         layout.addRow("Model:", model_layout)
         
         self.target_lang = QComboBox()
-        self.target_lang.addItems(["Chinese", "English", "Japanese", "French", "Spanish", "German", "Korean"])
+        for language in ("Chinese", "English", "Japanese", "French", "Spanish", "German", "Korean"):
+            self.target_lang.addItem(language, language)
         self.target_lang.setEditable(True)
-        self.target_lang.setCurrentText(config.target_lang)
+        target_index = self.target_lang.findData(config.target_lang)
+        if target_index >= 0:
+            self.target_lang.setCurrentIndex(target_index)
+        else:
+            self.target_lang.setCurrentText(config.target_lang)
         layout.addRow("Target Language:", self.target_lang)
         
         # Test Translation button
         test_layout = QHBoxLayout()
-        self.test_trans_btn = QPushButton("🔗 Test Connection")
-        self.test_trans_btn.setStyleSheet(
-            "QPushButton { background: #45475a; color: #cdd6f4; padding: 8px 16px; "
-            "border-radius: 4px; font-weight: bold; } "
-            "QPushButton:hover { background: #585b70; }"
-        )
+        self.test_trans_btn = QPushButton("Test Connection")
         self.test_trans_btn.clicked.connect(self._test_translation)
         test_layout.addWidget(self.test_trans_btn)
         test_layout.addStretch()
@@ -991,8 +945,25 @@ class Dashboard(QWidget):
         self.update_translation_mode_label()
         
         tab.setLayout(layout)
-        self.tabs.addTab(tab, "🈵 Translate")
+        self.tabs.addTab(tab, "Translate")
         self.tabs.setTabToolTip(self.tabs.count() - 1, "Translate — API, model, test connection")
+
+    def _use_agnes_preset(self):
+        """Apply the provider's documented OpenAI-compatible defaults."""
+        index = self.translation_mode.findData("online")
+        self.translation_mode.setCurrentIndex(index)
+        self.base_url.setText("https://apihub.agnes-ai.com/v1")
+        self.model.setCurrentText("agnes-2.0-flash")
+        self.api_key.setFocus()
+        self.update_translation_mode_label()
+
+    def _use_lm_studio_preset(self):
+        """Apply a local endpoint without touching the API-key field."""
+        index = self.translation_mode.findData("local")
+        self.translation_mode.setCurrentIndex(index)
+        self.base_url.setText("http://127.0.0.1:1234/v1")
+        self.model.setCurrentText("qwen2.5-coder-14b-instruct-mlx")
+        self.update_translation_mode_label()
         
     def update_translation_mode_label(self, *_):
         mode = self.translation_mode.currentData() or "off"
@@ -1025,7 +996,7 @@ class Dashboard(QWidget):
         base_url = self.base_url.text().strip()
         model = self.model.currentText().strip()
         mode = self.translation_mode.currentData() or "off"
-        target_lang = self.target_lang.currentText()
+        target_lang = self.target_lang.currentData() or self.target_lang.currentText()
 
         if mode == "off":
             self.trans_test_result.setText("ℹ️ Translation is disabled; no connection is needed")
@@ -1069,15 +1040,16 @@ class Dashboard(QWidget):
                 engine = TranslationEngine()
                 engine.target_lang = target_lang
                 engine.set_mode(mode, base_url=base_url, api_key=api_key, model=model)
-                health = engine.check_health()
-                if health.get("available"):
-                    self.translation_test_finished.emit(True, f"Connected — {model}")
+                sample = engine.translate("The connection is working.")
+                if sample and not sample.startswith("[Translation Failed:"):
+                    self.translation_test_finished.emit(
+                        True, f"Connected — {model}\n{sample[:120]}"
+                    )
                 else:
-                    err = health.get("error", "Unknown error")
                     hint = ""
                     if is_local:
-                        hint = "\nLocal endpoint may have been routed through system proxy. "
-                    self.translation_test_finished.emit(False, f"{err}{hint}")
+                        hint = "\nCheck that the local server and selected model are running."
+                    self.translation_test_finished.emit(False, f"{sample or 'Empty response'}{hint}")
             except Exception as e:
                 log.error(f"Translation test: {e}")
                 self.translation_test_finished.emit(False, f"{type(e).__name__}: {str(e)[:160]}")
@@ -1090,7 +1062,9 @@ class Dashboard(QWidget):
         color = "#a6e3a1" if ok else "#f38ba8"
         self.trans_test_result.setStyleSheet(f"color: {color}; font-size: 12px;")
         self.test_trans_btn.setEnabled(True)
-        self.test_trans_btn.setText("🔗 Test Connection")
+        self.test_trans_btn.setText(
+            "测试连接" if self.ui_language == "zh-Hans" else "Test Connection"
+        )
 
     def init_model_tab(self):
         """Model Management tab - download/delete/switch ASR models"""
@@ -1098,7 +1072,7 @@ class Dashboard(QWidget):
         layout = QVBoxLayout()
         layout.setSpacing(10)
         
-        header = QLabel("📦 Model Management")
+        header = QLabel("Model Management")
         header.setStyleSheet("font-size: 16px; font-weight: bold; color: #fab387;")
         layout.addWidget(header)
         
@@ -1111,7 +1085,7 @@ class Dashboard(QWidget):
         filter_layout.addWidget(self.model_backend_combo)
         filter_layout.addStretch()
         
-        self.refresh_model_btn = QPushButton("🔄 Refresh")
+        self.refresh_model_btn = QPushButton("Refresh")
         self.refresh_model_btn.clicked.connect(self._refresh_model_list)
         filter_layout.addWidget(self.refresh_model_btn)
         layout.addLayout(filter_layout)
@@ -1137,7 +1111,7 @@ class Dashboard(QWidget):
         # Clear all button
         clear_layout = QHBoxLayout()
         clear_layout.addStretch()
-        self.clear_models_btn = QPushButton("🗑 Delete All Models")
+        self.clear_models_btn = QPushButton("Delete All Models")
         self.clear_models_btn.setStyleSheet(
             "QPushButton { background: #f38ba8; color: #1e1e2e; padding: 5px 10px; border-radius: 4px; } "
             "QPushButton:hover { background: #eba0ac; }"
@@ -1147,7 +1121,7 @@ class Dashboard(QWidget):
         layout.addLayout(clear_layout)
         
         tab.setLayout(layout)
-        self.tabs.addTab(tab, "📦 Models")
+        self.tabs.addTab(tab, "Models")
         
         layout.addWidget(self.progress_panel)
         self.progress_panel.title.setText("Download Progress")
@@ -1241,7 +1215,7 @@ class Dashboard(QWidget):
             btn.clicked.connect(lambda checked, mid=mid, be=be: self._download_model(mid, be))
         
         if model_info.get('recommended'):
-            rec_label = QLabel("⭐")
+            rec_label = QLabel("Recommended")
             rec_label.setToolTip("Recommended")
             layout.addWidget(rec_label)
         
@@ -1459,52 +1433,60 @@ class Dashboard(QWidget):
         # Font size
         self.original_font_size = QSpinBox()
         self.original_font_size.setRange(8, 48)
-        self.original_font_size.setValue(20)
+        self.original_font_size.setValue(getattr(config, "original_font_size", 20))
         self.original_font_size.setSuffix(" px")
         layout.addRow("Original Font Size:", self.original_font_size)
         
         self.translation_font_size = QSpinBox()
         self.translation_font_size.setRange(8, 48)
-        self.translation_font_size.setValue(17)
+        self.translation_font_size.setValue(getattr(config, "translation_font_size", 17))
         self.translation_font_size.setSuffix(" px")
         layout.addRow("Translation Font Size:", self.translation_font_size)
         
         # Colors
         self.original_color = QComboBox()
         self.original_color.addItems(["#ffffff", "#cdd6f4", "#a6e3a1", "#fab387", "#f9e2af", "#89b4fa"])
-        self.original_color.setCurrentText("#ffffff")
+        self.original_color.setCurrentText(getattr(config, "original_color", "#ffffff"))
         layout.addRow("Original Text Color:", self.original_color)
         
         self.translation_color = QComboBox()
         self.translation_color.addItems(["#9db5ff", "#89b4fa", "#a6e3a1", "#fab387", "#f9e2af", "#ffffff", "#cdd6f4"])
-        self.translation_color.setCurrentText("#9db5ff")
+        self.translation_color.setCurrentText(getattr(config, "translation_color", "#d99a69"))
         layout.addRow("Translation Color:", self.translation_color)
         
         # Window opacity
         self.window_opacity = QDoubleSpinBox()
         self.window_opacity.setRange(0.3, 1.0)
         self.window_opacity.setSingleStep(0.05)
-        self.window_opacity.setValue(0.94)
+        self.window_opacity.setValue(getattr(config, "window_opacity", 0.94))
         layout.addRow("Window Opacity:", self.window_opacity)
         
         # Window width
         self.window_width = QSpinBox()
         self.window_width.setRange(200, 1200)
-        self.window_width.setValue(620)
+        self.window_width.setValue(getattr(config, "window_width", 620))
         self.window_width.setSuffix(" px")
         layout.addRow("Window Width:", self.window_width)
+
+        self.visible_subtitles = QSpinBox()
+        self.visible_subtitles.setRange(1, 8)
+        self.visible_subtitles.setValue(getattr(config, "visible_subtitles", 3))
+        self.visible_subtitles.setToolTip(
+            "Controls the overlay height. Older subtitles remain available by scrolling up."
+        )
+        layout.addRow("Visible Subtitle Rows:", self.visible_subtitles)
         
         # Display mode
         self.display_mode = QComboBox()
-        self.display_mode.addItems(["bilingual", "original_only", "translation_only"])
+        self.display_mode.addItem("Bilingual", "bilingual")
+        self.display_mode.addItem("Original only", "original_only")
+        self.display_mode.addItem("Translation only", "translation_only")
+        mode_index = self.display_mode.findData(getattr(config, "display_mode", "bilingual"))
+        self.display_mode.setCurrentIndex(max(0, mode_index))
         layout.addRow("Display Mode:", self.display_mode)
         
         # Apply button
         apply_btn = QPushButton("Apply Style")
-        apply_btn.setStyleSheet(
-            "QPushButton { background: #89b4fa; color: #1e1e2e; padding: 10px; "
-            "border-radius: 6px; font-weight: bold; }"
-        )
         apply_btn.clicked.connect(self._apply_style)
         layout.addRow(apply_btn)
         
@@ -1514,33 +1496,122 @@ class Dashboard(QWidget):
         tab_layout.addWidget(scroll)
         tab.setLayout(tab_layout)
         
-        self.tabs.addTab(tab, "🎨 Style")
+        self.tabs.addTab(tab, "Style")
     
     def _apply_style(self):
         """Apply subtitle style to overlay window"""
+        style = {
+            "original_font_size": self.original_font_size.value(),
+            "translation_font_size": self.translation_font_size.value(),
+            "original_color": self.original_color.currentText(),
+            "translation_color": self.translation_color.currentText(),
+            "window_opacity": self.window_opacity.value(),
+            "window_width": self.window_width.value(),
+            "visible_subtitles": self.visible_subtitles.value(),
+            "display_mode": self.display_mode.currentData() or "bilingual",
+        }
         if hasattr(self, 'overlay_window') and self.overlay_window:
-            style = {
-                "original_font_size": self.original_font_size.value(),
-                "translation_font_size": self.translation_font_size.value(),
-                "original_color": self.original_color.currentText(),
-                "translation_color": self.translation_color.currentText(),
-                "window_opacity": self.window_opacity.value(),
-                "window_width": self.window_width.value(),
-                "display_mode": self.display_mode.currentText(),
-            }
             self.overlay_window.set_style(style)
-            self.status_label.setText("✅ Style applied")
-            self.status_label.setStyleSheet("font-size: 18px; color: #a6e3a1;")
+        self._save_display_preferences(style)
+        self._set_localized_text(self.status_label, "Appearance applied")
+
+    def _save_display_preferences(self, style):
+        import configparser
+        from app_paths import write_config
+
+        parser = configparser.ConfigParser()
+        parser.read(config.config_path)
+        if not parser.has_section("display"):
+            parser.add_section("display")
+        for key, value in style.items():
+            parser.set("display", key, str(value))
+            setattr(config, key, value)
+        parser.set("display", "history_limit", str(getattr(config, "subtitle_history_limit", 250)))
+        write_config(parser, config.config_path)
     
     def init_diagnostics_tab(self):
-        """System diagnostics tab"""
+        """Product-facing system preferences with optional technical detail."""
         tab = QWidget()
-        layout = QVBoxLayout()
-        layout.setSpacing(10)
-        
-        header = QLabel("System Diagnostics")
-        header.setStyleSheet("font-size: 16px; font-weight: bold; color: #fab387;")
-        layout.addWidget(header)
+        tab_layout = QVBoxLayout(tab)
+        tab_layout.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        tab_layout.addWidget(scroll)
+
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(26, 22, 26, 26)
+        layout.setSpacing(14)
+
+        language_card = QFrame()
+        language_card.setObjectName("SettingsCard")
+        language_layout = QVBoxLayout(language_card)
+        language_layout.setContentsMargins(18, 16, 18, 16)
+        language_layout.setSpacing(10)
+        language_title = QLabel("App Language")
+        language_title.setStyleSheet("font-size: 16px; font-weight: 700;")
+        language_layout.addWidget(language_title)
+        language_row = QHBoxLayout()
+        language_row.addWidget(QLabel("Interface Language:"))
+        self.ui_language_combo = QComboBox()
+        self.ui_language_combo.addItem("English", "en")
+        self.ui_language_combo.addItem("简体中文", "zh-Hans")
+        language_index = self.ui_language_combo.findData(self.ui_language)
+        self.ui_language_combo.setCurrentIndex(max(0, language_index))
+        language_row.addWidget(self.ui_language_combo)
+        language_row.addStretch()
+        language_layout.addLayout(language_row)
+        language_hint = QLabel("Changes apply immediately across the app.")
+        language_hint.setObjectName("Muted")
+        language_layout.addWidget(language_hint)
+        self.ui_language_combo.currentIndexChanged.connect(self._change_ui_language)
+        layout.addWidget(language_card)
+
+        about_card = QFrame()
+        about_card.setObjectName("SettingsCard")
+        about_layout = QVBoxLayout(about_card)
+        about_layout.setContentsMargins(18, 16, 18, 16)
+        about_title = QLabel("About")
+        about_title.setStyleSheet("font-size: 16px; font-weight: 700;")
+        about_layout.addWidget(about_title)
+        try:
+            from version import BUILD_VERSION
+            version_text = str(BUILD_VERSION)
+        except ImportError:
+            version_text = "Development"
+        about_layout.addWidget(QLabel(f"Realtime Subtitle · {version_text}"))
+        privacy_note = QLabel("Audio and settings stay on this Mac.")
+        privacy_note.setObjectName("Muted")
+        about_layout.addWidget(privacy_note)
+        layout.addWidget(about_card)
+
+        action_row = QHBoxLayout()
+        self.save_btn = QPushButton("Save Changes")
+        self.save_btn.clicked.connect(self.save_config)
+        action_row.addWidget(self.save_btn)
+        self.run_diag_btn = QPushButton("Run Quick Check")
+        self.run_diag_btn.setObjectName("SecondaryButton")
+        self.run_diag_btn.clicked.connect(self._run_diagnostics)
+        action_row.addWidget(self.run_diag_btn)
+        self.view_logs_btn = QPushButton("View Logs")
+        self.view_logs_btn.setObjectName("SecondaryButton")
+        self.view_logs_btn.clicked.connect(self._view_logs)
+        action_row.addWidget(self.view_logs_btn)
+        action_row.addStretch()
+        layout.addLayout(action_row)
+
+        self.details_toggle = QPushButton("Technical Details")
+        self.details_toggle.setObjectName("SecondaryButton")
+        self.details_toggle.setCheckable(True)
+        self.details_toggle.setChecked(False)
+        self.details_toggle.toggled.connect(self._toggle_technical_details)
+        layout.addWidget(self.details_toggle)
+
+        self.technical_details = QFrame()
+        details_layout = QVBoxLayout(self.technical_details)
+        details_layout.setContentsMargins(0, 0, 0, 0)
+        details_layout.setSpacing(10)
 
         # Architecture status (v2.4)
         self._arch_status = QLabel("")
@@ -1549,7 +1620,7 @@ class Dashboard(QWidget):
             "color: #bac2de; background: #181825; border: 1px solid #313244; "
             "border-radius: 4px; padding: 8px; font-size: 11px;"
         )
-        layout.addWidget(self._arch_status)
+        details_layout.addWidget(self._arch_status)
         self._refresh_arch_status()
 
         # Runtime decision (v2.4)
@@ -1560,7 +1631,7 @@ class Dashboard(QWidget):
             "color: #bac2de; background: #181825; border: 1px solid #313244; "
             "border-radius: 4px; padding: 8px; font-size: 11px;"
         )
-        layout.addWidget(self._runtime_decision_status)
+        details_layout.addWidget(self._runtime_decision_status)
         self._refresh_runtime_decision_status()
 
         # Transcript history (v2.4)
@@ -1571,41 +1642,47 @@ class Dashboard(QWidget):
             "color: #bac2de; background: #181825; border: 1px solid #313244; "
             "border-radius: 4px; padding: 8px; font-size: 11px;"
         )
-        layout.addWidget(self._history_status)
+        details_layout.addWidget(self._history_status)
         self._refresh_history_status()
-
-        # ─────────────────────────────────────────────────────
-        
-        # Run diagnostics button
-        self.run_diag_btn = QPushButton("▶ Run Diagnostics")
-        self.run_diag_btn.setStyleSheet(
-            "QPushButton { background: #89b4fa; color: #1e1e2e; padding: 10px; "
-            "border-radius: 6px; font-weight: bold; }"
-        )
-        self.run_diag_btn.clicked.connect(self._run_diagnostics)
-        layout.addWidget(self.run_diag_btn)
         
         # Results area
         self.diag_results = QTextEdit()
         self.diag_results.setReadOnly(True)
-        self.diag_results.setStyleSheet(
-            "QTextEdit { background: #11111b; color: #cdd6f4; border: 1px solid #45475a; "
-            "border-radius: 6px; padding: 10px; font-family: monospace; font-size: 12px; }"
-        )
-        layout.addWidget(self.diag_results)
-        
-        # Log viewer
-        log_layout = QHBoxLayout()
-        log_layout.addWidget(QLabel("Recent Logs:"))
-        self.view_logs_btn = QPushButton("📄 View")
-        self.view_logs_btn.clicked.connect(self._view_logs)
-        log_layout.addWidget(self.view_logs_btn)
-        log_layout.addStretch()
-        layout.addLayout(log_layout)
-        
-        tab.setLayout(layout)
-        self.tabs.addTab(tab, "🔍 Diag")
+        self.diag_results.setMinimumHeight(150)
+        self.diag_results.setMaximumHeight(260)
+        details_layout.addWidget(self.diag_results)
+        self.technical_details.setVisible(False)
+        layout.addWidget(self.technical_details)
+        layout.addStretch()
+
+        scroll.setWidget(content)
+        self.tabs.addTab(tab, "Diag")
         self.tabs.setTabToolTip(self.tabs.count() - 1, "Diagnostics — check system, view logs")
+
+    def _change_ui_language(self, *_):
+        self.ui_language = normalize_language(self.ui_language_combo.currentData())
+        config.ui_language = self.ui_language
+        self._save_ui_language()
+        apply_language(self, self.ui_language)
+
+    def _save_ui_language(self):
+        import configparser
+        from app_paths import write_config
+
+        parser = configparser.ConfigParser()
+        parser.read(config.config_path)
+        if not parser.has_section("app"):
+            parser.add_section("app")
+        parser.set("app", "language", self.ui_language)
+        write_config(parser, config.config_path)
+
+    def _toggle_technical_details(self, visible):
+        self.technical_details.setVisible(visible)
+        self.details_toggle.setText(
+            ("收起技术详情" if visible else "技术详情")
+            if self.ui_language == "zh-Hans"
+            else ("Hide Technical Details" if visible else "Technical Details")
+        )
     
     def _refresh_runtime_decision_status(self):
         """Update runtime decision label using guard + formatter."""
@@ -1663,7 +1740,8 @@ class Dashboard(QWidget):
         import logging
         
         self.run_diag_btn.setEnabled(False)
-        self.run_diag_btn.setText("Running...")
+        self.details_toggle.setChecked(True)
+        self._set_localized_text(self.run_diag_btn, "Running Quick Check…")
         
         report = diagnostics.get_status_text()
         
@@ -1702,11 +1780,13 @@ class Dashboard(QWidget):
         
         self.diag_results.setText(report)
         self.run_diag_btn.setEnabled(True)
-        self.run_diag_btn.setText("▶ Run Diagnostics")
+        self._set_localized_text(self.run_diag_btn, "Run Quick Check")
     
     def _view_logs(self):
         """View recent log entries"""
         from diagnostics import logger
+
+        self.details_toggle.setChecked(True)
         
         logs = logger.get_logs(50)
         if logs:
@@ -1749,6 +1829,7 @@ class Dashboard(QWidget):
         if not cp.has_section("translation"): cp.add_section("translation")
         if not cp.has_section("transcription"): cp.add_section("transcription")
         if not cp.has_section("display"): cp.add_section("display")
+        if not cp.has_section("app"): cp.add_section("app")
         
         # Audio
         idx = self.device_combo.currentData()
@@ -1769,18 +1850,31 @@ class Dashboard(QWidget):
         cp.set("api", "api_key", self.api_key.text())
         cp.set("api", "base_url", self.base_url.text())
         cp.set("translation", "model", self.model.currentText())
-        cp.set("translation", "target_lang", self.target_lang.currentText())
+        cp.set("translation", "target_lang", str(self.target_lang.currentData() or self.target_lang.currentText()))
         cp.set("translation", "mode", str(self.translation_mode.currentData() or "off"))
+
+        # App and overlay appearance
+        cp.set("app", "language", self.ui_language)
+        cp.set("display", "window_width", str(self.window_width.value()))
+        cp.set("display", "visible_subtitles", str(self.visible_subtitles.value()))
+        cp.set("display", "history_limit", str(getattr(config, "subtitle_history_limit", 250)))
+        cp.set("display", "original_font_size", str(self.original_font_size.value()))
+        cp.set("display", "translation_font_size", str(self.translation_font_size.value()))
+        cp.set("display", "original_color", self.original_color.currentText())
+        cp.set("display", "translation_color", self.translation_color.currentText())
+        cp.set("display", "window_opacity", str(self.window_opacity.value()))
+        cp.set("display", "display_mode", str(self.display_mode.currentData() or "bilingual"))
         
         write_config(cp, config_path)
         
         # Visual feedback
-        original_text = self.save_btn.text()
-        self.save_btn.setText("✓ Saved")
-        self.status_label.setText("✅ Settings saved! Restart to apply.")
-        self.status_label.setStyleSheet("font-size: 18px; color: #a6e3a1;")
+        self._set_localized_text(self.save_btn, "Saved")
+        self._set_localized_text(self.status_label, "Settings saved")
         # Restore after 2s
-        QTimer.singleShot(2000, lambda: self.save_btn.setText(original_text))
+        QTimer.singleShot(
+            2000,
+            lambda: self._set_localized_text(self.save_btn, "Save Changes"),
+        )
 
     def on_start(self):
         import logging
@@ -1788,10 +1882,10 @@ class Dashboard(QWidget):
         log.info("Launch Translator clicked")
         
         # Update UI to Loading State
-        self.status_label.setText("Initializing Pipeline... (This may take a moment)")
+        self._set_localized_text(self.status_label, "Initializing…")
         self.status_label.setStyleSheet("font-size: 18px; color: #fab387;")
         self.start_btn.setEnabled(False)
-        self.start_btn.setText("Loading...")
+        self._set_localized_text(self.start_btn, "Loading…")
         
         # Start worker thread for NON-UI preparation
         self.startup_worker = StartupWorker()
@@ -1813,7 +1907,20 @@ class Dashboard(QWidget):
             # Create overlay ON MAIN THREAD
             from main import create_and_show_overlay
             log.info("Creating overlay on main thread...")
-            self.overlay_window = create_and_show_overlay(pipeline, signals, start_pipeline=False)
+            style = {
+                "original_font_size": self.original_font_size.value(),
+                "translation_font_size": self.translation_font_size.value(),
+                "original_color": self.original_color.currentText(),
+                "translation_color": self.translation_color.currentText(),
+                "window_opacity": self.window_opacity.value(),
+                "window_width": self.window_width.value(),
+                "visible_subtitles": self.visible_subtitles.value(),
+                "history_limit": getattr(config, "subtitle_history_limit", 250),
+                "display_mode": self.display_mode.currentData() or "bilingual",
+            }
+            self.overlay_window = create_and_show_overlay(
+                pipeline, signals, start_pipeline=False, subtitle_style=style
+            )
             log.info("Overlay shown")
             
             self.pipeline = pipeline
@@ -1841,7 +1948,7 @@ class Dashboard(QWidget):
             self._startup_timeout.start(10000)
             
             # Now safe to start
-            self.status_label.setText("Starting Pipeline...")
+            self._set_localized_text(self.status_label, "Starting…")
             self.status_label.setStyleSheet("font-size: 18px; color: #fab387;")
             pipeline.start()
             
@@ -1858,10 +1965,10 @@ class Dashboard(QWidget):
         log = logging.getLogger("RealtimeSubtitle")
         log.error(f"Startup failed: {error}")
         
-        self.status_label.setText("Initialization Failed")
+        self._set_localized_text(self.status_label, "Initialization Failed")
         self.status_label.setStyleSheet("font-size: 18px; color: #f38ba8;")
         self.start_btn.setEnabled(True)
-        self.start_btn.setText("Start Live Subtitles")
+        self._set_localized_text(self.start_btn, "Start Live Subtitles")
         
         from PyQt6.QtWidgets import QMessageBox
         QMessageBox.critical(self, "Launch Failed",
@@ -1873,12 +1980,12 @@ class Dashboard(QWidget):
         log = logging.getLogger("RealtimeSubtitle")
         log.error(f"Pipeline failed: {error}")
         self.last_pipeline_error = error
-        self.status_label.setText("Pipeline Error — cleaning up...")
+        self._set_localized_text(self.status_label, "Pipeline Error — cleaning up…")
         self.status_label.setStyleSheet("font-size: 18px; color: #fab387;")
         self.stop_btn.hide()
         self.start_btn.show()
         self.start_btn.setEnabled(False)
-        self.start_btn.setText("Cleaning up...")
+        self._set_localized_text(self.start_btn, "Cleaning up…")
         self.showNormal()
     
     def _on_pipeline_cleanup_finished(self, success, message):
@@ -1887,19 +1994,19 @@ class Dashboard(QWidget):
         log = logging.getLogger("RealtimeSubtitle")
         log.info(f"Pipeline cleanup finished: success={success} {message}")
         if not success:
-            self.status_label.setText("Cleanup failed — retry or force quit")
+            self._set_localized_text(self.status_label, "Cleanup failed — retry or force quit")
             self.status_label.setStyleSheet("font-size: 18px; color: #f38ba8;")
             self.start_btn.setEnabled(False)
-            self.start_btn.setText("Retry Stop")
+            self._set_localized_text(self.start_btn, "Retry Stop")
             return
         if hasattr(self, 'overlay_window') and self.overlay_window:
             self.overlay_window.close()
             self.overlay_window = None
         self.pipeline = None
-        self.status_label.setText("Pipeline Error — ready to retry")
+        self._set_localized_text(self.status_label, "Pipeline Error — ready to retry")
         self.status_label.setStyleSheet("font-size: 18px; color: #f38ba8;")
         self.start_btn.setEnabled(True)
-        self.start_btn.setText("Retry Start")
+        self._set_localized_text(self.start_btn, "Retry Start")
     
     def _on_pipeline_started(self):
         """Pipeline confirmed started — transition to Running."""
@@ -1909,7 +2016,7 @@ class Dashboard(QWidget):
         if hasattr(self, '_startup_timeout'):
             self._startup_timeout.stop()
         self.start_btn.hide()
-        self.status_label.setText("Running...")
+        self._set_localized_text(self.status_label, "Running…")
         self.status_label.setStyleSheet("font-size: 18px; color: #a6e3a1;")
         self.stop_btn.show()
         self.stop_btn.setEnabled(True)
@@ -1920,13 +2027,13 @@ class Dashboard(QWidget):
         import logging
         log = logging.getLogger("RealtimeSubtitle")
         log.error(f"Audio device failed: {message}")
-        self.status_label.setText("Audio Device Error")
+        self._set_localized_text(self.status_label, "Audio Device Error")
         self.status_label.setStyleSheet("font-size: 18px; color: #f38ba8;")
         self.last_pipeline_error = f"Audio: {message[:200]}"
         self.stop_btn.hide()
         self.start_btn.show()
         self.start_btn.setEnabled(False)  # disabled until cleanup_finished
-        self.start_btn.setText("Wait...")
+        self._set_localized_text(self.start_btn, "Wait…")
         self.showNormal()
     
     def _on_startup_timeout(self):
@@ -1936,11 +2043,11 @@ class Dashboard(QWidget):
         log.error("Pipeline start timeout")
         if hasattr(self, 'pipeline') and self.pipeline:
             self.pipeline.stop()
-        self.status_label.setText("Start failed — timeout")
+        self._set_localized_text(self.status_label, "Start failed — timeout")
         self.status_label.setStyleSheet("font-size: 18px; color: #f38ba8;")
         self.start_btn.show()
         self.start_btn.setEnabled(True)
-        self.start_btn.setText("Retry Start")
+        self._set_localized_text(self.start_btn, "Retry Start")
     
     def _on_style_changed(self, style):
         """Sync style changes back to the style tab"""
@@ -1958,17 +2065,21 @@ class Dashboard(QWidget):
             self.window_opacity.blockSignals(False)
         if hasattr(self, 'display_mode'):
             self.display_mode.blockSignals(True)
-            idx = self.display_mode.findText(style.get('display_mode', 'bilingual'))
+            idx = self.display_mode.findData(style.get('display_mode', 'bilingual'))
             if idx >= 0:
                 self.display_mode.setCurrentIndex(idx)
             self.display_mode.blockSignals(False)
+        if hasattr(self, 'visible_subtitles'):
+            self.visible_subtitles.blockSignals(True)
+            self.visible_subtitles.setValue(style.get('visible_subtitles', 3))
+            self.visible_subtitles.blockSignals(False)
 
     def on_stop(self):
         import logging
         log = logging.getLogger("RealtimeSubtitle")
         
         self.stop_btn.setEnabled(False)
-        self.stop_btn.setText("Stopping...")
+        self._set_localized_text(self.stop_btn, "Stopping…")
         
         if hasattr(self, 'pipeline') and self.pipeline:
             try:
@@ -1978,10 +2089,10 @@ class Dashboard(QWidget):
                 ok = False
             if not ok:
                 log.error("Pipeline stop timed out")
-                self.status_label.setText("Stop timed out — Retry or Force Quit")
+                self._set_localized_text(self.status_label, "Stop timed out — Retry or Force Quit")
                 self.status_label.setStyleSheet("font-size: 18px; color: #f38ba8;")
                 self.stop_btn.setEnabled(True)
-                self.stop_btn.setText("Retry Stop")
+                self._set_localized_text(self.stop_btn, "Retry Stop")
                 return False
             self.pipeline = None
             
@@ -1991,12 +2102,12 @@ class Dashboard(QWidget):
         
         log.info("Translator stopped")
         
-        self.status_label.setText("Stopped")
+        self._set_localized_text(self.status_label, "Stopped")
         self.status_label.setStyleSheet("font-size: 18px; color: #6c7086;")
         self.stop_btn.hide()
         self.start_btn.show()
         self.start_btn.setEnabled(True)
-        self.start_btn.setText("Start Live Subtitles")
+        self._set_localized_text(self.start_btn, "Start Live Subtitles")
         self.showNormal()
         return True
 

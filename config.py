@@ -40,6 +40,12 @@ class Config:
                 except OSError:
                     print(f"[Config] Cannot backup corrupted config at {self.config_path}")
                 self.config = configparser.ConfigParser()  # fresh empty config
+
+        # App-level preferences.  Keep this in the same user-owned config so
+        # the launcher, dashboard, and packaged app all agree on language.
+        self.ui_language = self._get("app", "language", "en")
+        if self.ui_language not in ("en", "zh-Hans"):
+            self.ui_language = "en"
         
         # API settings (env vars take precedence)
         self.api_base_url = os.getenv("OPENAI_BASE_URL") or self._get("api", "base_url") or None
@@ -115,6 +121,22 @@ class Config:
         self.display_duration = self._getfloat("display", "display_duration", 3.0)
         self.window_width = self._getint("display", "window_width", 800)
         self.window_height = self._getint("display", "window_height", 120)
+        self.original_font_size = max(8, min(48, self._getint("display", "original_font_size", 20)))
+        self.translation_font_size = max(8, min(48, self._getint("display", "translation_font_size", 17)))
+        self.original_color = self._get("display", "original_color", "#ffffff")
+        self.translation_color = self._get("display", "translation_color", "#d99a69")
+        if self.translation_color.lower() == "#9db5ff":
+            self.translation_color = "#d99a69"
+        self.window_opacity = max(0.3, min(1.0, self._getfloat("display", "window_opacity", 0.94)))
+        self.display_mode = self._get("display", "display_mode", "bilingual")
+        if self.display_mode not in ("bilingual", "original_only", "translation_only"):
+            self.display_mode = "bilingual"
+        self.visible_subtitles = max(
+            1, min(8, self._getint("display", "visible_subtitles", 3))
+        )
+        self.subtitle_history_limit = max(
+            20, min(1000, self._getint("display", "history_limit", 250))
+        )
         
         # Normalize: ensure no field is None (avoids NoneType subscript crashes)
         self.api_key = self.api_key or ""

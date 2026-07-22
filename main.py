@@ -860,7 +860,7 @@ def _shutdown_active_pipeline():
         except Exception:
             log.exception("Pipeline cleanup during application quit failed")
 
-def create_and_show_overlay(pipeline, signals, start_pipeline=True):
+def create_and_show_overlay(pipeline, signals, start_pipeline=True, subtitle_style=None):
     """Create and show the overlay window (MUST be called from main thread).
     Set start_pipeline=False if caller needs to connect signals first."""
     global _overlay_window, _overlay_pipeline
@@ -868,7 +868,21 @@ def create_and_show_overlay(pipeline, signals, start_pipeline=True):
     from enhanced_overlay_window import EnhancedOverlayWindow
     
     log.info("Creating overlay window on main thread...")
-    window = EnhancedOverlayWindow()
+    if subtitle_style is None:
+        from config import config
+        subtitle_style = {
+            "window_width": getattr(config, "window_width", 620),
+            "window_height": getattr(config, "window_height", 220),
+            "visible_subtitles": getattr(config, "visible_subtitles", 3),
+            "history_limit": getattr(config, "subtitle_history_limit", 250),
+            "original_font_size": getattr(config, "original_font_size", 20),
+            "translation_font_size": getattr(config, "translation_font_size", 17),
+            "original_color": getattr(config, "original_color", "#ffffff"),
+            "translation_color": getattr(config, "translation_color", "#d99a69"),
+            "window_opacity": getattr(config, "window_opacity", 0.94),
+            "display_mode": getattr(config, "display_mode", "bilingual"),
+        }
+    window = EnhancedOverlayWindow(subtitle_style)
     window.show()
     log.info("Overlay window shown")
     
