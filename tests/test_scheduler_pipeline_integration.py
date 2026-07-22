@@ -88,18 +88,24 @@ class TestTranslationNonBlocking:
     def test_original_text_written_before_translation(self):
         """Simulates the pipeline pattern: emit original text immediately,
         then submit to scheduler."""
-        from collections import OrderedDict
+        import threading
         timeline = []
+
+        translation_gate = threading.Event()
+
+        def gated_translator(text, lang=None):
+            assert translation_gate.wait(timeout=2.0)
+            return f"ZH:{text}"
 
         # Mimic pipeline behavior
         text = "hello"
         chunk_id = 1
         timeline.append(("original_emit", chunk_id, text))
-        s, a, results = _setup(translator=_slow_translator(0.15))
+        s, a, results = _setup(translator=gated_translator)
         a.on_final_text(text, chunk_id)
         timeline.append(("scheduler_submit", chunk_id))
-        time.sleep(0.05)  # original is already emitted
         timeline.append(("check_before_translation", len(results)))
+        translation_gate.set()
         s.shutdown(wait=True)
         timeline.append(("after_shutdown", len(results)))
 
