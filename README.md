@@ -8,14 +8,14 @@
 
 ## 下载 / Download
 
-当前稳定版：**v2.5.0** · macOS 13 Ventura 或更高版本
+当前稳定版：**v2.5.1** · macOS 13 Ventura 或更高版本
 
-Current stable release: **v2.5.0** · macOS 13 Ventura or later
+Current stable release: **v2.5.1** · macOS 13 Ventura or later
 
 | Mac | 安装包 / Installer | 适用设备 / Hardware |
 |---|---|---|
-| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.5.0-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
-| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.5.0-macos-x86_64.dmg) | Intel-based Macs |
+| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.5.1-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
+| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.5.1-macos-x86_64.dmg) | Intel-based Macs |
 
 [查看全部版本 / View all releases](https://github.com/Dreaminmaster/realtime-subtitle-product/releases)
 
@@ -31,6 +31,8 @@ Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本�
 
 - 本地实时语音识别，内置 `faster-whisper tiny` 模型，安装后即可开始。
 - 悬浮字幕窗始终置顶，支持拖动、缩放、双语/仅原文/仅翻译显示。
+- 上下文断句会识别短暂停顿后的未完句，在同一条字幕中续接并重新翻译，避免把半句话永久切开。
+- 翻译提示把所有输入严格视为“待翻译语音”，问句不会被本地模型误当成聊天请求；异常回答会自动重试并拦截。
 - 可自定义屏幕上同时显示的字幕条数；向上滚动可查看本次会话的过往字幕。
 - 默认把每次字幕保存为本机会话，像聊天记录一样回看、导出或删除；也可在开始前切换为不留记录的临时会话。
 - 应用界面支持全局中文/English 即时切换，入口位于 **System**。
@@ -112,6 +114,8 @@ Realtime Subtitle is a native-feeling macOS control center with an always-on-top
 - Instant app-wide English / Simplified Chinese switching under **System**.
 - Online, local-LLM, custom OpenAI-compatible, or disabled translation.
 - A single provider selector for Agnes AI, LM Studio, and custom OpenAI-compatible endpoints.
+- Context-aware phrase revisions join likely unfinished speech after a short pause and retranslate the same caption instead of leaving fragmented lines.
+- Strict quoted-speech prompting, automatic retry, and response screening prevent local models from answering spoken questions as a chat assistant.
 - Microphone and BlackHole system-audio input.
 - Model management, permission prompts only when needed, diagnostics, and local transcripts.
 - Separate native downloads for Apple Silicon and Intel Macs.
@@ -182,17 +186,17 @@ Build a native DMG on a matching Mac:
 
 ```bash
 # Apple Silicon host
-bash build_dmg.sh 2.5.0 arm64
+bash build_dmg.sh 2.5.1 arm64
 
 # Intel host, or Apple Silicon with Rosetta installed
-bash build_dmg.sh 2.5.0 x86_64
+bash build_dmg.sh 2.5.1 x86_64
 ```
 
 Outputs:
 
 ```text
-dist/RealtimeSubtitle-2.5.0-macos-arm64.dmg
-dist/RealtimeSubtitle-2.5.0-macos-x86_64.dmg
+dist/RealtimeSubtitle-2.5.1-macos-arm64.dmg
+dist/RealtimeSubtitle-2.5.1-macos-x86_64.dmg
 ```
 
 The GitHub Actions release workflow builds `arm64` on an Apple Silicon runner and `x86_64` on an Intel runner, verifies the embedded architecture and app icon, creates SHA-256 checksums, and publishes both DMGs to one release.

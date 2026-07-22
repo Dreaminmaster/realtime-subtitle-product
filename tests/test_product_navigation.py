@@ -3,9 +3,9 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PyQt6.QtWidgets import QApplication, QTabWidget, QWidget
+from PyQt6.QtWidgets import QApplication, QWidget
 
-from product_navigation import ProductNavigation
+from product_navigation import ProductNavigation, SectionTabs
 
 
 @pytest.fixture(scope="module")
@@ -39,7 +39,7 @@ def test_eight_feature_pages_are_grouped_into_five_sections(app):
         "Appearance",
         "System",
     ]
-    assert isinstance(navigation._section_widgets["Audio"], QTabWidget)
+    assert isinstance(navigation._section_widgets["Audio"], SectionTabs)
     assert navigation._section_widgets["Audio"].count() == 2
     assert navigation._section_widgets["Language"].count() == 3
     assert [

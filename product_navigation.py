@@ -12,10 +12,62 @@ from PyQt6.QtWidgets import (
     QLabel,
     QPushButton,
     QStackedWidget,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
+
+
+class SectionTabs(QFrame):
+    """Native-looking subnavigation without macOS QTabWidget chrome."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("SectionTabs")
+        self._labels = []
+        self._buttons = []
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        self.header = QFrame()
+        self.header.setObjectName("Subnav")
+        self.header_layout = QHBoxLayout(self.header)
+        self.header_layout.setContentsMargins(20, 10, 20, 8)
+        self.header_layout.setSpacing(6)
+        self.header_layout.addStretch()
+        self.group = QButtonGroup(self)
+        self.group.setExclusive(True)
+        self.pages = QStackedWidget()
+        root.addWidget(self.header)
+        root.addWidget(self.pages, 1)
+
+    def addTab(self, widget, label):
+        index = self.pages.addWidget(widget)
+        self._labels.append(label)
+        button = QPushButton(label)
+        button.setObjectName("SubnavButton")
+        button.setCheckable(True)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.clicked.connect(lambda checked=False, value=index: self.setCurrentIndex(value))
+        self.group.addButton(button, index)
+        self.header_layout.insertWidget(self.header_layout.count() - 1, button)
+        self._buttons.append(button)
+        if index == 0:
+            button.setChecked(True)
+        return index
+
+    def setCurrentIndex(self, index):
+        self.pages.setCurrentIndex(index)
+        if 0 <= index < len(self._buttons):
+            self._buttons[index].setChecked(True)
+
+    def currentIndex(self):
+        return self.pages.currentIndex()
+
+    def count(self):
+        return self.pages.count()
+
+    def tabText(self, index):
+        return self._buttons[index].text()
 
 
 class ProductNavigation(QFrame):
@@ -76,10 +128,7 @@ class ProductNavigation(QFrame):
 
     def _create_section(self, section_key: str, nav_label: str):
         if section_key in self._MULTI_SECTIONS:
-            section_widget = QTabWidget()
-            section_widget.setObjectName("SectionTabs")
-            section_widget.setDocumentMode(True)
-            section_widget.setUsesScrollButtons(False)
+            section_widget = SectionTabs()
         else:
             section_widget = None
 
@@ -120,7 +169,7 @@ class ProductNavigation(QFrame):
                 self.stack.setCurrentIndex(0)
 
         section_widget = self._section_widgets[section_key]
-        if isinstance(section_widget, QTabWidget):
+        if isinstance(section_widget, SectionTabs):
             section_widget.addTab(widget, sub_label or plain)
 
         self._page_count += 1

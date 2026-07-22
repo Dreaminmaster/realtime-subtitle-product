@@ -188,8 +188,16 @@ class ResizeHandle(QLabel):
     def mouseMoveEvent(self, event):
         if self.startPos:
             delta = event.globalPosition().toPoint() - self.startPos
-            new_w = max(self.parent_window.minimumWidth(), self.parent_window.width() + delta.x())
-            new_h = max(self.parent_window.minimumHeight(), self.parent_window.height() + delta.y())
+            screen = QApplication.screenAt(event.globalPosition().toPoint()) or QApplication.primaryScreen()
+            geometry = screen.availableGeometry()
+            new_w = min(
+                max(self.parent_window.minimumWidth(), self.parent_window.width() + delta.x()),
+                int(geometry.width() * 0.92),
+            )
+            new_h = min(
+                max(self.parent_window.minimumHeight(), self.parent_window.height() + delta.y()),
+                int(geometry.height() * 0.68),
+            )
             self.parent_window.resize(new_w, new_h)
             # Update stored width
             self.parent_window.subtitle_style["window_width"] = new_w
@@ -286,11 +294,13 @@ class EnhancedOverlayWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self.setWindowTitle("")  # prevent macOS title bar text
+        self.setObjectName("OverlaySurface")
         
         # Keep glyphs fully opaque; opacity belongs to subtitle backgrounds.
         self.setWindowOpacity(1.0)
         self.setMouseTracking(True)
         self.setMinimumSize(360, 140)
+        self._apply_surface_style()
         
         # Main layout
         main_layout = QVBoxLayout()
@@ -415,12 +425,14 @@ class EnhancedOverlayWindow(QWidget):
         )
         
         # Initial size and position — bottom-centered like standard subtitles
-        w = self.subtitle_style.get("window_width", 620)
-        h = self._height_for_visible_rows()
+        screen = QApplication.primaryScreen().availableGeometry()
+        maximum_width = min(960, int(screen.width() * 0.88))
+        w = min(max(460, int(self.subtitle_style.get("window_width", 620))), maximum_width)
+        h = min(self._height_for_visible_rows(), int(screen.height() * 0.62))
+        self.subtitle_style["window_width"] = w
         self.subtitle_style["window_height"] = h
         self.resize(w, h)
         
-        screen = QApplication.primaryScreen().availableGeometry()
         x = screen.x() + (screen.width() - w) // 2
         y = screen.y() + screen.height() - h - 60
         
@@ -429,13 +441,27 @@ class EnhancedOverlayWindow(QWidget):
         settings = QSettings("RealtimeSubtitle", "Overlay")
         saved_x = settings.value("window/x")
         saved_y = settings.value("window/y")
-        if saved_x is not None and saved_y is not None:
+        placement_version = int(settings.value("window/placement_version", 0) or 0)
+        if placement_version == 3 and saved_x is not None and saved_y is not None:
             try:
                 x, y = int(saved_x), int(saved_y)
             except (ValueError, TypeError):
                 pass
+        x = max(screen.x(), min(x, screen.x() + screen.width() - w))
+        y = max(screen.y(), min(y, screen.y() + screen.height() - h))
         
         self.move(x, y)
+
+    def _apply_surface_style(self):
+        # The overlay is a collection of opaque-enough subtitle cards, not a
+        # large panel.  Keeping the outer surface transparent prevents it from
+        # covering the video or call behind it; each bubble owns its own
+        # independently configurable background opacity.
+        self.setStyleSheet(
+            "QWidget#OverlaySurface {"
+            "background-color: transparent; border: none;"
+            "}"
+        )
     
     def _control_btn_style(self):
         return (
@@ -503,6 +529,7 @@ class EnhancedOverlayWindow(QWidget):
         self.subtitle_style.update(style_dict)
         self._sync_display_mode_flags()
         self.setWindowOpacity(1.0)
+        self._apply_surface_style()
         if "visible_subtitles" in style_dict or "display_mode" in style_dict:
             self.subtitle_style["window_height"] = self._height_for_visible_rows()
         self.resize(
@@ -589,6 +616,17 @@ class EnhancedOverlayWindow(QWidget):
             widget.deleteLater()
         self.items.clear()
         self.transcript_data.clear()
+
+    def remove_text(self, chunk_id):
+        """Remove a superseded PARTIAL row after sentence-level merging."""
+        for index, (existing_id, widget) in enumerate(list(self.items)):
+            if existing_id != chunk_id:
+                continue
+            self.items.pop(index)
+            self.container_layout.removeWidget(widget)
+            widget.deleteLater()
+            break
+        self.transcript_data.pop(chunk_id, None)
     
     def update_audio_status(self, status_text, volume_level):
         """Update audio monitoring indicator"""
@@ -667,6 +705,7 @@ class EnhancedOverlayWindow(QWidget):
         settings = QSettings("RealtimeSubtitle", "Overlay")
         settings.setValue("window/x", self.x())
         settings.setValue("window/y", self.y())
+        settings.setValue("window/placement_version", 3)
 
 
 # For backward compatibility

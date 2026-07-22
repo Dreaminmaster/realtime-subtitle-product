@@ -107,3 +107,24 @@ def test_history_limit_is_a_safety_cap_not_visible_count(app):
     assert len(window.items) == 20
     assert [chunk_id for chunk_id, _ in window.items][:2] == [5, 6]
     window.close()
+
+
+def test_remove_text_drops_superseded_partial_row(app):
+    window = EnhancedOverlayWindow()
+    window.update_text(7, "unfinished partial", "")
+    window.update_text(8, "another caption", "另一条字幕")
+
+    window.remove_text(7)
+
+    assert [chunk_id for chunk_id, _ in window.items] == [8]
+    assert 7 not in window.transcript_data
+    window.close()
+
+
+def test_outer_surface_stays_transparent_while_bubbles_own_opacity(app):
+    window = EnhancedOverlayWindow({"window_opacity": 0.8})
+    window.update_text(1, "Readable", "清晰")
+
+    assert "background-color: transparent" in window.styleSheet()
+    assert "rgba(24, 23, 21, 204)" in window.items[0][1].styleSheet()
+    window.close()

@@ -64,6 +64,38 @@ class TestNormalSuccess:
         result = translator.translate("hello")
         assert result == "Chinese text"
 
+    def test_question_is_treated_as_quoted_speech(self, translator):
+        create = translator._ensure_client = MagicMock()
+        client = create.return_value
+        client.chat.completions.create.return_value = MockResponse(
+            choices=[MockChoice("你现在在做什么？")]
+        )
+        result = translator.translate("What are you doing now?")
+        assert result == "你现在在做什么？"
+        messages = client.chat.completions.create.call_args.kwargs["messages"]
+        assert "not a chat assistant" in messages[0]["content"]
+        assert messages[1]["content"] == "<source>What are you doing now?</source>"
+
+    def test_assistant_reply_is_retried_as_translation(self, translator):
+        translator._ensure_client = MagicMock()
+        create = translator._ensure_client.return_value.chat.completions.create
+        create.side_effect = [
+            MockResponse(choices=[MockChoice("我正在处理您的请求，准备为您提供帮助。")]),
+            MockResponse(choices=[MockChoice("你现在在做什么？")]),
+        ]
+        assert translator.translate("What are you doing now?") == "你现在在做什么？"
+        assert create.call_count == 2
+
+    def test_repeated_assistant_reply_is_never_shown_as_a_subtitle(self, translator):
+        translator._ensure_client = MagicMock()
+        create = translator._ensure_client.return_value.chat.completions.create
+        create.return_value = MockResponse(
+            choices=[MockChoice("我正在处理您的请求，准备为您提供帮助。")]
+        )
+        result = translator.translate("What are you doing now?")
+        assert result == "[Translation Failed: model answered instead of translating]"
+        assert create.call_count == 2
+
 class TestEmptyInput:
     def test_empty_string(self, translator):
         result = translator.translate("")

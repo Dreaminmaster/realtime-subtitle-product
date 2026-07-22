@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Reusable progress panel — model download + first-launch setup."""
-from PyQt6.QtWidgets import (QFrame, QVBoxLayout, QHBoxLayout, QLabel,
-                              QProgressBar, QPushButton, QSizePolicy)
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtWidgets import (
+    QFrame, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar, QPushButton,
+)
+from PyQt6.QtCore import pyqtSignal
 
 
 class ProgressPanel(QFrame):
@@ -12,59 +13,61 @@ class ProgressPanel(QFrame):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setObjectName("progressPanel")
+        self.setObjectName("DownloadProgress")
         self.setStyleSheet("""
-            QFrame#progressPanel {
-                background: #313244; border-radius: 10px; padding: 12px;
-                border: 1px solid #45475a;
+            QFrame#DownloadProgress {
+                background: #22211f; border-radius: 12px;
+                border: 1px solid #45413a;
             }
-            QProgressBar {
-                border: 1px solid #585b70; border-radius: 3px; height: 12px;
-                text-align: center; background: #1e1e2e;
+            QLabel#ProgressTitle { color: #f2eee6; font-size: 14px; font-weight: 700; }
+            QLabel#ProgressStatus { color: #b6b0a6; font-size: 12px; }
+            QProgressBar#DownloadBar {
+                border: none; border-radius: 4px; height: 8px;
+                text-align: center; background: #34312d; color: transparent;
             }
-            QProgressBar::chunk { background: #89b4fa; border-radius: 2px; }
+            QProgressBar#DownloadBar::chunk { background: #d98246; border-radius: 4px; }
+            QPushButton { padding: 7px 14px; border-radius: 7px; font-weight: 650; }
+            QPushButton#ProgressPrimary { background: #d98246; color: #1d1712; }
+            QPushButton#ProgressSecondary { background: #2d2b27; color: #ddd8ce; border: 1px solid #48443d; }
+            QPushButton#ProgressDanger { background: #4b2c29; color: #f1b7aa; border: 1px solid #6c3e37; }
         """)
         self._init_ui()
 
     def _init_ui(self):
         layout = QVBoxLayout()
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(6)
-        self.title = QLabel("Progress")
-        self.title.setStyleSheet("font-weight: bold; color: #cdd6f4;")
+        layout.setContentsMargins(16, 13, 16, 13)
+        layout.setSpacing(8)
+        self.title = QLabel("Download Progress")
+        self.title.setObjectName("ProgressTitle")
         layout.addWidget(self.title)
         self.status = QLabel("")
         self.status.setWordWrap(True)
-        self.status.setStyleSheet("color: #a6adc8; font-size: 12px;")
+        self.status.setObjectName("ProgressStatus")
         layout.addWidget(self.status)
         self.bar = QProgressBar()
+        self.bar.setObjectName("DownloadBar")
         self.bar.setRange(0, 100)
         self.bar.setValue(0)
+        self.bar.setTextVisible(False)
         layout.addWidget(self.bar)
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(6)
         self.retry_btn = QPushButton("Retry")
-        self.retry_btn.setStyleSheet(self._btn("#a6e3a1"))
+        self.retry_btn.setObjectName("ProgressPrimary")
         self.retry_btn.clicked.connect(self.retry_clicked.emit)
         self.retry_btn.hide()
         btn_layout.addWidget(self.retry_btn)
         self.cancel_btn = QPushButton("Cancel")
-        self.cancel_btn.setStyleSheet(self._btn("#f38ba8"))
+        self.cancel_btn.setObjectName("ProgressDanger")
         self.cancel_btn.clicked.connect(self.cancel_clicked.emit)
         btn_layout.addWidget(self.cancel_btn)
         self.dismiss_btn = QPushButton("Close")
-        self.dismiss_btn.setStyleSheet(self._btn("#6c7086"))
+        self.dismiss_btn.setObjectName("ProgressSecondary")
         self.dismiss_btn.clicked.connect(self.dismiss_clicked.emit)
         self.dismiss_btn.hide()
         btn_layout.addWidget(self.dismiss_btn)
         layout.addLayout(btn_layout)
         self.setLayout(layout)
-
-    @staticmethod
-    def _btn(color):
-        return (f"QPushButton {{ background: {color}; color: #1e1e2e; "
-                f"padding: 6px 14px; border-radius: 4px; font-weight: bold; }}"
-                f"QPushButton:hover {{ opacity: 0.8; }}")
 
     def set_progress(self, event):
         self.status.setText(event.message)

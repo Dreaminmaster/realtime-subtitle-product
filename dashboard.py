@@ -12,8 +12,7 @@ import sounddevice as sd
 from config import config
 from localization import apply_language, normalize_language, translate as ui_translate
 from product_navigation import ProductNavigation
-from ui_components import ThemedComboBox
-from ui_components import ColorButton
+from ui_components import ColorButton, ProviderSelector, ThemedComboBox
 
 # Use one popup implementation everywhere so menus cannot revert to the
 # unreadable native light palette or clip long provider/model names.
@@ -35,14 +34,14 @@ QPushButton#NavButton {
 QPushButton#NavButton:hover { background: #2a2926; color: #f4f1ea; }
 QPushButton#NavButton:checked { background: #34312b; color: #ffb36a; }
 QStackedWidget#ProductStack { background: #171716; }
-QTabWidget#SectionTabs::pane { border: none; background: #171716; top: -1px; }
-QTabBar { background: #171716; color: #bdb8ae; }
-QTabWidget#SectionTabs QTabBar::tab, QTabBar::tab {
-    background: transparent; color: #928e86; padding: 10px 16px;
-    border: none; border-bottom: 2px solid transparent; font-weight: 600;
+QFrame#SectionTabs { background: #171716; border: none; }
+QFrame#Subnav { background: #1e1e1c; border-bottom: 1px solid #383631; }
+QPushButton#SubnavButton {
+    background: transparent; color: #aaa59b; border: none; border-radius: 7px;
+    padding: 8px 13px; font-weight: 650;
 }
-QTabWidget#SectionTabs QTabBar::tab:hover { color: #dedad1; }
-QTabWidget#SectionTabs QTabBar::tab:selected { color: #ffb36a; border-bottom-color: #d67a36; }
+QPushButton#SubnavButton:hover { background: #2a2926; color: #f0ece4; }
+QPushButton#SubnavButton:checked { background: #3a3129; color: #ffad66; }
 QLabel { font-size: 13px; background: transparent; }
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
     background-color: #262522; border: 1px solid #44413b; border-radius: 7px;
@@ -65,6 +64,19 @@ QPushButton:disabled { background: #33312d; color: #77736b; }
 QPushButton#SecondaryButton { background: #292824; color: #ddd8ce; border: 1px solid #46433d; }
 QPushButton#SecondaryButton:hover { background: #34322e; }
 QPushButton#DangerButton { background: #4b2c29; color: #f1b7aa; border: 1px solid #6c3e37; }
+QPushButton#ProviderOption {
+    background: #242320; color: #c7c1b7; border: 1px solid #45413a;
+    border-radius: 10px; padding: 10px 14px; text-align: left; font-weight: 650;
+}
+QPushButton#ProviderOption:hover { border-color: #7a6453; color: #f3eee5; }
+QPushButton#ProviderOption:checked { background: #3b2f27; color: #ffb36a; border: 1px solid #c5733b; }
+QFrame#ModelCard { background: #22211f; border: 1px solid #3e3b35; border-radius: 12px; }
+QLabel#ModelName { color: #f2eee6; font-size: 14px; font-weight: 700; }
+QLabel#ModelMeta { color: #b2aca2; font-size: 11px; }
+QLabel#ModelBestFor { color: #d49a6f; font-size: 11px; }
+QLabel#RecommendedPill { color: #9fd3ad; background: #243329; border: 1px solid #395340; border-radius: 8px; padding: 3px 7px; }
+QPushButton#ModelInstalled { background: #26362b; color: #a8ddb5; border: 1px solid #3d5b45; }
+QPushButton#ModelDownload { background: #d98246; color: #1d1712; }
 QFrame#HeroCard, QFrame#SummaryCard, QFrame#SettingsCard {
     background: #22211f; border: 1px solid #3a3833; border-radius: 12px;
 }
@@ -1023,11 +1035,13 @@ class Dashboard(QWidget):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         outer.addWidget(scroll)
         content = QWidget()
-        content.setMaximumWidth(820)
+        content.setMinimumWidth(520)
+        content.setMaximumWidth(940)
         layout = QFormLayout(content)
         layout.setContentsMargins(28, 24, 28, 28)
         layout.setHorizontalSpacing(18)
         layout.setVerticalSpacing(14)
+        layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         title = QLabel("Translation Provider")
         title.setObjectName("HeroTitle")
         layout.addRow(title)
@@ -1036,12 +1050,11 @@ class Dashboard(QWidget):
         intro.setWordWrap(True)
         layout.addRow(intro)
 
-        self.translation_mode = QComboBox()
+        self.translation_mode = ProviderSelector()
         self.translation_mode.addItem("No translation", "off")
         self.translation_mode.addItem("Agnes AI", "online")
         self.translation_mode.addItem("LM Studio / local server", "local")
-        self.translation_mode.addItem("Other OpenAI-compatible provider", "custom")
-        self.translation_mode.addItem("macOS System Translation (experimental)", "fast")
+        self.translation_mode.addItem("Custom API", "custom")
         mode_index = self.translation_mode.findData(config.translation_mode)
         self.translation_mode.setCurrentIndex(max(0, mode_index))
         self.translation_mode.currentIndexChanged.connect(self._on_provider_changed)
@@ -1109,6 +1122,7 @@ class Dashboard(QWidget):
         wrapper = QWidget()
         wrapper_layout = QHBoxLayout(wrapper)
         wrapper_layout.setContentsMargins(0, 0, 0, 0)
+        wrapper_layout.addStretch()
         wrapper_layout.addWidget(content)
         wrapper_layout.addStretch()
         scroll.setWidget(wrapper)
@@ -1158,22 +1172,35 @@ class Dashboard(QWidget):
         api_key = self.api_key.text().strip()
         base_url = self.base_url.text().strip()
         model = self.model.currentText().strip()
+        zh = self.ui_language == "zh-Hans"
         if mode == "off":
-            self.trans_mode_label.setText("Translation: Off — original subtitles only")
+            self.trans_mode_label.setText(
+                "翻译：关闭 · 仅显示原文" if zh else "Translation: Off · original subtitles only"
+            )
         elif mode == "online" and (not api_key or api_key == "sk-..."):
-            self.trans_mode_label.setText("Translation: Off (no API key)")
+            self.trans_mode_label.setText(
+                "翻译：关闭 · 请先填写 API 密钥" if zh else "Translation: Off · API key required"
+            )
         elif mode == "online":
             endpoint = base_url or "OpenAI default endpoint"
-            self.trans_mode_label.setText(f"Translation: Online — {model} via {endpoint}")
+            self.trans_mode_label.setText(
+                f"翻译：在线 · {model} · {endpoint}" if zh
+                else f"Translation: Online · {model} · {endpoint}"
+            )
         elif mode == "local":
             endpoint = base_url or "http://localhost:1234/v1"
-            self.trans_mode_label.setText(f"Translation: Local — {model} via {endpoint}")
-        elif mode == "custom":
             self.trans_mode_label.setText(
-                f"Translation: Custom — {model} via {base_url or '(endpoint required)'}"
+                f"翻译：本地 · {model} · {endpoint}" if zh
+                else f"Translation: Local · {model} · {endpoint}"
+            )
+        elif mode == "custom":
+            endpoint = base_url or ("请填写接口地址" if zh else "endpoint required")
+            self.trans_mode_label.setText(
+                f"翻译：自定义 · {model} · {endpoint}" if zh
+                else f"Translation: Custom · {model} · {endpoint}"
             )
         else:
-            self.trans_mode_label.setText("Translation: macOS System Translation (experimental)")
+            self.trans_mode_label.setText("翻译：关闭" if zh else "Translation: Off")
     
     def _test_translation(self):
         """Test translation backend with current settings"""
@@ -1190,7 +1217,10 @@ class Dashboard(QWidget):
         target_lang = self.target_lang.currentData() or self.target_lang.currentText()
 
         if mode == "off":
-            self.trans_test_result.setText("ℹ️ Translation is disabled; no connection is needed")
+            self.trans_test_result.setText(
+                "ℹ️ 翻译已关闭，无需测试连接" if self.ui_language == "zh-Hans"
+                else "ℹ️ Translation is disabled; no connection is needed"
+            )
             self.trans_test_result.setStyleSheet("color: #89b4fa; font-size: 12px;")
             return
         
@@ -1198,7 +1228,10 @@ class Dashboard(QWidget):
         if mode == "online" and (
             not api_key or api_key in ("sk-...", "", "dummy-key-for-local")
         ):
-            self.trans_test_result.setText("❌ No API key configured — enter a key to test")
+            self.trans_test_result.setText(
+                "❌ 请先填写 API 密钥" if self.ui_language == "zh-Hans"
+                else "❌ No API key configured — enter a key to test"
+            )
             self.trans_test_result.setStyleSheet("color: #f38ba8; font-size: 12px;")
             return
         
@@ -1213,14 +1246,20 @@ class Dashboard(QWidget):
         # Custom endpoints must be explicit. Online mode may use the SDK's
         # official default endpoint when the field is blank.
         if mode == "custom" and not base_url:
-            self.trans_test_result.setText("❌ No API endpoint configured")
+            self.trans_test_result.setText(
+                "❌ 请先填写接口地址" if self.ui_language == "zh-Hans"
+                else "❌ No API endpoint configured"
+            )
             self.trans_test_result.setStyleSheet("color: #f38ba8; font-size: 12px;")
             return
         
         is_local = any(h in base_url for h in ("localhost", "127.0.0.1", "::1"))
         
         endpoint_label = base_url or "OpenAI default endpoint"
-        self.trans_test_result.setText(f"Testing {endpoint_label}...")
+        self.trans_test_result.setText(
+            f"正在测试 {endpoint_label}…" if self.ui_language == "zh-Hans"
+            else f"Testing {endpoint_label}…"
+        )
         self.trans_test_result.setStyleSheet("color: #fab387; font-size: 12px;")
         self.test_trans_btn.setEnabled(False)
         
@@ -1233,8 +1272,9 @@ class Dashboard(QWidget):
                 engine.set_mode(mode, base_url=base_url, api_key=api_key, model=model)
                 sample = engine.translate("The connection is working.")
                 if sample and not sample.startswith("[Translation Failed:"):
+                    prefix = "连接成功" if self.ui_language == "zh-Hans" else "Connected"
                     self.translation_test_finished.emit(
-                        True, f"Connected — {model}\n{sample[:120]}"
+                        True, f"{prefix} · {model}\n{sample[:120]}"
                     )
                 else:
                     hint = ""
@@ -1260,62 +1300,68 @@ class Dashboard(QWidget):
     def init_model_tab(self):
         """Model Management tab - download/delete/switch ASR models"""
         tab = QWidget()
-        layout = QVBoxLayout()
-        layout.setSpacing(10)
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(28, 22, 28, 24)
+        layout.setSpacing(14)
         
         header = QLabel("Model Management")
-        header.setStyleSheet("font-size: 16px; font-weight: bold; color: #fab387;")
+        header.setObjectName("HeroTitle")
         layout.addWidget(header)
+        model_copy = QLabel("Download speech-recognition models for offline use. Smaller models are faster; larger models are more accurate.")
+        model_copy.setObjectName("Muted")
+        model_copy.setWordWrap(True)
+        layout.addWidget(model_copy)
         
         # Backend filter
-        filter_layout = QHBoxLayout()
+        filter_card = QFrame()
+        filter_card.setObjectName("SettingsCard")
+        filter_layout = QHBoxLayout(filter_card)
+        filter_layout.setContentsMargins(16, 12, 16, 12)
         filter_layout.addWidget(QLabel("Backend:"))
         self.model_backend_combo = QComboBox()
+        self.model_backend_combo.setMinimumWidth(170)
         self.model_backend_combo.addItems(["whisper", "mlx"])
         self.model_backend_combo.currentTextChanged.connect(self._refresh_model_list)
         filter_layout.addWidget(self.model_backend_combo)
         filter_layout.addStretch()
         
         self.refresh_model_btn = QPushButton("Refresh")
+        self.refresh_model_btn.setObjectName("SecondaryButton")
         self.refresh_model_btn.clicked.connect(self._refresh_model_list)
         filter_layout.addWidget(self.refresh_model_btn)
-        layout.addLayout(filter_layout)
+        layout.addWidget(filter_card)
         
         # Model list
         self.model_list_widget = QWidget()
         self.model_list_layout = QVBoxLayout()
-        self.model_list_layout.setSpacing(5)
+        self.model_list_layout.setContentsMargins(0, 0, 0, 0)
+        self.model_list_layout.setSpacing(10)
         self.model_list_widget.setLayout(self.model_list_layout)
         
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(self.model_list_widget)
-        scroll.setStyleSheet("QScrollArea { border: 1px solid #45475a; border-radius: 6px; }")
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         layout.addWidget(scroll)
         
         # Status
         self.model_mgmt_status = QLabel("")
         self.model_mgmt_status.setWordWrap(True)
-        self.model_mgmt_status.setStyleSheet("color: #a6adc8; font-size: 12px;")
+        self.model_mgmt_status.setObjectName("Muted")
         layout.addWidget(self.model_mgmt_status)
         
         # Clear all button
         clear_layout = QHBoxLayout()
         clear_layout.addStretch()
         self.clear_models_btn = QPushButton("Delete All Models")
-        self.clear_models_btn.setStyleSheet(
-            "QPushButton { background: #f38ba8; color: #1e1e2e; padding: 5px 10px; border-radius: 4px; } "
-            "QPushButton:hover { background: #eba0ac; }"
-        )
+        self.clear_models_btn.setObjectName("DangerButton")
         self.clear_models_btn.clicked.connect(self._clear_all_models)
         clear_layout.addWidget(self.clear_models_btn)
         layout.addLayout(clear_layout)
         
-        tab.setLayout(layout)
         self.tabs.addTab(tab, "Models")
         
         layout.addWidget(self.progress_panel)
-        self.progress_panel.title.setText("Download Progress")
         
         self._refresh_model_list()
     
@@ -1339,37 +1385,43 @@ class Dashboard(QWidget):
         
         self.model_list_layout.addStretch()
         
-        self.model_mgmt_status.setText(
-            f"Total disk usage: {disk['total_mb']} MB across {disk['model_count']} models"
-        )
+        if self.ui_language == "zh-Hans":
+            self.model_mgmt_status.setText(
+                f"本地模型共占用 {disk['total_mb']} MB · {disk['model_count']} 个模型"
+            )
+        else:
+            self.model_mgmt_status.setText(
+                f"{disk['model_count']} local model(s) · {disk['total_mb']} MB"
+            )
     
     def _create_model_card(self, model_info, backend):
         """Create a card widget for a single model"""
         card = QFrame()
-        card.setStyleSheet(
-            "QFrame { background: #313244; border: 1px solid #45475a; "
-            "border-radius: 6px; padding: 8px; margin: 2px; }"
-        )
+        card.setObjectName("ModelCard")
+        card.setMinimumHeight(92)
         
         layout = QHBoxLayout()
-        layout.setSpacing(8)
+        layout.setContentsMargins(18, 14, 16, 14)
+        layout.setSpacing(14)
         card.setLayout(layout)
         
         # Model info
         info_layout = QVBoxLayout()
-        info_layout.setSpacing(2)
+        info_layout.setSpacing(5)
         
         name_label = QLabel(f"{model_info['name']}")
-        name_label.setStyleSheet("font-weight: bold; color: #cdd6f4; font-size: 13px;")
+        name_label.setObjectName("ModelName")
         info_layout.addWidget(name_label)
         
-        detail = f"{model_info['speed']} | {model_info['accuracy']} | {model_info['size_mb']} MB"
+        speed = ui_translate(model_info['speed'], self.ui_language)
+        accuracy = ui_translate(model_info['accuracy'], self.ui_language)
+        detail = f"{speed} · {accuracy} · {model_info['size_mb']} MB"
         detail_label = QLabel(detail)
-        detail_label.setStyleSheet("color: #6c7086; font-size: 11px;")
+        detail_label.setObjectName("ModelMeta")
         info_layout.addWidget(detail_label)
         
-        best_for = QLabel(model_info['best_for'])
-        best_for.setStyleSheet("color: #a6adc8; font-size: 10px; font-style: italic;")
+        best_for = QLabel(ui_translate(model_info['best_for'], self.ui_language))
+        best_for.setObjectName("ModelBestFor")
         info_layout.addWidget(best_for)
         
         layout.addLayout(info_layout, 1)
@@ -1381,32 +1433,23 @@ class Dashboard(QWidget):
         is_downloading = hasattr(self, '_active_downloads') and mid in self._active_downloads
         
         if downloaded:
-            btn = QPushButton("✓ Downloaded")
-            btn.setStyleSheet(
-                "QPushButton { background: #a6e3a1; color: #1e1e2e; padding: 4px 8px; "
-                "border-radius: 4px; font-size: 11px; } "
-                "QPushButton:hover { background: #f38ba8; }"
-            )
+            btn = QPushButton(ui_translate("Installed", self.ui_language))
+            btn.setObjectName("ModelInstalled")
+            btn.setToolTip("Installed locally · click to remove")
             btn.clicked.connect(lambda checked, mid=mid, be=be: self._delete_model(mid, be))
         elif is_downloading:
-            btn = QPushButton("Cancel")
-            btn.setStyleSheet(
-                "QPushButton { background: #f38ba8; color: #1e1e2e; padding: 4px 8px; "
-                "border-radius: 4px; font-size: 11px; } "
-                "QPushButton:hover { background: #eba0ac; }"
-            )
+            btn = QPushButton(ui_translate("Cancel", self.ui_language))
+            btn.setObjectName("DangerButton")
             btn.clicked.connect(lambda checked, mid=mid: self._cancel_download(mid))
         else:
-            btn = QPushButton("Download")
-            btn.setStyleSheet(
-                "QPushButton { background: #89b4fa; color: #1e1e2e; padding: 4px 8px; "
-                "border-radius: 4px; font-size: 11px; } "
-                "QPushButton:hover { background: #b4befe; }"
-            )
+            btn = QPushButton(ui_translate("Download", self.ui_language))
+            btn.setObjectName("ModelDownload")
             btn.clicked.connect(lambda checked, mid=mid, be=be: self._download_model(mid, be))
+        btn.setMinimumWidth(104)
         
         if model_info.get('recommended'):
-            rec_label = QLabel("Recommended")
+            rec_label = QLabel(ui_translate("Recommended", self.ui_language))
+            rec_label.setObjectName("RecommendedPill")
             rec_label.setToolTip("Recommended")
             layout.addWidget(rec_label)
         
@@ -1429,7 +1472,10 @@ class Dashboard(QWidget):
             log.info("Another model is already downloading — ignoring")
             return
         
-        self.model_mgmt_status.setText(f"⏳ {model_id}: starting...")
+        self.model_mgmt_status.setText(
+            f"{model_id} · 正在准备下载…" if self.ui_language == "zh-Hans"
+            else f"{model_id} · preparing download…"
+        )
         self.model_mgmt_status.setStyleSheet("color: #fab387; font-size: 12px;")
         
         # Use SYNCHRONOUS download — DownloadTask handles retries, not nested threads
@@ -1444,7 +1490,7 @@ class Dashboard(QWidget):
         
         # Wire progress channel to the associated ProgressPanel
         from model_progress_channel import ModelProgressChannel
-        channel = ModelProgressChannel(model_id, max_attempts=3)
+        channel = ModelProgressChannel(model_id, max_attempts=3, language=self.ui_language)
         self._progress_model_id = model_id
         self._progress_backend = backend
         self.progress_event.emit(channel.on_start())
@@ -1467,13 +1513,22 @@ class Dashboard(QWidget):
     def _on_model_status(self, model_id, status, attempt):
         """Qt-safe status callback — queued to main thread."""
         if status == "downloading":
-            self.model_mgmt_status.setText(f"⏳ {model_id}: attempt {attempt}...")
+            self.model_mgmt_status.setText(
+                f"{model_id} · 正在下载（第 {attempt} 次）" if self.ui_language == "zh-Hans"
+                else f"{model_id} · downloading (attempt {attempt})"
+            )
             self.model_mgmt_status.setStyleSheet("color: #fab387; font-size: 12px;")
         elif status == "retrying":
-            self.model_mgmt_status.setText(f"🔄 {model_id}: retry {attempt}...")
+            self.model_mgmt_status.setText(
+                f"{model_id} · 正在重试（第 {attempt} 次）" if self.ui_language == "zh-Hans"
+                else f"{model_id} · retrying (attempt {attempt})"
+            )
             self.model_mgmt_status.setStyleSheet("color: #f9e2af; font-size: 12px;")
         elif status == "cancelled":
-            self.model_mgmt_status.setText(f"⊘ {model_id}: cancelled")
+            self.model_mgmt_status.setText(
+                f"{model_id} · 已取消" if self.ui_language == "zh-Hans"
+                else f"{model_id} · cancelled"
+            )
             self.model_mgmt_status.setStyleSheet("color: #6c7086; font-size: 12px;")
     
     def _on_model_done(self, model_id, terminal_state, error, attempt):
@@ -1483,15 +1538,24 @@ class Dashboard(QWidget):
         from model_download_task import SUCCEEDED, CANCELLED
         if terminal_state == SUCCEEDED:
             log.info(f"Model {model_id} downloaded")
-            self.model_mgmt_status.setText(f"✅ {model_id} installed")
+            self.model_mgmt_status.setText(
+                f"{model_id} · 已安装" if self.ui_language == "zh-Hans"
+                else f"{model_id} · installed"
+            )
             self.model_mgmt_status.setStyleSheet("color: #a6e3a1; font-size: 12px;")
         elif terminal_state == CANCELLED:
             log.info(f"Model download cancelled: {model_id}")
-            self.model_mgmt_status.setText(f"⊘ {model_id}: cancelled")
+            self.model_mgmt_status.setText(
+                f"{model_id} · 已取消" if self.ui_language == "zh-Hans"
+                else f"{model_id} · cancelled"
+            )
             self.model_mgmt_status.setStyleSheet("color: #6c7086; font-size: 12px;")
         else:
             log.error(f"Model {model_id} failed: {error}")
-            self.model_mgmt_status.setText(f"❌ {model_id}: failed after {attempt} attempts — retry?")
+            self.model_mgmt_status.setText(
+                (f"{model_id} · 下载失败（已尝试 {attempt} 次）" if self.ui_language == "zh-Hans"
+                 else f"{model_id} · failed after {attempt} attempts")
+            )
             self.model_mgmt_status.setStyleSheet("color: #f38ba8; font-size: 12px;")
         if hasattr(self, '_active_downloads'):
             self._active_downloads.pop(model_id, None)
@@ -1554,7 +1618,10 @@ class Dashboard(QWidget):
             task = self._active_downloads[model_id]
             task.cancel()
             log.info(f"Download cancelled: {model_id}")
-            self.model_mgmt_status.setText(f"⊘ {model_id}: cancelling...")
+            self.model_mgmt_status.setText(
+                f"{model_id} · 正在取消…" if self.ui_language == "zh-Hans"
+                else f"{model_id} · cancelling…"
+            )
             self.model_mgmt_status.setStyleSheet("color: #fab387; font-size: 12px;")
     
     def _delete_model(self, model_id, backend):
@@ -1855,6 +1922,10 @@ class Dashboard(QWidget):
         config.ui_language = self.ui_language
         self._save_ui_language()
         apply_language(self, self.ui_language)
+        if hasattr(self, "model_list_layout"):
+            self._refresh_model_list()
+        if hasattr(self, "trans_mode_label"):
+            self.update_translation_mode_label()
 
     def _save_ui_language(self):
         import configparser

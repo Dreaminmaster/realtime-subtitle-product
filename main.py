@@ -193,6 +193,7 @@ def create_pipeline():
     
     class WorkerSignals(QObject):
         update_text = pyqtSignal(int, str, str)
+        remove_text = pyqtSignal(int)
         audio_status = pyqtSignal(str, float)  # (status_text, volume_level 0.0-1.0)
         pipeline_failed = pyqtSignal(str)       # error message when pipeline crashes
         pipeline_cleanup_finished = pyqtSignal(bool, str) # (success, message)
@@ -213,6 +214,9 @@ def create_pipeline():
             self._latest_partial_seq = {}  # uid -> latest seq
             self._session_generation = 0    # incremented each Launch, stops stale tasks
             self.last_final_text = ""        # context prompt across utterances
+            from src.contextual_phrase_composer import ContextualPhraseComposer
+            self.phrase_composer = ContextualPhraseComposer(join_window=4.0)
+            self._latest_translation_revision = {}
             self._cleanup_in_progress = False
             self._failed = False
             self._stopping = False             # dedup stop guard
@@ -781,22 +785,37 @@ def create_pipeline():
                     log.warning(f"Utterance[{chunk_id}] FINAL empty: dur={dur:.1f}s rms={rms:.4f} peak={peak:.3f} samples={len(audio_data)} reason=whisper_no_text")
                 
                 if text:
-                    if len(text.split()) > 2:
-                        self.last_final_text = text
+                    decision = self.phrase_composer.compose(chunk_id, text)
+                    display_chunk_id = decision.chunk_id
+                    display_text = decision.text
+                    self._latest_translation_revision[display_chunk_id] = decision.revision
+                    if decision.merged and decision.source_chunk_id != display_chunk_id:
+                        # A PARTIAL bubble may already exist for the new audio
+                        # chunk.  Remove it because this final revises the
+                        # previous sentence instead of starting a new one.
+                        self.signals.remove_text.emit(decision.source_chunk_id)
+                    if len(display_text.split()) > 2:
+                        self.last_final_text = display_text
                     trans_active = self.translation_engine.current_mode != "off"
                     if trans_active:
-                        self.signals.update_text.emit(chunk_id, text, "(translating...)")
+                        self.signals.update_text.emit(display_chunk_id, display_text, "…")
                         if hasattr(self, 'translation_adapter'):
-                            self.translation_adapter.on_final_text(text, chunk_id)
+                            self.translation_adapter.on_final_text(display_text, display_chunk_id)
                         elif translate_executor:
-                            translate_executor.submit(self._run_translation_safe, text, chunk_id, session_gen)
+                            translate_executor.submit(
+                                self._run_translation_safe,
+                                display_text,
+                                display_chunk_id,
+                                session_gen,
+                                decision.revision,
+                            )
                     else:
-                        self.signals.update_text.emit(chunk_id, text, "")
+                        self.signals.update_text.emit(display_chunk_id, display_text, "")
                         if hasattr(self, 'translation_adapter'):
                             # Translation-off mode still records the original
                             # transcript in the v2.4 session repository.
                             self.translation_adapter.on_final_text(
-                                text, chunk_id, translate=False,
+                                display_text, display_chunk_id, translate=False,
                             )
                 
                 with lifecycle_lock or self._lifecycle_lock:
@@ -812,7 +831,7 @@ def create_pipeline():
                 with lifecycle_lock or self._lifecycle_lock:
                     self._finalizing_uids.discard(chunk_id)
         
-        def _run_translation_safe(self, text, chunk_id, session_gen):
+        def _run_translation_safe(self, text, chunk_id, session_gen, revision=None):
             """Session-safe translation. Discards result if session changed."""
             log.info(f"Translation[{chunk_id}] requested session={session_gen}")
             try:
@@ -824,6 +843,9 @@ def create_pipeline():
                 
                 if self._session_generation != session_gen:
                     log.info(f"Translation[{chunk_id}] discarded after translate: stale session current={self._session_generation}")
+                    return
+                if revision is not None and self._latest_translation_revision.get(chunk_id) != revision:
+                    log.info(f"Translation[{chunk_id}] discarded: superseded revision={revision}")
                     return
                 
                 if translated:
@@ -880,6 +902,7 @@ def create_and_show_overlay(pipeline, signals, start_pipeline=True, subtitle_sty
     
     # Connect signals
     signals.update_text.connect(window.update_text)
+    signals.remove_text.connect(window.remove_text)
     signals.audio_status.connect(window.update_audio_status)
     window.stop_requested.connect(pipeline.stop)
     
