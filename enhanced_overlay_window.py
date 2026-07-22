@@ -96,7 +96,8 @@ class SubtitleBubble(QFrame):
         layout.addWidget(self.copy_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
     
     def _get_bubble_style(self):
-        bg = self.parent_style.get("bubble_bg", "rgba(8, 12, 24, 225)")
+        opacity = max(0.3, min(1.0, float(self.parent_style.get("window_opacity", 0.94))))
+        bg = self.parent_style.get("bubble_bg", f"rgba(24, 23, 21, {round(opacity * 255)})")
         radius = self.parent_style.get("bubble_radius", 14)
         return (
             f"QFrame#SubtitleBubble {{ background-color: {bg}; "
@@ -140,6 +141,7 @@ class SubtitleBubble(QFrame):
     def update_style(self, parent_style):
         """Update styling dynamically"""
         self.parent_style = parent_style
+        self.setStyleSheet(self._get_bubble_style())
         
         original_font_size = parent_style.get("original_font_size", 18)
         original_color = parent_style.get("original_color", "#ffffff")
@@ -215,7 +217,6 @@ class EnhancedOverlayWindow(QWidget):
             "translation_font_size": 17,
             "original_color": "#ffffff",
             "translation_color": "#d99a69",
-            "bubble_bg": "rgba(24, 23, 21, 232)",
             "bubble_radius": 14,
             "show_translation": True,
             "show_original": True,
@@ -286,7 +287,8 @@ class EnhancedOverlayWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self.setWindowTitle("")  # prevent macOS title bar text
         
-        self.setWindowOpacity(self.subtitle_style.get("window_opacity", 0.85))
+        # Keep glyphs fully opaque; opacity belongs to subtitle backgrounds.
+        self.setWindowOpacity(1.0)
         self.setMouseTracking(True)
         self.setMinimumSize(360, 140)
         
@@ -381,9 +383,9 @@ class EnhancedOverlayWindow(QWidget):
         control_bar.addStretch()
         
         # Save button
-        self.save_btn = QPushButton("↓")
-        self.save_btn.setToolTip("Save transcript")
-        self.save_btn.setFixedSize(28, 28)
+        self.save_btn = QPushButton("Save")
+        self.save_btn.setToolTip("Save a text copy of this transcript")
+        self.save_btn.setFixedSize(48, 28)
         self.save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.save_btn.setStyleSheet(self._control_btn_style())
         self.save_btn.clicked.connect(self._save_transcript)
@@ -500,7 +502,7 @@ class EnhancedOverlayWindow(QWidget):
         """Set multiple style properties at once"""
         self.subtitle_style.update(style_dict)
         self._sync_display_mode_flags()
-        self.setWindowOpacity(self.subtitle_style.get("window_opacity", 0.85))
+        self.setWindowOpacity(1.0)
         if "visible_subtitles" in style_dict or "display_mode" in style_dict:
             self.subtitle_style["window_height"] = self._height_for_visible_rows()
         self.resize(
@@ -630,7 +632,7 @@ class EnhancedOverlayWindow(QWidget):
             
         except Exception as e:
             self.save_btn.setText("✗")
-            QTimer.singleShot(2000, lambda: self.save_btn.setText("↓"))
+            QTimer.singleShot(2000, lambda: self.save_btn.setText("Save"))
             print(f"[Overlay] Save error: {e}")
     
     # Dragging

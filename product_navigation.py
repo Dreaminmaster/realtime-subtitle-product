@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
 
 
 class ProductNavigation(QFrame):
-    """Group the former eight top-level tabs into five product sections.
+    """Group feature pages into a compact product sidebar.
 
     ``addTab`` and ``setTabToolTip`` mirror the subset of QTabWidget used by
     Dashboard. Feature pages keep their existing logic while users see a
@@ -28,6 +28,7 @@ class ProductNavigation(QFrame):
 
     _ROUTES = {
         "Home": ("Live", "Live", None),
+        "History": ("History", "History", None),
         "Audio": ("Audio", "Audio", "Input"),
         "Devices": ("Audio", "Audio", "System Audio"),
         "Transcript": ("Language", "Language", "Recognition"),
@@ -52,7 +53,7 @@ class ProductNavigation(QFrame):
 
         self.sidebar = QFrame()
         self.sidebar.setObjectName("Sidebar")
-        self.sidebar.setFixedWidth(164)
+        self.sidebar.setFixedWidth(176)
         sidebar_layout = QVBoxLayout(self.sidebar)
         sidebar_layout.setContentsMargins(10, 14, 10, 14)
         sidebar_layout.setSpacing(4)

@@ -54,10 +54,22 @@ class TranslationAdapter:
         scheduler._on_result = self._on_result
         scheduler._on_error = self._on_error
 
-    def start_session(self, session_id: str) -> None:
+    def start_session(
+        self,
+        session_id: str,
+        *,
+        source_language: str | None = None,
+        target_language: str | None = None,
+    ) -> None:
         self.scheduler.start_session(session_id)
         self._chunk_to_segment.clear()
         self._revision_by_segment.clear()
+        if self._repo_enabled:
+            self._repository.create_session(
+                session_id,
+                source_language=source_language or "Auto",
+                target_language=target_language,
+            )
 
     def stop_session(self) -> None:
         self.scheduler.stop_session()

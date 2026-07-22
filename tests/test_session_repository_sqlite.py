@@ -83,6 +83,19 @@ class TestSessionCRUD:
         assert s["status"] == "CLOSED"
         assert s["closed_at"] is not None
 
+    def test_delete_and_clear_sessions(self, repo):
+        for sid in ("one", "two"):
+            repo.create_session(sid)
+            repo.upsert_original_segment(
+                session_id=sid, segment_id="seg", revision=1,
+                status="FINAL", original_text=sid,
+            )
+        assert repo.delete_session("one") is True
+        assert repo.get_session("one") is None
+        assert repo.list_segments(session_id="one") == []
+        assert repo.clear_sessions() == 1
+        assert repo.list_sessions() == []
+
     def test_close_session_idempotent(self, repo):
         repo.create_session("s1")
         repo.close_session("s1")

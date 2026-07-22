@@ -65,6 +65,16 @@ def test_set_style_updates_mode_visibility(app):
     window.close()
 
 
+def test_background_opacity_never_fades_text_window(app):
+    window = EnhancedOverlayWindow({"window_opacity": 0.35})
+    window.update_text(1, "Readable", "清晰")
+    window.show()
+    app.processEvents()
+    assert window.windowOpacity() == 1.0
+    assert "89" in window.items[0][1].styleSheet()  # round(.35 * 255)
+    window.close()
+
+
 def test_overlay_keeps_history_beyond_visible_row_count(app):
     window = EnhancedOverlayWindow()
     for chunk_id in range(1, 4):

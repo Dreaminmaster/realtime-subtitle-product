@@ -173,6 +173,25 @@ class SQLiteSessionRepository:
             rows = cur.fetchall()
             return [_row_to_dict(r, cur) for r in rows]
 
+    def delete_session(self, session_id: str) -> bool:
+        """Delete one saved transcript and its segments."""
+        with self._lock:
+            conn = self._ensure()
+            conn.execute("DELETE FROM segments WHERE session_id = ?", (session_id,))
+            cur = conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+            conn.commit()
+            return cur.rowcount > 0
+
+    def clear_sessions(self) -> int:
+        """Delete all saved transcript sessions, returning the count."""
+        with self._lock:
+            conn = self._ensure()
+            count = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+            conn.execute("DELETE FROM segments")
+            conn.execute("DELETE FROM sessions")
+            conn.commit()
+            return int(count)
+
     # ── segments ─────────────────────────────────────────────────
     def upsert_original_segment(
         self,

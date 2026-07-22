@@ -1,5 +1,5 @@
 from config import Config
-from translation_engine import TranslationEngine
+from translation_engine import TranslationEngine, normalize_base_url
 
 
 def _config(monkeypatch, tmp_path, text: str | None = None) -> Config:
@@ -47,3 +47,8 @@ def test_local_mode_uses_default_endpoint_when_field_is_blank():
     engine = TranslationEngine()
     translator = engine.set_mode("local", base_url="", model="local-model")
     assert translator.base_url == "http://localhost:1234/v1"
+
+
+def test_provider_endpoints_are_normalized():
+    assert normalize_base_url("127.0.0.1:1234", "local") == "http://127.0.0.1:1234/v1"
+    assert normalize_base_url("apihub.agnes-ai.com", "online") == "https://apihub.agnes-ai.com/v1"

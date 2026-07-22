@@ -46,6 +46,9 @@ class Config:
         self.ui_language = self._get("app", "language", "en")
         if self.ui_language not in ("en", "zh-Hans"):
             self.ui_language = "en"
+        self.session_mode = self._get("app", "session_mode", "saved").lower()
+        if self.session_mode not in ("saved", "temporary"):
+            self.session_mode = "saved"
         
         # API settings (env vars take precedence)
         self.api_base_url = os.getenv("OPENAI_BASE_URL") or self._get("api", "base_url") or None
@@ -154,6 +157,10 @@ class Config:
             os.getenv("REALTIME_SUBTITLE_USE_SQLITE_SESSION_REPOSITORY", "false").lower() == "true"
             or self._get("v2.4", "use_sqlite_session_repository", "").lower() == "true"
         )
+        self.use_segment_api_for_history = self.use_sqlite_session_repository
+        self.use_segment_api_for_export = self.use_sqlite_session_repository
+        self.use_segment_api_for_overlay = False
+        self.use_transcriber_output_bridge = False
     
     def _get(self, section, key, fallback=""):
         try:

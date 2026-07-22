@@ -2,7 +2,8 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QFrame, QComboBox, QLineEdit, 
                              QSpinBox, QDoubleSpinBox, QGridLayout,
                              QScrollArea, QSizePolicy, QSpacerItem, QFormLayout, QApplication,
-                             QMessageBox, QTextEdit, QDialog)
+                             QMessageBox, QTextEdit, QDialog, QSlider,
+                             QListWidget, QListWidgetItem, QSplitter, QFileDialog)
 from PyQt6.QtCore import Qt, QSize, pyqtSignal, QThread, QTimer
 from PyQt6.QtGui import QFont, QIcon, QColor, QPixmap
 import sys
@@ -11,6 +12,12 @@ import sounddevice as sd
 from config import config
 from localization import apply_language, normalize_language, translate as ui_translate
 from product_navigation import ProductNavigation
+from ui_components import ThemedComboBox
+from ui_components import ColorButton
+
+# Use one popup implementation everywhere so menus cannot revert to the
+# unreadable native light palette or clip long provider/model names.
+QComboBox = ThemedComboBox
 
 # Modern QSS Styles
 STYLESHEET = """
@@ -29,7 +36,8 @@ QPushButton#NavButton:hover { background: #2a2926; color: #f4f1ea; }
 QPushButton#NavButton:checked { background: #34312b; color: #ffb36a; }
 QStackedWidget#ProductStack { background: #171716; }
 QTabWidget#SectionTabs::pane { border: none; background: #171716; top: -1px; }
-QTabWidget#SectionTabs QTabBar::tab {
+QTabBar { background: #171716; color: #bdb8ae; }
+QTabWidget#SectionTabs QTabBar::tab, QTabBar::tab {
     background: transparent; color: #928e86; padding: 10px 16px;
     border: none; border-bottom: 2px solid transparent; font-weight: 600;
 }
@@ -42,6 +50,12 @@ QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
     selection-background-color: #9b572d;
 }
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus { border: 1px solid #d8874d; }
+QComboBox QAbstractItemView {
+    background: #282622; color: #f5f1e9; border: 1px solid #565149;
+    border-radius: 8px; padding: 5px; outline: 0;
+    selection-background-color: #b9612f; selection-color: #ffffff;
+}
+QComboBox::drop-down { border: none; width: 28px; background: #302e2a; }
 QPushButton {
     background-color: #d98246; color: #1d1712; border: none;
     padding: 8px 15px; border-radius: 7px; font-weight: 650;
@@ -55,7 +69,7 @@ QFrame#HeroCard, QFrame#SummaryCard, QFrame#SettingsCard {
     background: #22211f; border: 1px solid #3a3833; border-radius: 12px;
 }
 QLabel#HeroTitle { color: #f6f2e9; font-size: 24px; font-weight: 700; }
-QLabel#HeroCopy, QLabel#Muted { color: #9d988f; font-size: 12px; }
+QLabel#HeroCopy, QLabel#Muted { color: #b6b0a6; font-size: 12px; }
 QLabel#StatusPill {
     color: #b9dfc0; background: #243329; border: 1px solid #395340;
     border-radius: 10px; padding: 4px 10px; font-size: 11px; font-weight: 650;
@@ -67,6 +81,11 @@ QScrollBar:vertical { background: transparent; width: 8px; margin: 2px; }
 QScrollBar::handle:vertical { background: #514d46; border-radius: 4px; min-height: 28px; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QTextEdit { background: #121211; color: #dedad1; border: 1px solid #3f3c37; border-radius: 8px; padding: 9px; }
+QListWidget { background: #1d1c1a; color: #e9e4da; border: 1px solid #403d37; border-radius: 10px; padding: 6px; }
+QListWidget::item { padding: 10px; border-radius: 7px; }
+QListWidget::item:selected { background: #44352b; color: #ffbd80; }
+QSlider::groove:horizontal { height: 5px; background: #46423b; border-radius: 2px; }
+QSlider::handle:horizontal { width: 17px; margin: -6px 0; background: #ec9251; border-radius: 8px; }
 QGroupBox { border: 1px solid #3f3c37; border-radius: 9px; margin-top: 12px; padding-top: 12px; }
 QGroupBox::title { subcontrol-origin: margin; padding: 0 7px; color: #d99a69; }
 """
@@ -181,6 +200,7 @@ class Dashboard(QWidget):
         self.layout.addWidget(self.tabs)
         
         self.init_home_tab()
+        self.init_history_tab()
         self.init_audio_tab()
         self.init_device_manager_tab()
         self.init_transcription_tab()
@@ -264,6 +284,25 @@ class Dashboard(QWidget):
         action_row.addWidget(self.status_label)
         action_row.addStretch()
         hero_layout.addLayout(action_row)
+
+        session_row = QHBoxLayout()
+        session_row.addWidget(QLabel("Session:"))
+        self.session_mode_combo = QComboBox()
+        self.session_mode_combo.addItem("Saved session", "saved")
+        self.session_mode_combo.addItem("Temporary session", "temporary")
+        self.session_mode_combo.setCurrentIndex(
+            max(0, self.session_mode_combo.findData(getattr(config, "session_mode", "saved")))
+        )
+        self.session_mode_combo.setToolTip(
+            "Saved sessions remain on this Mac. Temporary sessions disappear when stopped."
+        )
+        session_row.addWidget(self.session_mode_combo)
+        session_row.addStretch()
+        hero_layout.addLayout(session_row)
+        session_hint = QLabel("Saved locally · switch to Temporary for private one-off captions")
+        session_hint.setObjectName("Muted")
+        session_hint.setWordWrap(True)
+        hero_layout.addWidget(session_hint)
         layout.addWidget(hero)
 
         summaries = QHBoxLayout()
@@ -301,6 +340,124 @@ class Dashboard(QWidget):
 
         tab.setLayout(layout)
         self.tabs.addTab(tab, "Home")
+
+    def init_history_tab(self):
+        """Chat-style local transcript library with saved/temporary sessions."""
+        tab = QWidget()
+        root = QVBoxLayout(tab)
+        root.setContentsMargins(24, 20, 24, 24)
+        root.setSpacing(12)
+
+        title_row = QHBoxLayout()
+        title = QLabel("Session History")
+        title.setObjectName("HeroTitle")
+        title_row.addWidget(title)
+        title_row.addStretch()
+        refresh = QPushButton("Refresh")
+        refresh.setObjectName("SecondaryButton")
+        refresh.clicked.connect(self._refresh_history)
+        title_row.addWidget(refresh)
+        self.history_export_btn = QPushButton("Export")
+        self.history_export_btn.setObjectName("SecondaryButton")
+        self.history_export_btn.clicked.connect(self._export_history_session)
+        title_row.addWidget(self.history_export_btn)
+        self.history_delete_btn = QPushButton("Delete")
+        self.history_delete_btn.setObjectName("DangerButton")
+        self.history_delete_btn.clicked.connect(self._delete_history_session)
+        title_row.addWidget(self.history_delete_btn)
+        root.addLayout(title_row)
+
+        hint = QLabel("Saved sessions stay only on this Mac. Choose Temporary on Live for a session that leaves no history.")
+        hint.setObjectName("Muted")
+        hint.setWordWrap(True)
+        root.addWidget(hint)
+
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.history_list = QListWidget()
+        self.history_list.setMinimumWidth(220)
+        self.history_list.currentItemChanged.connect(self._show_history_session)
+        splitter.addWidget(self.history_list)
+        self.history_text = QTextEdit()
+        self.history_text.setReadOnly(True)
+        self.history_text.setPlaceholderText("Your saved transcript will appear here.")
+        splitter.addWidget(self.history_text)
+        splitter.setSizes([260, 650])
+        root.addWidget(splitter, 1)
+
+        self.history_status = QLabel("")
+        self.history_status.setObjectName("Muted")
+        root.addWidget(self.history_status)
+        self.tabs.addTab(tab, "History")
+        self._refresh_history()
+
+    def _open_history_repository(self):
+        from src.session_repository import SQLiteSessionRepository, get_default_database_path
+        repo = SQLiteSessionRepository(get_default_database_path())
+        repo.initialize()
+        return repo
+
+    def _refresh_history(self):
+        selected = self.history_list.currentItem().data(Qt.ItemDataRole.UserRole) if self.history_list.currentItem() else None
+        self.history_list.clear()
+        try:
+            from datetime import datetime
+            repo = self._open_history_repository()
+            sessions = repo.list_sessions(limit=100)
+            repo.close()
+            for session in sessions:
+                stamp = datetime.fromtimestamp(session["created_at"]).strftime("%Y-%m-%d  %H:%M")
+                languages = " → ".join(filter(None, (session.get("source_language"), session.get("target_language"))))
+                item = QListWidgetItem(f"{stamp}\n{languages or 'Live subtitles'}")
+                item.setData(Qt.ItemDataRole.UserRole, session["session_id"])
+                self.history_list.addItem(item)
+                if session["session_id"] == selected:
+                    self.history_list.setCurrentItem(item)
+            if self.history_list.count() and self.history_list.currentRow() < 0:
+                self.history_list.setCurrentRow(0)
+            self.history_status.setText(f"{len(sessions)} saved session(s)")
+            if not sessions:
+                self.history_text.setPlainText("No saved sessions yet. Start Live with ‘Saved session’ selected.")
+        except Exception as exc:
+            self.history_status.setText(f"History unavailable: {exc}")
+
+    def _show_history_session(self, current, previous=None):
+        del previous
+        if current is None:
+            return
+        try:
+            from src.segment_api import SegmentAPI
+            repo = self._open_history_repository()
+            snapshot = SegmentAPI(repo).get_session_snapshot(current.data(Qt.ItemDataRole.UserRole))
+            repo.close()
+            self.history_text.setPlainText(snapshot.bilingual_text if snapshot else "")
+        except Exception as exc:
+            self.history_text.setPlainText(f"Unable to read this session: {exc}")
+
+    def _delete_history_session(self):
+        item = self.history_list.currentItem()
+        if item is None:
+            return
+        reply = QMessageBox.question(self, "Delete Session", "Delete this saved transcript?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            repo = self._open_history_repository()
+            repo.delete_session(item.data(Qt.ItemDataRole.UserRole))
+            repo.close()
+            self._refresh_history()
+
+    def _export_history_session(self):
+        item = self.history_list.currentItem()
+        if item is None:
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Export Transcript", "transcript.txt", "Text files (*.txt)")
+        if not path:
+            return
+        from src.segment_api import SegmentAPI
+        repo = self._open_history_repository()
+        text = SegmentAPI(repo).export_transcript(item.data(Qt.ItemDataRole.UserRole), format="txt")
+        repo.close()
+        from pathlib import Path
+        Path(path).write_text(text, encoding="utf-8")
+        self.history_status.setText(f"Exported to {path}")
 
     def init_audio_tab(self):
         tab = QWidget()
@@ -859,30 +1016,36 @@ class Dashboard(QWidget):
 
     def init_translation_tab(self):
         tab = QWidget()
-        layout = QFormLayout()
-
-        preset_row = QHBoxLayout()
-        agnes_btn = QPushButton("Use Agnes AI")
-        agnes_btn.setObjectName("SecondaryButton")
-        agnes_btn.clicked.connect(self._use_agnes_preset)
-        preset_row.addWidget(agnes_btn)
-        local_btn = QPushButton("Use LM Studio")
-        local_btn.setObjectName("SecondaryButton")
-        local_btn.clicked.connect(self._use_lm_studio_preset)
-        preset_row.addWidget(local_btn)
-        preset_row.addStretch()
-        layout.addRow(preset_row)
+        outer = QVBoxLayout(tab)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        outer.addWidget(scroll)
+        content = QWidget()
+        content.setMaximumWidth(820)
+        layout = QFormLayout(content)
+        layout.setContentsMargins(28, 24, 28, 28)
+        layout.setHorizontalSpacing(18)
+        layout.setVerticalSpacing(14)
+        title = QLabel("Translation Provider")
+        title.setObjectName("HeroTitle")
+        layout.addRow(title)
+        intro = QLabel("Choose a provider, then test it here. The same settings are used when Live starts.")
+        intro.setObjectName("Muted")
+        intro.setWordWrap(True)
+        layout.addRow(intro)
 
         self.translation_mode = QComboBox()
-        self.translation_mode.addItem("Off — original subtitles only", "off")
-        self.translation_mode.addItem("Online API — hosted OpenAI-compatible", "online")
-        self.translation_mode.addItem("Local LLM — LM Studio / Ollama", "local")
-        self.translation_mode.addItem("Custom OpenAI-compatible API", "custom")
+        self.translation_mode.addItem("No translation", "off")
+        self.translation_mode.addItem("Agnes AI", "online")
+        self.translation_mode.addItem("LM Studio / local server", "local")
+        self.translation_mode.addItem("Other OpenAI-compatible provider", "custom")
         self.translation_mode.addItem("macOS System Translation (experimental)", "fast")
         mode_index = self.translation_mode.findData(config.translation_mode)
         self.translation_mode.setCurrentIndex(max(0, mode_index))
-        self.translation_mode.currentIndexChanged.connect(self.update_translation_mode_label)
-        layout.addRow("Mode:", self.translation_mode)
+        self.translation_mode.currentIndexChanged.connect(self._on_provider_changed)
+        layout.addRow("Provider:", self.translation_mode)
         
         self.api_key = QLineEdit(config.api_key)
         self.api_key.setEchoMode(QLineEdit.EchoMode.Password)
@@ -943,8 +1106,12 @@ class Dashboard(QWidget):
         self.trans_mode_label.setWordWrap(True)
         layout.addRow(self.trans_mode_label)
         self.update_translation_mode_label()
-        
-        tab.setLayout(layout)
+        wrapper = QWidget()
+        wrapper_layout = QHBoxLayout(wrapper)
+        wrapper_layout.setContentsMargins(0, 0, 0, 0)
+        wrapper_layout.addWidget(content)
+        wrapper_layout.addStretch()
+        scroll.setWidget(wrapper)
         self.tabs.addTab(tab, "Translate")
         self.tabs.setTabToolTip(self.tabs.count() - 1, "Translate — API, model, test connection")
 
@@ -964,9 +1131,30 @@ class Dashboard(QWidget):
         self.base_url.setText("http://127.0.0.1:1234/v1")
         self.model.setCurrentText("qwen2.5-coder-14b-instruct-mlx")
         self.update_translation_mode_label()
+
+    def _on_provider_changed(self, *_):
+        mode = self.translation_mode.currentData() or "off"
+        if mode == "online":
+            if not self.base_url.text().strip() or "127.0.0.1" in self.base_url.text() or "localhost" in self.base_url.text():
+                self.base_url.setText("https://apihub.agnes-ai.com/v1")
+            if not self.model.currentText().strip() or "qwen" in self.model.currentText().lower():
+                self.model.setCurrentText("agnes-2.0-flash")
+        elif mode == "local":
+            if not self.base_url.text().strip() or "agnes-ai.com" in self.base_url.text():
+                self.base_url.setText("http://127.0.0.1:1234/v1")
+            if not self.model.currentText().strip() or self.model.currentText() == "agnes-2.0-flash":
+                self.model.setCurrentText("qwen2.5-coder-14b-instruct-mlx")
+        self.update_translation_mode_label()
         
     def update_translation_mode_label(self, *_):
         mode = self.translation_mode.currentData() or "off"
+        endpoint_mode = mode in {"online", "local", "custom"}
+        self.api_key.setEnabled(mode in {"online", "custom"})
+        self.base_url.setEnabled(endpoint_mode)
+        self.model.setEnabled(endpoint_mode)
+        self.refresh_models_btn.setEnabled(endpoint_mode)
+        self.target_lang.setEnabled(mode != "off")
+        self.test_trans_btn.setEnabled(endpoint_mode)
         api_key = self.api_key.text().strip()
         base_url = self.base_url.text().strip()
         model = self.model.currentText().strip()
@@ -993,9 +1181,12 @@ class Dashboard(QWidget):
         log = logging.getLogger("RealtimeSubtitle")
         
         api_key = self.api_key.text().strip()
-        base_url = self.base_url.text().strip()
-        model = self.model.currentText().strip()
         mode = self.translation_mode.currentData() or "off"
+        from translation_engine import normalize_base_url
+        base_url = normalize_base_url(self.base_url.text(), mode)
+        if base_url != self.base_url.text().strip():
+            self.base_url.setText(base_url)
+        model = self.model.currentText().strip()
         target_lang = self.target_lang.currentData() or self.target_lang.currentText()
 
         if mode == "off":
@@ -1444,22 +1635,22 @@ class Dashboard(QWidget):
         layout.addRow("Translation Font Size:", self.translation_font_size)
         
         # Colors
-        self.original_color = QComboBox()
-        self.original_color.addItems(["#ffffff", "#cdd6f4", "#a6e3a1", "#fab387", "#f9e2af", "#89b4fa"])
-        self.original_color.setCurrentText(getattr(config, "original_color", "#ffffff"))
+        self.original_color = ColorButton(getattr(config, "original_color", "#ffffff"))
         layout.addRow("Original Text Color:", self.original_color)
         
-        self.translation_color = QComboBox()
-        self.translation_color.addItems(["#9db5ff", "#89b4fa", "#a6e3a1", "#fab387", "#f9e2af", "#ffffff", "#cdd6f4"])
-        self.translation_color.setCurrentText(getattr(config, "translation_color", "#d99a69"))
+        self.translation_color = ColorButton(getattr(config, "translation_color", "#d99a69"))
         layout.addRow("Translation Color:", self.translation_color)
         
-        # Window opacity
-        self.window_opacity = QDoubleSpinBox()
-        self.window_opacity.setRange(0.3, 1.0)
-        self.window_opacity.setSingleStep(0.05)
-        self.window_opacity.setValue(getattr(config, "window_opacity", 0.94))
-        layout.addRow("Window Opacity:", self.window_opacity)
+        # Background opacity — deliberately independent from text colors.
+        opacity_row = QHBoxLayout()
+        self.window_opacity = QSlider(Qt.Orientation.Horizontal)
+        self.window_opacity.setRange(30, 100)
+        self.window_opacity.setValue(round(getattr(config, "window_opacity", 0.94) * 100))
+        self.opacity_value = QLabel(f"{self.window_opacity.value()}%")
+        self.window_opacity.valueChanged.connect(lambda value: self.opacity_value.setText(f"{value}%"))
+        opacity_row.addWidget(self.window_opacity, 1)
+        opacity_row.addWidget(self.opacity_value)
+        layout.addRow("Background Opacity:", opacity_row)
         
         # Window width
         self.window_width = QSpinBox()
@@ -1505,7 +1696,7 @@ class Dashboard(QWidget):
             "translation_font_size": self.translation_font_size.value(),
             "original_color": self.original_color.currentText(),
             "translation_color": self.translation_color.currentText(),
-            "window_opacity": self.window_opacity.value(),
+            "window_opacity": self.window_opacity.value() / 100.0,
             "window_width": self.window_width.value(),
             "visible_subtitles": self.visible_subtitles.value(),
             "display_mode": self.display_mode.currentData() or "bilingual",
@@ -1846,15 +2037,21 @@ class Dashboard(QWidget):
         cp.set("transcription", "compute_type", self.compute_type.currentText())
         cp.set("transcription", "source_language", self.source_language.currentText())
         
-        # Translation
+        # Translation — normalize exactly once so Test and Live share it.
+        from translation_engine import normalize_base_url
+        translation_mode = str(self.translation_mode.currentData() or "off")
+        normalized_url = normalize_base_url(self.base_url.text(), translation_mode)
+        self.base_url.setText(normalized_url)
         cp.set("api", "api_key", self.api_key.text())
-        cp.set("api", "base_url", self.base_url.text())
+        cp.set("api", "base_url", normalized_url)
         cp.set("translation", "model", self.model.currentText())
         cp.set("translation", "target_lang", str(self.target_lang.currentData() or self.target_lang.currentText()))
-        cp.set("translation", "mode", str(self.translation_mode.currentData() or "off"))
+        cp.set("translation", "mode", translation_mode)
 
         # App and overlay appearance
         cp.set("app", "language", self.ui_language)
+        session_mode = str(self.session_mode_combo.currentData() or "saved")
+        cp.set("app", "session_mode", session_mode)
         cp.set("display", "window_width", str(self.window_width.value()))
         cp.set("display", "visible_subtitles", str(self.visible_subtitles.value()))
         cp.set("display", "history_limit", str(getattr(config, "subtitle_history_limit", 250)))
@@ -1862,10 +2059,43 @@ class Dashboard(QWidget):
         cp.set("display", "translation_font_size", str(self.translation_font_size.value()))
         cp.set("display", "original_color", self.original_color.currentText())
         cp.set("display", "translation_color", self.translation_color.currentText())
-        cp.set("display", "window_opacity", str(self.window_opacity.value()))
+        cp.set("display", "window_opacity", str(self.window_opacity.value() / 100.0))
         cp.set("display", "display_mode", str(self.display_mode.currentData() or "bilingual"))
         
         write_config(cp, config_path)
+
+        # Keep the singleton used by create_pipeline in sync with what is on
+        # screen.  Previously this only updated disk, causing Live to launch
+        # with stale provider/model values after a successful connection test.
+        config.device_index = idx
+        config.sample_rate = self.sample_rate.value()
+        config.silence_threshold = self.silence_thresh.value()
+        config.silence_duration = self.silence_dur.value()
+        config.asr_backend = self.asr_backend.currentText()
+        config.whisper_model = self.whisper_model.currentText()
+        config.funasr_model = self.funasr_model.currentText()
+        config.whisper_device = self.device_type.currentText()
+        config.whisper_compute_type = self.compute_type.currentText()
+        source = self.source_language.currentText()
+        config.source_language = None if source == "auto" else source
+        config.api_key = self.api_key.text().strip()
+        config.api_base_url = normalized_url
+        config.model = self.model.currentText().strip()
+        config.target_lang = str(self.target_lang.currentData() or self.target_lang.currentText())
+        config.translation_mode = translation_mode
+        config.session_mode = session_mode
+        config.use_translation_scheduler = session_mode == "saved"
+        config.use_sqlite_session_repository = session_mode == "saved"
+        config.use_segment_api_for_history = session_mode == "saved"
+        config.use_segment_api_for_export = session_mode == "saved"
+        config.original_font_size = self.original_font_size.value()
+        config.translation_font_size = self.translation_font_size.value()
+        config.original_color = self.original_color.currentText()
+        config.translation_color = self.translation_color.currentText()
+        config.window_opacity = self.window_opacity.value() / 100.0
+        config.window_width = self.window_width.value()
+        config.visible_subtitles = self.visible_subtitles.value()
+        config.display_mode = self.display_mode.currentData() or "bilingual"
         
         # Visual feedback
         self._set_localized_text(self.save_btn, "Saved")
@@ -1880,6 +2110,7 @@ class Dashboard(QWidget):
         import logging
         log = logging.getLogger("RealtimeSubtitle")
         log.info("Launch Translator clicked")
+        self.save_config()
         
         # Update UI to Loading State
         self._set_localized_text(self.status_label, "Initializing…")
@@ -1912,7 +2143,7 @@ class Dashboard(QWidget):
                 "translation_font_size": self.translation_font_size.value(),
                 "original_color": self.original_color.currentText(),
                 "translation_color": self.translation_color.currentText(),
-                "window_opacity": self.window_opacity.value(),
+                "window_opacity": self.window_opacity.value() / 100.0,
                 "window_width": self.window_width.value(),
                 "visible_subtitles": self.visible_subtitles.value(),
                 "history_limit": getattr(config, "subtitle_history_limit", 250),
@@ -2061,7 +2292,7 @@ class Dashboard(QWidget):
             self.translation_font_size.blockSignals(False)
         if hasattr(self, 'window_opacity'):
             self.window_opacity.blockSignals(True)
-            self.window_opacity.setValue(style.get('window_opacity', 0.85))
+            self.window_opacity.setValue(round(float(style.get('window_opacity', 0.85)) * 100))
             self.window_opacity.blockSignals(False)
         if hasattr(self, 'display_mode'):
             self.display_mode.blockSignals(True)
@@ -2109,6 +2340,8 @@ class Dashboard(QWidget):
         self.start_btn.setEnabled(True)
         self._set_localized_text(self.start_btn, "Start Live Subtitles")
         self.showNormal()
+        if hasattr(self, "history_list"):
+            self._refresh_history()
         return True
 
 class StartupWorker(QThread):

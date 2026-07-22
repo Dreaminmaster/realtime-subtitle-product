@@ -40,11 +40,8 @@ log = logging.getLogger("RealtimeSubtitle")
 
 
 def should_open_permission_guide(no_permission_check=False):
-    """Return whether the first-launch guide is needed for this launch."""
-    if no_permission_check:
-        return False
-    from permission_guide import should_show_permission_guide
-    return should_show_permission_guide()
+    """The dashboard now provides non-modal onboarding; never block launch."""
+    return False
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Realtime Subtitle")
@@ -155,16 +152,6 @@ def main():
     
     signal.signal(signal.SIGINT, lambda sig, frame: app.quit())
     app.aboutToQuit.connect(_shutdown_active_pipeline)
-    
-    # First-launch permission guide (GUI)
-    if should_open_permission_guide(args.no_permission_check):
-        try:
-            from permission_guide import create_permission_guide
-            guide = create_permission_guide()
-            if guide:
-                guide.exec()
-        except Exception as e:
-            log.warning(f"Permission guide error: {e}")
     
     from diagnostics import diagnostics
     diagnostics._check_platform()
@@ -304,8 +291,13 @@ def create_pipeline():
                     repository=self._repository,
                     repository_enabled=self._repository is not None,
                 )
-                self._translation_session_id = str(id(self))
-                self.translation_adapter.start_session(self._translation_session_id)
+                import uuid
+                self._translation_session_id = uuid.uuid4().hex
+                self.translation_adapter.start_session(
+                    self._translation_session_id,
+                    source_language=config.source_language or "Auto",
+                    target_language=config.target_lang if trans_mode != "off" else None,
+                )
                 log.info("Pipeline: v2.4 TranslationScheduler wired (use_translation_scheduler=true)")
 
                 # v2.4 Transcriber output bridge (opt-in, off by default)

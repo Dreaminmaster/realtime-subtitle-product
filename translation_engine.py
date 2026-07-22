@@ -16,6 +16,22 @@ import urllib.error
 from urllib.parse import urlparse
 
 
+def normalize_base_url(base_url: str | None, mode: str = "custom") -> str:
+    """Return a usable OpenAI-compatible endpoint without guessing remote paths."""
+    value = (base_url or "").strip().rstrip("/")
+    if not value:
+        return "http://127.0.0.1:1234/v1" if mode == "local" else ""
+    if not value.startswith(("http://", "https://")):
+        value = ("http://" if any(h in value for h in ("localhost", "127.0.0.1", "::1")) else "https://") + value
+    parsed = urlparse(value)
+    host = (parsed.hostname or "").lower()
+    if host in {"apihub.agnes-ai.com", "localhost", "127.0.0.1", "::1"}:
+        path = parsed.path.rstrip("/")
+        if not path or path == "/":
+            value += "/v1"
+    return value
+
+
 class BaseTranslator:
     """Base translator interface"""
     
@@ -86,9 +102,7 @@ class OnlineAPITranslator(BaseTranslator):
         self.timeout = timeout  # total request timeout
         
         # URLs to try in order — auto-fix missing scheme
-        if base_url and not base_url.startswith(("http://", "https://")):
-            base_url = "http://" + base_url
-        self.base_url = base_url
+        self.base_url = normalize_base_url(base_url, "local" if self.__class__.__name__ == "LocalLLMTranslator" else "custom")
         self.api_key = api_key
         
         self._client = None
@@ -196,6 +210,7 @@ class OnlineAPITranslator(BaseTranslator):
             log.error("Translation error (%s): %s", type(e).__name__, safe_err)
             
             # Map to user-friendly messages
+            error_name = type(e).__name__
             if "Connection refused" in err_str or "Connection error" in err_str:
                 return f"[Translation Failed: connection refused — is the server running?]"
             elif "Invalid URL" in err_str or "No address" in err_str:
@@ -204,9 +219,9 @@ class OnlineAPITranslator(BaseTranslator):
                 return f"[Translation Failed: cannot reach server — check the base URL]"
             elif "timeout" in err_str.lower():
                 return "[Translation Failed: request timed out — server may be overloaded]"
-            elif "401" in err_str or "Unauthorized" in err_str:
+            elif "401" in err_str or "Unauthorized" in err_str or error_name == "AuthenticationError":
                 return "[Translation Failed: invalid API key]"
-            elif "403" in err_str or "Forbidden" in err_str:
+            elif "403" in err_str or "Forbidden" in err_str or error_name == "PermissionDeniedError":
                 return "[Translation Failed: access denied — check API key and permissions]"
             elif "404" in err_str or "model" in err_str.lower() and "not found" in err_str.lower():
                 return f"[Translation Failed: model not found — \"{self.model}\"]"

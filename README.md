@@ -32,11 +32,12 @@ Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本�
 - 本地实时语音识别，内置 `faster-whisper tiny` 模型，安装后即可开始。
 - 悬浮字幕窗始终置顶，支持拖动、缩放、双语/仅原文/仅翻译显示。
 - 可自定义屏幕上同时显示的字幕条数；向上滚动可查看本次会话的过往字幕。
+- 默认把每次字幕保存为本机会话，像聊天记录一样回看、导出或删除；也可在开始前切换为不留记录的临时会话。
 - 应用界面支持全局中文/English 即时切换，入口位于 **System**。
 - 在线 API、本地 LLM、OpenAI-compatible 自定义 API，以及完全关闭翻译。
-- 内置 Agnes AI 与 LM Studio 快速配置，仍可手动填写任意兼容服务。
+- 翻译服务通过单一 Provider 选择器配置：Agnes AI、LM Studio 或任意 OpenAI-compatible 服务。
 - 麦克风输入与 BlackHole 系统音频输入。
-- 模型管理、权限引导、运行诊断和本地字幕记录。
+- 模型管理、按需权限提示、运行诊断和本地字幕记录。
 - Apple Silicon 与 Intel 分架构原生安装包。
 
 ![Realtime Subtitle floating overlay](docs/images/subtitle-overlay.png)
@@ -46,7 +47,7 @@ Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本�
 1. 根据上表下载与你的 Mac 匹配的 DMG。
 2. 打开 DMG，把 `RealtimeSubtitle.app` 拖入 `Applications`。
 3. 首次启动若出现安全提示，Control-click App → **打开**。
-4. 按提示授予麦克风权限。
+4. App 会直接进入控制中心；首次点击开始时，按 macOS 提示授予麦克风权限。
 5. 打开 **Audio** 选择输入设备；在 **Language** 设置识别语言和翻译模式。
 6. 回到 **Live**，点击 **Start Live Subtitles**。
 
@@ -71,9 +72,9 @@ brew install blackhole-2ch
 | Local LLM | LM Studio、Ollama 等本地 OpenAI-compatible 服务 |
 | Custom API | 自定义 Base URL、模型与 API Key |
 
-点击 **Use Agnes AI** 会填入官方接口 `https://apihub.agnes-ai.com/v1` 与
-`agnes-2.0-flash`；点击 **Use LM Studio** 会填入本地地址
-`http://127.0.0.1:1234/v1`。API Key 不会写入仓库，只在你保存设置后进入本机用户配置。
+在 Provider 中选择 **Agnes AI** 会使用官方接口 `https://apihub.agnes-ai.com/v1` 与
+`agnes-2.0-flash`；选择 **LM Studio / 本地服务** 会使用
+`http://127.0.0.1:1234/v1`。缺失的协议和本地 `/v1` 路径会自动补全。API Key 不会写入仓库，只在你保存设置后进入本机用户配置。
 
 语音只在本机识别。只有启用在线翻译时，识别出的文本才会发送到你配置的服务；音频不会由本项目上传。
 
@@ -84,6 +85,7 @@ brew install blackhole-2ch
 | 设置 | `~/Library/Application Support/RealtimeSubtitle/config.ini` |
 | 运行环境 | `~/Library/Application Support/RealtimeSubtitle/venv` |
 | 日志 | `~/Library/Logs/RealtimeSubtitle` |
+| 保存的会话 | `~/Library/Application Support/RealtimeSubtitle/realtime_subtitle.sqlite3` |
 | 手动保存的字幕 | `~/Documents/Realtime Subtitle/Transcripts` |
 
 API Key 保存在本机配置文件中。共享诊断信息前，请先检查其中是否包含设备名称、路径或服务地址。
@@ -106,11 +108,12 @@ Realtime Subtitle is a native-feeling macOS control center with an always-on-top
 - Local live transcription with a bundled `faster-whisper tiny` model.
 - Draggable, resizable bilingual overlay with original-only and translation-only modes.
 - Adjustable visible-row count with in-session scrollback for older captions.
+- Chat-style local session history with view, export and delete actions, plus a no-history Temporary mode.
 - Instant app-wide English / Simplified Chinese switching under **System**.
 - Online, local-LLM, custom OpenAI-compatible, or disabled translation.
-- One-click Agnes AI and LM Studio presets, plus fully custom endpoints.
+- A single provider selector for Agnes AI, LM Studio, and custom OpenAI-compatible endpoints.
 - Microphone and BlackHole system-audio input.
-- Model management, guided permissions, diagnostics, and local transcripts.
+- Model management, permission prompts only when needed, diagnostics, and local transcripts.
 - Separate native downloads for Apple Silicon and Intel Macs.
 
 ### Install and start
@@ -118,7 +121,7 @@ Realtime Subtitle is a native-feeling macOS control center with an always-on-top
 1. Download the DMG matching your Mac from the table above.
 2. Open it and drag `RealtimeSubtitle.app` to `Applications`.
 3. If Gatekeeper blocks the unsigned build, Control-click the app and choose **Open**.
-4. Grant microphone access when prompted.
+4. The control center opens immediately; grant microphone access when you first start captions.
 5. Choose an input under **Audio**, then configure recognition and translation under **Language**.
 6. Return to **Live** and click **Start Live Subtitles**.
 
@@ -138,8 +141,9 @@ Select it under **Audio → System Audio**. Create a Multi-Output Device in Audi
 
 Audio is transcribed locally. When online translation is enabled, only recognized text is sent to the provider configured by the user; this project does not upload the audio. Select **Off** for a fully local transcription path.
 
-The Agnes AI preset uses `https://apihub.agnes-ai.com/v1` with
-`agnes-2.0-flash`. The LM Studio preset uses `http://127.0.0.1:1234/v1`.
+The Agnes AI provider uses `https://apihub.agnes-ai.com/v1` with
+`agnes-2.0-flash`. The LM Studio provider uses `http://127.0.0.1:1234/v1`.
+Missing schemes and the local `/v1` path are normalized automatically.
 Credentials are never committed to this repository; saving them writes only to
 the current user's local configuration.
 
@@ -201,6 +205,7 @@ Audio input → local ASR → utterance lifecycle → subtitle overlay
 
 Control Center
 ├── Live
+├── History
 ├── Audio: Input / System Audio
 ├── Language: Recognition / Translation / Models
 ├── Appearance
