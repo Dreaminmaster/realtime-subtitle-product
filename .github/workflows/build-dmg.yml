@@ -53,15 +53,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install test dependencies
-        run: python3 -m pip install --quiet -r requirements-core.txt pytest
+        run: |
+          python3 -m venv .ci-venv
+          .ci-venv/bin/python -m pip install --quiet -r requirements-core.txt pytest
       - name: Static checks
         run: |
           bash -n build_dmg.sh
-          python3 -m py_compile main.py dashboard.py product_navigation.py launcher.py
+          .ci-venv/bin/python -m py_compile main.py dashboard.py product_navigation.py launcher.py
       - name: Test
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python3 -m pytest -q
+        run: .ci-venv/bin/python -m pytest -q
 
   build:
     needs: [metadata, quality]
