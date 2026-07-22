@@ -6,15 +6,37 @@
 # Venv is created on the USER's machine on first launch, so it never
 # contains GitHub runner paths.
 #
-# Usage:  bash build_dmg.sh [version]
+# Usage:  bash build_dmg.sh <version> [arm64|x86_64]
 # =============================================================================
 set -e
 
-VERSION="${1:-1.0.0}"
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+    echo "Usage: bash build_dmg.sh <version> [arm64|x86_64]"
+    exit 2
+fi
+VERSION_INPUT="$1"
+VERSION="${VERSION_INPUT#v}"
+if ! [[ "${VERSION}" =~ ^[0-9]+(\.[0-9]+){2}(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+    echo "ERROR: version must be semantic, for example 2.4.0 or 2.4.0-rc1"
+    exit 2
+fi
+HOST_ARCH=$(uname -m)
+ARCH_INPUT="${2:-${HOST_ARCH}}"
+case "${ARCH_INPUT}" in
+    arm64|aarch64) ARCH="arm64" ;;
+    x86_64|amd64) ARCH="x86_64" ;;
+    *)
+        echo "ERROR: architecture must be arm64 or x86_64"
+        exit 2
+        ;;
+esac
+
+BUNDLE_VERSION="${VERSION%%-*}"
 APP_NAME="RealtimeSubtitle"
-DMG_NAME="${APP_NAME}-${VERSION}.dmg"
+DMG_NAME="${APP_NAME}-${VERSION}-macos-${ARCH}.dmg"
+VOLUME_NAME="${APP_NAME}-${ARCH}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BUILD_DIR="${SCRIPT_DIR}/build"
+BUILD_DIR="${SCRIPT_DIR}/build/${ARCH}"
 APP_BUNDLE="${BUILD_DIR}/${APP_NAME}.app"
 CONTENTS="${APP_BUNDLE}/Contents"
 MACOS_DIR="${CONTENTS}/MacOS"
@@ -25,39 +47,63 @@ DIST_DIR="${SCRIPT_DIR}/dist"
 
 # Portable Python source
 PYTHON_STANDALONE_TAG="20260602"
-PYTHON_FILENAME="cpython-3.12.13%2B20260602-aarch64-apple-darwin-install_only.tar.gz"
+if [ "${ARCH}" = "arm64" ]; then
+    PYTHON_PLATFORM="aarch64-apple-darwin"
+else
+    PYTHON_PLATFORM="x86_64-apple-darwin"
+fi
+PYTHON_FILENAME="cpython-3.12.13%2B20260602-${PYTHON_PLATFORM}-install_only.tar.gz"
 PYTHON_URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PYTHON_STANDALONE_TAG}/${PYTHON_FILENAME}"
+PYTHON_CACHE="${SCRIPT_DIR}/.python_cache/cpython-3.12-${ARCH}.tar.gz"
+
+run_arch() {
+    if [ "${HOST_ARCH}" = "arm64" ] && [ "${ARCH}" = "x86_64" ]; then
+        /usr/bin/arch -x86_64 "$@"
+    elif [ "${HOST_ARCH}" = "x86_64" ] && [ "${ARCH}" = "arm64" ]; then
+        echo "ERROR: arm64 builds require an arm64 host (use GitHub's macos-15 runner)" >&2
+        return 1
+    else
+        "$@"
+    fi
+}
 
 echo "============================================"
-echo "  Building ${APP_NAME} v${VERSION}"
+echo "  Building ${APP_NAME} v${VERSION} for ${ARCH}"
 echo "============================================"
 echo ""
 
 # ---- Clean ----
-rm -rf "${BUILD_DIR}" "${DIST_DIR}"
+rm -rf "${BUILD_DIR}"
 # Detach any leftover mounts from previous runs
-hdiutil detach "/Volumes/${APP_NAME}" 2>/dev/null || true
+hdiutil detach "/Volumes/${VOLUME_NAME}" 2>/dev/null || true
 mkdir -p "${MACOS_DIR}" "${RESOURCES}" "${DIST_DIR}"
 
 # ---- Step 1: Download & unpack portable Python ----
 echo "[1/8] Setting up portable Python..."
-if [ ! -f "${SCRIPT_DIR}/.python_cache/cpython-3.12.tar.gz" ]; then
+if [ ! -f "${PYTHON_CACHE}" ]; then
     mkdir -p "${SCRIPT_DIR}/.python_cache"
-    echo "  Downloading portable Python 3.12..."
-    curl -L --retry 3 -o "${SCRIPT_DIR}/.python_cache/cpython-3.12.tar.gz" "${PYTHON_URL}" 2>&1
+    echo "  Downloading portable Python 3.12 (${ARCH})..."
+    curl -L --retry 3 -o "${PYTHON_CACHE}" "${PYTHON_URL}" 2>&1
 fi
 
 mkdir -p "${PYTHON_DIR}"
-tar xzf "${SCRIPT_DIR}/.python_cache/cpython-3.12.tar.gz" -C "${PYTHON_DIR}" --strip-components=1 2>&1
-echo "  Python: $(${PYTHON_BIN} --version 2>&1)"
+tar xzf "${PYTHON_CACHE}" -C "${PYTHON_DIR}" --strip-components=1 2>&1
+PYTHON_VERSION=$(run_arch "${PYTHON_BIN}" --version 2>&1)
+echo "  Python: ${PYTHON_VERSION}"
+PYTHON_FILE_INFO=$(file "${PYTHON_BIN}")
+if [[ "${ARCH}" = "arm64" && "${PYTHON_FILE_INFO}" != *"arm64"* ]] \
+   || [[ "${ARCH}" = "x86_64" && "${PYTHON_FILE_INFO}" != *"x86_64"* ]]; then
+    echo "  ERROR: bundled Python architecture mismatch: ${PYTHON_FILE_INFO}"
+    exit 1
+fi
 
 # ---- Step 1.5: Install PyQt6 into portable Python (bootstrap dependency) ----
 echo "[1.5/8] Installing bootstrap PyQt6 into portable Python..."
-"${PYTHON_DIR}/bin/python3" -m pip install --no-cache-dir --quiet PyQt6 2>&1 || {
+run_arch "${PYTHON_BIN}" -m pip install --no-cache-dir --quiet PyQt6 2>&1 || {
     echo "  ERROR: failed to install PyQt6 into bundled Python"
     exit 1
 }
-"${PYTHON_DIR}/bin/python3" -c "import PyQt6" || { echo "  ERROR: PyQt6 import failed"; exit 1; }
+run_arch "${PYTHON_BIN}" -c "import PyQt6" || { echo "  ERROR: PyQt6 import failed"; exit 1; }
 echo "  ✅ PyQt6 OK in bundled Python"
 
 # ---- Step 2: Copy project source ----
@@ -71,10 +117,51 @@ rsync -av --exclude='.git' \
       --exclude='.DS_Store' \
       --exclude='*.dmg' \
       --exclude='.python_cache' \
+      --exclude='.venv' \
+      --exclude='.pytest_cache' \
+      --exclude='.ruff_cache' \
+      --exclude='.coverage' \
+      --exclude='.gitignore' \
+      --exclude='.github' \
+      --exclude='tests' \
+      --exclude='tools' \
+      --exclude='docs' \
+      --exclude='demo' \
+      --exclude='build_dmg.sh' \
+      --exclude='install_mac.sh' \
+      --exclude='install_windows.bat' \
+      --exclude='start_mac.sh' \
+      --exclude='start_windows.bat' \
+      --exclude='pytest.ini' \
+      --exclude='test_funasr.py' \
+      --exclude='FUNASR_GUIDE.md' \
+      --exclude='FUNASR_IMPLEMENTATION_SUMMARY.md' \
+      --exclude='SPEAKER_RECOGNITION.md' \
+      --exclude='requirements_spec.md' \
+      --exclude='runtime/test_reports' \
+      --exclude='assets/icon/*-chroma.png' \
       --exclude='python' \
       --exclude='venv' \
       --exclude='wheelhouse' \
       "${SCRIPT_DIR}/" "${RESOURCES}/" 2>/dev/null
+
+# Always stamp local and CI builds from the version argument.  This avoids
+# stale source-tree constants and keeps the bundle identity reproducible.
+VERSION_NO_V="${VERSION}"
+BUILD_COMMIT=$(git -C "${SCRIPT_DIR}" rev-parse --short=10 HEAD 2>/dev/null || echo "unknown")
+if ! git -C "${SCRIPT_DIR}" diff --quiet --ignore-submodules -- 2>/dev/null \
+   || ! git -C "${SCRIPT_DIR}" diff --cached --quiet --ignore-submodules -- 2>/dev/null \
+   || [ -n "$(git -C "${SCRIPT_DIR}" ls-files --others --exclude-standard 2>/dev/null)" ]; then
+    BUILD_COMMIT="${BUILD_COMMIT}-dirty"
+fi
+BUILD_TIME=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+cat > "${RESOURCES}/version.py" <<EOF
+BUILD_VERSION = "${VERSION_NO_V}"
+BUILD_COMMIT = "${BUILD_COMMIT}"
+BUILD_TIME = "${BUILD_TIME}"
+BUILD_ARCH = "${ARCH}"
+EOF
+echo "  Build identity: v${VERSION_NO_V} (${BUILD_COMMIT}, ${ARCH})"
 echo "  Done."
 
 # ---- Step 2.5: Build wheelhouse (offline dependency bundle) ----
@@ -85,7 +172,7 @@ mkdir -p "${WHEELHOUSE_DIR}"
 
 # Download all wheels for requirements-core.txt (binary only, no source dists)
 echo "  Downloading wheels..."
-"${PYTHON_DIR}/bin/python3" -m pip download \
+run_arch "${PYTHON_BIN}" -m pip download \
     --dest "${WHEELHOUSE_DIR}" \
     --only-binary=:all: \
     -r "${RESOURCES}/requirements-core.txt" 2>&1 | tail -3
@@ -101,12 +188,12 @@ fi
 # Verify wheelhouse: clean venv → offline install → import check
 echo "  Verifying wheelhouse with clean venv..."
 TMP_VENV=$(mktemp -d)
-"${PYTHON_DIR}/bin/python3" -m venv "${TMP_VENV}" 2>&1 || {
+run_arch "${PYTHON_BIN}" -m venv "${TMP_VENV}" 2>&1 || {
     echo "  ❌ Failed to create test venv"; exit 1
 }
 
 TMP_PY="${TMP_VENV}/bin/python3"
-"${TMP_PY}" -m pip install \
+run_arch "${TMP_PY}" -m pip install \
     --no-index \
     --find-links "${WHEELHOUSE_DIR}" \
     --disable-pip-version-check \
@@ -121,7 +208,7 @@ if [ $INSTALL_EXIT -ne 0 ]; then
 fi
 
 # Verify critical imports
-IMPORT_CHECK=$("${TMP_PY}" -c "
+IMPORT_CHECK=$(run_arch "${TMP_PY}" -c "
 for m in ['PyQt6','numpy','sounddevice','httpx','openai','faster_whisper']:
     __import__(m)
     print(f'  ✅ {m}')
@@ -145,9 +232,9 @@ rm -rf "${BUNDLED_MODEL}"
 mkdir -p "${BUNDLED_MODEL}"
 
 # Ensure huggingface_hub is available in portable Python for model download
-"${PYTHON_DIR}/bin/python3" -c "import huggingface_hub" 2>/dev/null || {
+run_arch "${PYTHON_BIN}" -c "import huggingface_hub" 2>/dev/null || {
     echo "  Installing huggingface-hub from wheelhouse..."
-    "${PYTHON_DIR}/bin/python3" -m pip install --no-index \
+    run_arch "${PYTHON_BIN}" -m pip install --no-index \
         --find-links "${RESOURCES}/wheelhouse" \
         --disable-pip-version-check --no-input \
         huggingface-hub 2>&1 | tail -1
@@ -155,7 +242,7 @@ mkdir -p "${BUNDLED_MODEL}"
 
 echo "  Downloading Systran/faster-whisper-tiny from Hugging Face..."
 MODEL_DL=$(cd "${WHEELHOUSE_DIR}" && HOME="${TMP_HOME:-/tmp}" \
-    "${PYTHON_DIR}/bin/python3" -c "
+    run_arch "${PYTHON_BIN}" -c "
 import os, shutil
 os.environ['BUNDLED_MODEL'] = '${BUNDLED_MODEL}'
 from huggingface_hub import snapshot_download
@@ -198,7 +285,7 @@ echo "[3/8] Creating launcher…"
 cat > "${MACOS_DIR}/realtime-subtitle" << 'LAUNCHER'
 #!/bin/bash
 # =============================================================================
-# Realtime Subtitle Launcher (v2.3.1)
+# Realtime Subtitle Launcher
 # Bootstraps bundled Python → launcher.py → SetupController → Dashboard.
 # Shell does NOT create venv or install deps — SetupController handles that.
 # =============================================================================
@@ -229,7 +316,7 @@ if [ ! -x "$BUNDLED_PYTHON" ]; then
     alert "App bundle is incomplete.\n\nBundled Python is missing.\nPlease re-download."
     exit 1
 fi
-log "Bundled Python: $($BUNDLED_PYTHON --version 2>&1)"
+log "Bundled Python: $("$BUNDLED_PYTHON" --version 2>&1)"
 
 # Override portable Python's /install prefix
 export PYTHONHOME="${RESOURCES}/python"
@@ -241,8 +328,15 @@ LAUNCHER
 
 chmod +x "${MACOS_DIR}/realtime-subtitle"
 
-# ---- Step 4: Info.plist ----
+# ---- Step 4: App metadata and icon ----
 echo "[4/8] Creating Info.plist…"
+ICON_SOURCE="${SCRIPT_DIR}/assets/icon/AppIcon.icns"
+if [ ! -f "${ICON_SOURCE}" ]; then
+    echo "  ERROR: app icon is missing: ${ICON_SOURCE}"
+    exit 1
+fi
+cp "${ICON_SOURCE}" "${RESOURCES}/AppIcon.icns"
+
 cat > "${CONTENTS}/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -255,15 +349,17 @@ cat > "${CONTENTS}/Info.plist" << PLIST
     <key>CFBundleIdentifier</key>
     <string>com.realtimesubtitle.app</string>
     <key>CFBundleVersion</key>
-    <string>${VERSION}</string>
+    <string>${BUNDLE_VERSION}</string>
     <key>CFBundleShortVersionString</key>
-    <string>${VERSION}</string>
+    <string>${BUNDLE_VERSION}</string>
     <key>CFBundleExecutable</key>
     <string>realtime-subtitle</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
+    <string>13.0</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Realtime Subtitle needs microphone access for real-time speech recognition and translation.</string>
     <key>NSHighResolutionCapable</key>
@@ -296,18 +392,18 @@ img.save('${TMP_DMG_DIR}/.background/background.png', 'PNG')
 APP_SIZE_KB=$(du -sk "${TMP_DMG_DIR}" | cut -f1)
 DMG_SIZE_MB=$(( (APP_SIZE_KB + 50000) / 1024 + 200 ))
 
-hdiutil create -volname "${APP_NAME}" \
+hdiutil create -volname "${VOLUME_NAME}" \
     -srcfolder "${TMP_DMG_DIR}" \
     -ov -format UDRW \
     -size ${DMG_SIZE_MB}m \
-    "${DIST_DIR}/tmp.dmg" 2>&1
+    "${DIST_DIR}/tmp-${ARCH}.dmg" 2>&1
 
-DEVICE=$(hdiutil attach -readwrite -noverify -noautoopen "${DIST_DIR}/tmp.dmg" 2>&1 | head -1 | awk '{print $1}')
+DEVICE=$(hdiutil attach -readwrite -noverify -noautoopen "${DIST_DIR}/tmp-${ARCH}.dmg" 2>&1 | head -1 | awk '{print $1}')
 if [ -n "$DEVICE" ]; then
     sleep 2
     osascript -e "
         tell application \"Finder\"
-            tell disk \"${APP_NAME}\"
+            tell disk \"${VOLUME_NAME}\"
                 open
                 set current view of container window to icon view
                 set toolbar visible of container window to false
@@ -332,14 +428,14 @@ fi
 # Remove old DMG first
 rm -f "${DIST_DIR}/${DMG_NAME}"
 
-hdiutil convert "${DIST_DIR}/tmp.dmg" -format UDZO -o "${DIST_DIR}/${DMG_NAME}" 2>&1 || {
+hdiutil convert "${DIST_DIR}/tmp-${ARCH}.dmg" -format UDZO -o "${DIST_DIR}/${DMG_NAME}" 2>&1 || {
     echo "  convert failed, trying fallback..."
-    hdiutil create -volname "${APP_NAME}" \
+    hdiutil create -volname "${VOLUME_NAME}" \
         -srcfolder "${TMP_DMG_DIR}" \
         -ov -format UDZO \
         "${DIST_DIR}/${DMG_NAME}" 2>&1
 }
-rm -f "${DIST_DIR}/tmp.dmg"
+rm -f "${DIST_DIR}/tmp-${ARCH}.dmg"
 
 # ---- Step 6: Verify ----
 echo ""
@@ -355,7 +451,31 @@ fi
 if [ ! -x "${APP_BUNDLE}/Contents/Resources/python/bin/python3" ]; then
     echo "  ❌ portable python missing"; FAIL=true
 else
-    echo "  ✅ portable python: $(${APP_BUNDLE}/Contents/Resources/python/bin/python3 --version 2>&1)"
+    BUNDLE_PYTHON="${APP_BUNDLE}/Contents/Resources/python/bin/python3"
+    if BUNDLE_PYTHON_VERSION=$(run_arch "${BUNDLE_PYTHON}" --version 2>&1); then
+        echo "  ✅ portable python: ${BUNDLE_PYTHON_VERSION}"
+    else
+        echo "  ❌ portable python cannot start: ${BUNDLE_PYTHON_VERSION}"
+        FAIL=true
+    fi
+fi
+
+# App icon exists and is referenced by Info.plist.
+if [ ! -f "${APP_BUNDLE}/Contents/Resources/AppIcon.icns" ]; then
+    echo "  ❌ app icon missing"; FAIL=true
+elif [ "$(plutil -extract CFBundleIconFile raw "${APP_BUNDLE}/Contents/Info.plist" 2>/dev/null)" != "AppIcon" ]; then
+    echo "  ❌ app icon is not referenced by Info.plist"; FAIL=true
+else
+    echo "  ✅ app icon bundled"
+fi
+
+# Executable architecture must match the requested target.
+BUNDLE_PYTHON_INFO=$(file "${APP_BUNDLE}/Contents/Resources/python/bin/python3")
+if [[ "${ARCH}" = "arm64" && "${BUNDLE_PYTHON_INFO}" != *"arm64"* ]] \
+   || [[ "${ARCH}" = "x86_64" && "${BUNDLE_PYTHON_INFO}" != *"x86_64"* ]]; then
+    echo "  ❌ bundle architecture mismatch: ${BUNDLE_PYTHON_INFO}"; FAIL=true
+else
+    echo "  ✅ bundle architecture ${ARCH}"
 fi
 
 # NO pre-built venv in bundle (that would carry builder paths!)
@@ -395,8 +515,39 @@ echo "  ℹ️  /install in sysconfig is expected (overridden by launcher)"
 if [ ! -f "${APP_BUNDLE}/Contents/Resources/requirements.txt" ]; then
     echo "  ❌ requirements.txt missing"; FAIL=true
 else
-    echo "  ✅ requirements.txt ($(wc -l < ${APP_BUNDLE}/Contents/Resources/requirements.txt) lines)"
+    echo "  ✅ requirements.txt ($(wc -l < "${APP_BUNDLE}/Contents/Resources/requirements.txt") lines)"
 fi
+
+# Bundle metadata and stamped build identity
+if ! plutil -lint "${APP_BUNDLE}/Contents/Info.plist" >/dev/null; then
+    echo "  ❌ Info.plist is invalid"; FAIL=true
+else
+    ACTUAL_SHORT_VERSION=$(plutil -extract CFBundleShortVersionString raw "${APP_BUNDLE}/Contents/Info.plist")
+    ACTUAL_BUNDLE_VERSION=$(plutil -extract CFBundleVersion raw "${APP_BUNDLE}/Contents/Info.plist")
+    if [ "${ACTUAL_SHORT_VERSION}" != "${BUNDLE_VERSION}" ] || [ "${ACTUAL_BUNDLE_VERSION}" != "${BUNDLE_VERSION}" ]; then
+        echo "  ❌ bundle version mismatch: short=${ACTUAL_SHORT_VERSION} build=${ACTUAL_BUNDLE_VERSION}"
+        FAIL=true
+    else
+        echo "  ✅ bundle metadata version ${BUNDLE_VERSION}"
+    fi
+fi
+
+if ! grep -q "BUILD_VERSION = \"${VERSION_NO_V}\"" "${APP_BUNDLE}/Contents/Resources/version.py"; then
+    echo "  ❌ stamped build identity missing"; FAIL=true
+else
+    echo "  ✅ stamped build identity v${VERSION_NO_V}"
+fi
+if ! grep -q "BUILD_ARCH = \"${ARCH}\"" "${APP_BUNDLE}/Contents/Resources/version.py"; then
+    echo "  ❌ stamped architecture missing"; FAIL=true
+else
+    echo "  ✅ stamped architecture ${ARCH}"
+fi
+
+for excluded in .venv tests tools docs .github; do
+    if [ -e "${APP_BUNDLE}/Contents/Resources/${excluded}" ]; then
+        echo "  ❌ development path bundled: ${excluded}"; FAIL=true
+    fi
+done
 
 # Wheelhouse exists and has wheels
 if [ ! -d "${APP_BUNDLE}/Contents/Resources/wheelhouse" ]; then

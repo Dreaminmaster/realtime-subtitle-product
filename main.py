@@ -16,21 +16,35 @@ import signal
 import argparse
 import logging
 
+from app_paths import get_log_dir
+
 # Fix library conflicts
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 # Setup app-level logging
-LOG_DIR = os.path.join(os.path.expanduser("~"), "Library", "Logs", "RealtimeSubtitle")
-os.makedirs(LOG_DIR, exist_ok=True)
+LOG_DIR = get_log_dir()
+_log_handlers = [logging.StreamHandler(sys.stdout)]
+try:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    _log_handlers.insert(0, logging.FileHandler(LOG_DIR / "app.log"))
+except OSError:
+    # Read-only test environments and locked-down Macs should still be able
+    # to launch; diagnostics remain available on stdout.
+    pass
 logging.basicConfig(
     level=logging.INFO,
     format='[%(asctime)s] [%(levelname)s] %(message)s',
-    handlers=[
-        logging.FileHandler(os.path.join(LOG_DIR, "app.log")),
-        logging.StreamHandler(sys.stdout)
-    ]
+    handlers=_log_handlers,
 )
 log = logging.getLogger("RealtimeSubtitle")
+
+
+def should_open_permission_guide(no_permission_check=False):
+    """Return whether the first-launch guide is needed for this launch."""
+    if no_permission_check:
+        return False
+    from permission_guide import should_show_permission_guide
+    return should_show_permission_guide()
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Realtime Subtitle")
@@ -90,7 +104,8 @@ def main():
     
     try:
         from version import BUILD_VERSION, BUILD_COMMIT, BUILD_TIME
-        log.info(f"Realtime Subtitle v{BUILD_VERSION} (commit {BUILD_COMMIT} built {BUILD_TIME})")
+        version_label = BUILD_VERSION if str(BUILD_VERSION).startswith("v") else f"v{BUILD_VERSION}"
+        log.info(f"Realtime Subtitle {version_label} (commit {BUILD_COMMIT} built {BUILD_TIME})")
     except ImportError:
         log.info("Realtime Subtitle (dev build)")
     log.info(f"Args: {args}")
@@ -115,6 +130,16 @@ def main():
     app = QApplication.instance()
     if not app:
         app = QApplication(sys.argv)
+    try:
+        from PyQt6.QtGui import QIcon
+        icon_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "assets", "icon", "realtime-subtitle-icon.png",
+        )
+        if os.path.isfile(icon_path):
+            app.setWindowIcon(QIcon(icon_path))
+    except Exception:
+        log.debug("Application icon could not be loaded", exc_info=True)
     
     # Global exception hook
     def exception_hook(exctype, value, traceback_obj):
@@ -128,10 +153,11 @@ def main():
         sys.exit(1)
     sys.excepthook = exception_hook
     
-    signal.signal(signal.SIGINT, lambda sig, frame: os._exit(0))
+    signal.signal(signal.SIGINT, lambda sig, frame: app.quit())
+    app.aboutToQuit.connect(_shutdown_active_pipeline)
     
     # First-launch permission guide (GUI)
-    if not args.no_permission_check:
+    if should_open_permission_guide(args.no_permission_check):
         try:
             from permission_guide import create_permission_guide
             guide = create_permission_guide()
@@ -174,6 +200,7 @@ def create_pipeline():
     from concurrent.futures import ThreadPoolExecutor
     import threading
     from PyQt6.QtCore import QObject, pyqtSignal
+    from audio_capture import AudioCapture, AudioCaptureError
     
     log.info("Creating pipeline (non-UI)...")
     
@@ -203,7 +230,6 @@ def create_pipeline():
             self._failed = False
             self._stopping = False             # dedup stop guard
             
-            from audio_capture import AudioCapture, AudioCaptureError
             from transcriber_pool import get_or_create_transcriber
             
             log.info("Pipeline: initializing audio capture...")
@@ -232,6 +258,7 @@ def create_pipeline():
             from translation_engine import translation_engine
             self.translation_engine = translation_engine
             trans_mode = getattr(config, 'translation_mode', 'off')
+            self.translation_engine.target_lang = config.target_lang
             self.translation_engine.set_mode(
                 trans_mode,
                 base_url=config.api_base_url,
@@ -246,6 +273,7 @@ def create_pipeline():
             #                REALTIME_SUBTITLE_USE_SQLITE_SESSION_REPOSITORY
             self._repository = None
             self._repo_owned = False
+            self._translation_session_id = None
             from src.runtime_settings_guard import RuntimeSettingsGuard, settings_from_config
             self._runtime_decision = RuntimeSettingsGuard().evaluate(settings_from_config(config))
 
@@ -276,7 +304,8 @@ def create_pipeline():
                     repository=self._repository,
                     repository_enabled=self._repository is not None,
                 )
-                self.translation_adapter.start_session(str(id(self)))
+                self._translation_session_id = str(id(self))
+                self.translation_adapter.start_session(self._translation_session_id)
                 log.info("Pipeline: v2.4 TranslationScheduler wired (use_translation_scheduler=true)")
 
                 # v2.4 Transcriber output bridge (opt-in, off by default)
@@ -284,7 +313,7 @@ def create_pipeline():
                     from src.runtime_transcriber_bridge_adapter import build_transcriber_output_bridge_for_runtime
                     self.transcriber_output_bridge = build_transcriber_output_bridge_for_runtime(
                         self._runtime_decision,
-                        session_id=str(id(self)),
+                        session_id=self._translation_session_id,
                         translation_adapter=self.translation_adapter,
                     )
                     if self.transcriber_output_bridge is not None:
@@ -301,6 +330,7 @@ def create_pipeline():
         def start(self):
             self._stopping = False  # reset for new session
             self.running = True     # reset from previous stop
+            self.audio.prepare_start()
             self.thread = threading.Thread(target=self.processing_loop, daemon=True, name="PipelineLoop")
             self.thread.start()
         
@@ -320,12 +350,21 @@ def create_pipeline():
             # Session invalidation ONLY after clean shutdown
             self._session_generation += 1
             if hasattr(self, 'translation_adapter'):
-                self.translation_adapter.stop_session()
+                # Invalidate the scheduler before closing its repository.
+                # Running HTTP calls may finish later, but their results are
+                # session-guarded and cannot write to the closed connection.
+                self.translation_adapter.shutdown(wait=False)
             if self._repo_owned and self._repository is not None:
                 try:
-                    self._repository.close()
+                    if self._translation_session_id is not None:
+                        self._repository.close_session(self._translation_session_id)
                 except Exception as exc:
-                    log.warning(f"Pipeline: repository close error: {exc}")
+                    log.warning(f"Pipeline: session close error: {exc}")
+                finally:
+                    try:
+                        self._repository.close()
+                    except Exception as exc:
+                        log.warning(f"Pipeline: repository close error: {exc}")
                 self._repo_owned = False
                 self._repository = None
             log.info("Pipeline stopped — session invalidated")
@@ -404,12 +443,6 @@ def create_pipeline():
             asr_thread = threading.Thread(target=asr_worker_loop, daemon=True, name="ASRWorker")
             asr_thread.start()
             
-            # Signal pipeline started — everything is ready
-            try:
-                self.signals.pipeline_started.emit()
-            except Exception:
-                log.critical("pipeline_started signal broken")
-            
             # Task counter for ordering within same priority
             self._asr_seq = 0
             
@@ -454,9 +487,16 @@ def create_pipeline():
             
             try:
                 audio_gen = self.audio.generator()
+                startup_confirmed = False
                 for audio_chunk in audio_gen:
                     if not self.running:
                         break
+                    if not startup_confirmed:
+                        try:
+                            self.signals.pipeline_started.emit()
+                            startup_confirmed = True
+                        except Exception:
+                            log.critical("pipeline_started signal broken")
                     
                     chunk_rms = float(np.sqrt(np.mean(audio_chunk**2)))
                     is_speech = chunk_rms > self.audio.silence_threshold
@@ -698,7 +738,9 @@ def create_pipeline():
                         self._latest_partial_seq.pop(chunk_id, None)
                 
                 if text:
-                    log.info(f"Utterance[{chunk_id}] PARTIAL text=\"{text}\" seq={seq}")
+                    log.info(
+                        f"Utterance[{chunk_id}] PARTIAL chars={len(text)} seq={seq}"
+                    )
                     self.signals.update_text.emit(chunk_id, text, "")
             except Exception:
                 log.exception(f"Utterance[{chunk_id}] PARTIAL error")
@@ -739,7 +781,10 @@ def create_pipeline():
                         entry["state"] = "finalized"
                 
                 if text:
-                    log.info(f"Utterance[{chunk_id}] FINAL text=\"{text}\" dur={dur:.1f}s rms={rms:.4f} peak={peak:.3f}")
+                    log.info(
+                        f"Utterance[{chunk_id}] FINAL chars={len(text)} "
+                        f"dur={dur:.1f}s rms={rms:.4f} peak={peak:.3f}"
+                    )
                 else:
                     log.warning(f"Utterance[{chunk_id}] FINAL empty: dur={dur:.1f}s rms={rms:.4f} peak={peak:.3f} samples={len(audio_data)} reason=whisper_no_text")
                 
@@ -755,6 +800,12 @@ def create_pipeline():
                             translate_executor.submit(self._run_translation_safe, text, chunk_id, session_gen)
                     else:
                         self.signals.update_text.emit(chunk_id, text, "")
+                        if hasattr(self, 'translation_adapter'):
+                            # Translation-off mode still records the original
+                            # transcript in the v2.4 session repository.
+                            self.translation_adapter.on_final_text(
+                                text, chunk_id, translate=False,
+                            )
                 
                 with lifecycle_lock or self._lifecycle_lock:
                     while len(self._utt_lifecycle) > 50:
@@ -798,6 +849,16 @@ def create_pipeline():
 
 _overlay_window = None
 _overlay_pipeline = None
+
+
+def _shutdown_active_pipeline():
+    """Best-effort graceful cleanup for SIGINT and QApplication shutdown."""
+    pipeline = _overlay_pipeline
+    if pipeline is not None:
+        try:
+            pipeline.stop()
+        except Exception:
+            log.exception("Pipeline cleanup during application quit failed")
 
 def create_and_show_overlay(pipeline, signals, start_pipeline=True):
     """Create and show the overlay window (MUST be called from main thread).

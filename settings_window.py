@@ -9,12 +9,17 @@ class SettingsWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Settings")
-        self.setFixedSize(400, 300)
+        self.setFixedSize(400, 350)
         self.initUI()
         
     def initUI(self):
         layout = QVBoxLayout()
         form_layout = QFormLayout()
+
+        self.translation_mode_input = QComboBox()
+        self.translation_mode_input.addItems(["off", "online", "local", "custom", "fast"])
+        self.translation_mode_input.setCurrentText(config.translation_mode)
+        form_layout.addRow("Translation Mode:", self.translation_mode_input)
         
         # API Key
         self.api_key_input = QLineEdit()
@@ -191,7 +196,8 @@ class SettingsWindow(QWidget):
         
     def save_config(self):
         """Write to config.ini"""
-        config_path = os.path.join(os.path.dirname(__file__), "config.ini")
+        from app_paths import write_config
+        config_path = config.config_path
         parser = configparser.ConfigParser()
         parser.read(config_path)
         
@@ -204,6 +210,7 @@ class SettingsWindow(QWidget):
         parser.set("api", "api_key", self.api_key_input.text() or "")
         parser.set("api", "base_url", self.base_url_input.text() or "")
         parser.set("translation", "model", self.model_input.currentText())
+        parser.set("translation", "mode", self.translation_mode_input.currentText())
         parser.set("translation", "threads", str(self.threads_input.value()))
         parser.set("transcription", "backend", self.backend_input.currentText())
         parser.set("transcription", "whisper_model", self.whisper_input.currentText())
@@ -213,8 +220,7 @@ class SettingsWindow(QWidget):
         parser.set("audio", "silence_duration", str(self.silence_dur_input.value()))
         
         try:
-            with open(config_path, 'w') as f:
-                parser.write(f)
+            write_config(parser, config_path)
             QMessageBox.information(self, "Saved", "Configuration saved! The app should restart automatically.")
             self.close()
         except Exception as e:

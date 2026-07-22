@@ -112,21 +112,42 @@ class TestRevisionCancel:
         s.start_session(SID)
         s.submit(_event(segment_id="a", revision=1))
         s.submit(_event(segment_id="b", revision=1))
-        # both should be QUEUED or RUNNING
+        # Neither segment may be cancelled.  On a fast machine either job can
+        # already be completed before this assertion runs.
         for seg in ("a", "b"):
             j = s._jobs.get(f"{SID}:{seg}:1")
             assert j is not None
-            assert j.status in (TranslationStatus.QUEUED, TranslationStatus.RUNNING)
+            assert j.status in (
+                TranslationStatus.QUEUED,
+                TranslationStatus.RUNNING,
+                TranslationStatus.COMPLETED,
+            )
+        s.shutdown(wait=True)
 
 
 class TestStaleResult:
     def test_old_running_result_not_delivered(self):
         """When a stale job finishes, on_result is NOT called."""
         results = []
-        s = TranslationScheduler(on_result=lambda r: results.append(r), max_workers=1)
+        first_started = threading.Event()
+        release_first = threading.Event()
+
+        def controlled_translate(text, target_lang):
+            if text == "revision one":
+                first_started.set()
+                assert release_first.wait(timeout=2.0)
+            return f"translated: {text}"
+
+        s = TranslationScheduler(
+            translator=controlled_translate,
+            on_result=lambda r: results.append(r),
+            max_workers=1,
+        )
         s.start_session(SID)
-        s.submit(_event(segment_id="seg", revision=1))
-        s.submit(_event(segment_id="seg", revision=2))
+        s.submit(_event(segment_id="seg", revision=1, text_raw="revision one"))
+        assert first_started.wait(timeout=2.0)
+        s.submit(_event(segment_id="seg", revision=2, text_raw="revision two"))
+        release_first.set()
         s.shutdown(wait=True)
         # Only revision 2 should deliver a result
         delivered = [r for r in results if r.segment_id == "seg"]
@@ -243,6 +264,13 @@ class TestDefaultTranslator:
         s.shutdown(wait=True)
         assert len(results) == 1
         assert "hello" in results[0].translated_text
+
+    def test_completed_jobs_leave_active_queue(self):
+        s = TranslationScheduler(max_workers=1)
+        s.start_session(SID)
+        s.submit(_event(segment_id="completed"))
+        s.shutdown(wait=True)
+        assert s._queue == []
 
 
 class TestEmptyText:

@@ -8,18 +8,98 @@ This module can be imported without PyQt6 installed.
 import subprocess
 import platform
 import os
+import threading
+import time
+
+
+def microphone_permission_state() -> str:
+    """Return the current macOS microphone permission state.
+
+    Values are ``authorized``, ``denied``, ``restricted``,
+    ``not_determined``, ``not_applicable`` or ``unknown``.
+    """
+    if platform.system() != "Darwin":
+        return "not_applicable"
+    try:
+        import AVFoundation
+        status = int(
+            AVFoundation.AVCaptureDevice.authorizationStatusForMediaType_(
+                AVFoundation.AVMediaTypeAudio
+            )
+        )
+        return {
+            0: "not_determined",
+            1: "restricted",
+            2: "denied",
+            3: "authorized",
+        }.get(status, "unknown")
+    except Exception:
+        return "unknown"
+
+
+def screen_session_is_locked() -> bool:
+    """Return True only when macOS explicitly reports a locked GUI session."""
+    if platform.system() != "Darwin":
+        return False
+    try:
+        result = subprocess.run(
+            ["/usr/sbin/ioreg", "-n", "Root", "-d1"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        return '"IOConsoleLocked" = Yes' in result.stdout
+    except Exception:
+        return False
+
+
+def request_microphone_access(timeout=30.0, cancelled=None):
+    """Request microphone access without blocking shutdown indefinitely.
+
+    Returns True/False for a user decision and None for cancellation, timeout,
+    unsupported platforms or an unavailable AVFoundation bridge.
+    """
+    state = microphone_permission_state()
+    if state == "authorized":
+        return True
+    if state in {"denied", "restricted"}:
+        return False
+    if state != "not_determined":
+        return None
+
+    try:
+        import AVFoundation
+    except Exception:
+        return None
+
+    completed = threading.Event()
+    decision = {"granted": False}
+
+    def _finished(granted):
+        decision["granted"] = bool(granted)
+        completed.set()
+
+    AVFoundation.AVCaptureDevice.requestAccessForMediaType_completionHandler_(
+        AVFoundation.AVMediaTypeAudio,
+        _finished,
+    )
+    deadline = time.monotonic() + max(float(timeout), 0.0)
+    while not completed.wait(0.1):
+        if cancelled is not None and cancelled():
+            return None
+        if time.monotonic() >= deadline:
+            return None
+    return decision["granted"]
 
 
 def _check_microphone_raw():
-    if platform.system() != "Darwin":
+    state = microphone_permission_state()
+    if state == "authorized":
+        return True
+    if state in {"denied", "restricted"}:
+        return False
+    if state == "not_applicable":
         return None
-    try:
-        import objc
-        from AVFoundation import AVCaptureDevice
-        status = AVCaptureDevice.authorizationStatusForMediaType_("soun")
-        return status == 3
-    except Exception:
-        pass
     try:
         result = subprocess.run(
             ["tccutil", "status", "kTCCServiceMicrophone"],
@@ -31,8 +111,8 @@ def _check_microphone_raw():
 
 
 def should_show_permission_guide() -> bool:
-    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.ini")
-    if not os.path.exists(config_path):
+    from app_paths import get_permission_guide_marker
+    if not get_permission_guide_marker().exists():
         return True
     mic_ok = _check_microphone_raw()
     if mic_ok is False:
@@ -151,6 +231,18 @@ def create_permission_guide(parent=None):
             self.status_label.setWordWrap(True)
             self.status_label.setStyleSheet("font-size: 12px; color: #a6adc8; padding: 0; margin: 0;")
             layout.addWidget(self.status_label)
+
+        def accept(self):
+            from app_paths import get_permission_guide_marker
+            marker = get_permission_guide_marker()
+            try:
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.touch(mode=0o600, exist_ok=True)
+                os.chmod(marker, 0o600)
+            except OSError:
+                # The guide must never trap the user if persistence fails.
+                pass
+            super().accept()
         
         def _create_card(self, title, subtitle, description, section_name):
             card = QFrame()

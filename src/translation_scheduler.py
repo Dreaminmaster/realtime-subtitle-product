@@ -123,10 +123,12 @@ class TranslationScheduler:
             self._stopped = False
 
     def stop_session(self) -> None:
-        """Stop accepting new jobs. Cancel all pending. Caller must hold lock or
-        this method acquires it."""
-        # Acquire lock only if not already held (avoids re-entrant deadlock).
-        # Public callers should NOT hold the lock; internal callers already do.
+        """Stop accepting new jobs and cancel pending work atomically."""
+        with self._lock:
+            self._stop_session_locked()
+
+    def _stop_session_locked(self) -> None:
+        """Internal stop implementation. ``self._lock`` must be held."""
         self._stopped = True
         self._session_id = None
         for idx in list(reversed(self._queue)):
@@ -135,10 +137,9 @@ class TranslationScheduler:
     def shutdown(self, wait: bool = True) -> None:
         """Idempotent shutdown: stop + join executor."""
         with self._lock:
-            if not self._stopped:
-                self.stop_session()
+            self._stop_session_locked()
         if self._executor is not None:
-            self._executor.shutdown(wait=wait)
+            self._executor.shutdown(wait=wait, cancel_futures=True)
 
     # ── submit ─────────────────────────────────────────────────
     def submit(self, event) -> TranslationStatus | None:
@@ -281,6 +282,8 @@ class TranslationScheduler:
         job.finished_at = time.time()
         job.error = error
         self._running.discard(job_key)
+        if job_key in self._queue:
+            self._queue.remove(job_key)
 
         # Build result
         result = TranslationResult(

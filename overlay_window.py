@@ -319,19 +319,20 @@ class OverlayWindow(QWidget):
 
     def _save_transcript(self):
         """Save history to file"""
-        import os
         if not self.transcript_data:
             print("[Overlay] Nothing to save.")
             return
 
-        os.makedirs("transcripts", exist_ok=True)
-        filename = f"transcripts/transcript_{time.strftime('%Y%m%d_%H%M%S')}.txt"
+        from app_paths import get_transcript_dir
+        transcript_dir = get_transcript_dir()
+        transcript_dir.mkdir(parents=True, exist_ok=True)
+        filename = transcript_dir / f"transcript_{time.strftime('%Y%m%d_%H%M%S')}.txt"
         
         # Sort by chunk_id
         sorted_ids = sorted(self.transcript_data.keys())
         
         try:
-            with open(filename, "w", encoding="utf-8") as f:
+            with filename.open("w", encoding="utf-8") as f:
                 f.write(f"Transcript saved at {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
                 f.write("="*50 + "\n\n")
                 for cid in sorted_ids:
@@ -342,6 +343,7 @@ class OverlayWindow(QWidget):
             # Visual feedback on button
             original_text = self.save_btn.text()
             self.save_btn.setText("Saved!")
+            self.save_btn.setToolTip(f"Saved to {filename}")
             QTimer.singleShot(2000, lambda: self.save_btn.setText(original_text))
             
         except Exception as e:

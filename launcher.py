@@ -1,19 +1,79 @@
 import sys
 import os
 
+
+_MAIN_PASSTHROUGH_FLAGS = {
+    "--overlay-only",
+    "--diagnostics",
+    "--no-permission-check",
+}
+
+
+def _main_cli_args(argv=None):
+    """Forward only flags understood by main.py.
+
+    LaunchServices may append private arguments such as ``-psn_*``. Passing
+    those through would make argparse reject an otherwise valid app launch.
+    """
+    values = sys.argv if argv is None else argv
+    return [arg for arg in values[1:] if arg in _MAIN_PASSTHROUGH_FLAGS]
+
+
+def _build_identity():
+    try:
+        from version import BUILD_VERSION, BUILD_COMMIT, BUILD_TIME
+        label = BUILD_VERSION if str(BUILD_VERSION).startswith("v") else f"v{BUILD_VERSION}"
+        return label, BUILD_COMMIT, BUILD_TIME
+    except ImportError:
+        return "dev", "unknown", "unknown"
+
+
+def _user_venv_python():
+    return os.path.expanduser(
+        "~/Library/Application Support/RealtimeSubtitle/venv/bin/python3"
+    )
+
+
+def _reexec_in_user_venv_for_asr_smoke():
+    """Run dependency-heavy ASR diagnostics in the prepared user venv."""
+    import json
+
+    venv_python = _user_venv_python()
+    if not os.path.isfile(venv_python):
+        print(json.dumps({
+            "type": "asr_smoke_fail",
+            "error_type": "EnvironmentNotPrepared",
+            "message": "Run --bootstrap-test once before --asr-smoke-test.",
+        }))
+        sys.exit(1)
+
+    try:
+        already_in_venv = os.path.samefile(sys.executable, venv_python)
+    except OSError:
+        already_in_venv = os.path.realpath(sys.executable) == os.path.realpath(venv_python)
+    if already_in_venv:
+        return
+
+    env = os.environ.copy()
+    env.pop("PYTHONHOME", None)
+    env.pop("PYTHONPATH", None)
+    env["VIRTUAL_ENV"] = os.path.dirname(os.path.dirname(venv_python))
+    os.execve(
+        venv_python,
+        [venv_python, os.path.abspath(__file__), *sys.argv[1:]],
+        env,
+    )
+
 # Handle CLI flags BEFORE PyQt6 import (avoids unnecessary GUI dependencies)
 if "--version" in sys.argv:
-    try:
-        from version import BUILD_VERSION, BUILD_COMMIT
-        print(f"Realtime Subtitle v{BUILD_VERSION} (commit {BUILD_COMMIT})")
-    except ImportError:
-        print("Realtime Subtitle (dev build)")
+    _version, _commit, _ = _build_identity()
+    print(f"Realtime Subtitle {_version} (commit {_commit})")
     sys.exit(0)
 
 if "--diagnose" in sys.argv:
     from diagnostic_logger import write_full_report, get_system_info
     info = get_system_info()
-    info["app_version"] = "v2.3.1-rc15"
+    info["app_version"] = _build_identity()[0]
     info["python"] = sys.version.split()[0]
     print(write_full_report())
     sys.exit(0)
@@ -52,16 +112,25 @@ if "--bootstrap-test" in sys.argv:
     
     # Print final state
     info = get_system_info()
+    model_source = evidence.get("model_source", "unknown")
+    if model_source == "unknown":
+        prepared_model = os.path.expanduser(
+            f"~/Library/Application Support/RealtimeSubtitle/models/whisper/{model_id}"
+        )
+        required_model_files = ("config.json", "model.bin", "tokenizer.json")
+        if all(os.path.isfile(os.path.join(prepared_model, f)) for f in required_model_files):
+            model_source = "user_cache"
+
     result = {
         "type": "bootstrap_complete",
         "success": ok,
         "ready": ok,
         "model_id": model_id,
-        "app_version": "v2.3.1-rc15",
+        "app_version": _build_identity()[0],
         "python": sys.version.split()[0],
         "dependency_source": evidence.get("dependency_source", "wheelhouse"),
         "network_required": evidence.get("network_required", False),
-        "model_source": evidence.get("model_source", "unknown"),
+        "model_source": model_source,
     }
     # Also include error info if present
     if "error_type" in evidence:
@@ -93,6 +162,8 @@ if "--asr-smoke-test" in sys.argv:
     """
     import json as _json
     import os as _os
+
+    _reexec_in_user_venv_for_asr_smoke()
     
     model_id = sys.argv[sys.argv.index("--asr-smoke-test") + 1] \
         if len(sys.argv) > sys.argv.index("--asr-smoke-test") + 1 \
@@ -193,8 +264,8 @@ os.environ.pop("PYTHONPATH", None)
 class LauncherWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Real-Time Translator - Launcher")
-        self.setFixedSize(400, 200)
+        self.setWindowTitle("Realtime Subtitle")
+        self.setFixedSize(460, 230)
         
         # Central Widget
         central_widget = QWidget()
@@ -309,7 +380,7 @@ class LauncherWindow(QMainWindow):
         env.pop("PYTHONHOME", None)
         env.pop("PYTHONPATH", None)
         env["VIRTUAL_ENV"] = os.path.dirname(os.path.dirname(venv_py))
-        os.execve(venv_py, [venv_py, main_py], env)
+        os.execve(venv_py, [venv_py, main_py, *_main_cli_args()], env)
     
     def update_log(self, message):
         self.log_label.setText(message)
@@ -324,6 +395,9 @@ class LauncherWindow(QMainWindow):
             self.launch_btn.show()
             self.retry_btn.setEnabled(False)
             self.cancel_btn.setEnabled(False)
+            # A desktop app should open its product directly. The setup window
+            # remains visible only long enough to communicate readiness.
+            QTimer.singleShot(250, self._launch_dashboard)
         elif getattr(self.installer, 'ctrl', None) and self.installer.ctrl._cancel_requested:
             self.label.setText("Initialization Cancelled")
             self.log_label.setStyleSheet("color: #fab387;")
@@ -344,6 +418,16 @@ if __name__ == "__main__":
     log_diagnostic("launcher", "Bootstrap started")
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+    try:
+        from PyQt6.QtGui import QIcon
+        icon_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "assets", "icon", "realtime-subtitle-icon.png",
+        )
+        if os.path.isfile(icon_path):
+            app.setWindowIcon(QIcon(icon_path))
+    except Exception:
+        pass
     launcher = LauncherWindow()
     launcher.show()
     sys.exit(app.exec())

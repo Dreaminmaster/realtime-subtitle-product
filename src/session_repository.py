@@ -71,37 +71,46 @@ class SQLiteSessionRepository:
         self._timeout = timeout
         self._conn: sqlite3.Connection | None = None
         self._closed = False
-        self._lock = threading.Lock()
+        # sqlite3.Connection.close() must never race with a read or write on
+        # another thread.  RLock lets _ensure() initialize lazily while a
+        # repository operation already owns the lifecycle lock.
+        self._lock = threading.RLock()
 
     # ── lifecycle ────────────────────────────────────────────────
     def initialize(self) -> None:
-        if self._closed:
-            raise RepositoryError("Repository is closed")
-        if self._conn is not None:
-            return  # already initialized
+        with self._lock:
+            if self._closed:
+                raise RepositoryError("Repository is closed")
+            if self._conn is not None:
+                return  # already initialized
 
-        parent = os.path.dirname(self._db_path)
-        if parent and self._db_path != ":memory:" and not os.path.exists(parent):
-            os.makedirs(parent, exist_ok=True)
+            parent = os.path.dirname(self._db_path)
+            if parent and self._db_path != ":memory:" and not os.path.exists(parent):
+                os.makedirs(parent, exist_ok=True)
 
-        self._conn = sqlite3.connect(self._db_path, timeout=self._timeout, check_same_thread=False)
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA foreign_keys=ON")
-        self._conn.executescript(SCHEMA_SQL)
-        self._conn.commit()
+            self._conn = sqlite3.connect(
+                self._db_path,
+                timeout=self._timeout,
+                check_same_thread=False,
+            )
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA foreign_keys=ON")
+            self._conn.executescript(SCHEMA_SQL)
+            self._conn.commit()
 
     def close(self) -> None:
-        if self._conn is not None:
-            try:
-                self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            except Exception:
-                pass
-            try:
-                self._conn.close()
-            except Exception:
-                pass
-            self._conn = None
-        self._closed = True
+        with self._lock:
+            if self._conn is not None:
+                try:
+                    self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                except Exception:
+                    pass
+                try:
+                    self._conn.close()
+                except Exception:
+                    pass
+                self._conn = None
+            self._closed = True
 
     def _ensure(self) -> sqlite3.Connection:
         if self._closed:
@@ -145,22 +154,24 @@ class SQLiteSessionRepository:
             conn.commit()
 
     def get_session(self, session_id: str) -> dict | None:
-        conn = self._ensure()
-        cur = conn.execute(
-            "SELECT * FROM sessions WHERE session_id = ?", (session_id,)
-        )
-        row = cur.fetchone()
-        if row is None:
-            return None
-        return _row_to_dict(row, cur)
+        with self._lock:
+            conn = self._ensure()
+            cur = conn.execute(
+                "SELECT * FROM sessions WHERE session_id = ?", (session_id,)
+            )
+            row = cur.fetchone()
+            if row is None:
+                return None
+            return _row_to_dict(row, cur)
 
     def list_sessions(self, *, limit: int = 50) -> list[dict]:
-        conn = self._ensure()
-        cur = conn.execute(
-            "SELECT * FROM sessions ORDER BY updated_at DESC LIMIT ?", (limit,)
-        )
-        rows = cur.fetchall()
-        return [_row_to_dict(r, cur) for r in rows]
+        with self._lock:
+            conn = self._ensure()
+            cur = conn.execute(
+                "SELECT * FROM sessions ORDER BY updated_at DESC LIMIT ?", (limit,)
+            )
+            rows = cur.fetchall()
+            return [_row_to_dict(r, cur) for r in rows]
 
     # ── segments ─────────────────────────────────────────────────
     def upsert_original_segment(
@@ -171,6 +182,7 @@ class SQLiteSessionRepository:
         revision: int,
         status: str,
         original_text: str,
+        translation_status: str = "PENDING",
     ) -> None:
         now = time.time()
         with self._lock:
@@ -178,9 +190,18 @@ class SQLiteSessionRepository:
             conn.execute(
                 """INSERT OR REPLACE INTO segments
                    (session_id, segment_id, revision, status, original_text,
-                    created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (session_id, segment_id, revision, status, original_text, now, now),
+                    translation_status, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    session_id,
+                    segment_id,
+                    revision,
+                    status,
+                    original_text,
+                    translation_status,
+                    now,
+                    now,
+                ),
             )
             conn.execute(
                 "UPDATE sessions SET updated_at = ? WHERE session_id = ?",
@@ -255,17 +276,18 @@ class SQLiteSessionRepository:
         session_id: str,
         segment_id: str,
     ) -> dict | None:
-        conn = self._ensure()
-        cur = conn.execute(
-            """SELECT * FROM segments
-               WHERE session_id = ? AND segment_id = ?
-               ORDER BY revision DESC LIMIT 1""",
-            (session_id, segment_id),
-        )
-        row = cur.fetchone()
-        if row is None:
-            return None
-        return _row_to_dict(row, cur)
+        with self._lock:
+            conn = self._ensure()
+            cur = conn.execute(
+                """SELECT * FROM segments
+                   WHERE session_id = ? AND segment_id = ?
+                   ORDER BY revision DESC LIMIT 1""",
+                (session_id, segment_id),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return None
+            return _row_to_dict(row, cur)
 
     def list_segments(
         self,
@@ -273,16 +295,17 @@ class SQLiteSessionRepository:
         session_id: str,
         limit: int = 200,
     ) -> list[dict]:
-        conn = self._ensure()
-        cur = conn.execute(
-            """SELECT * FROM segments
-               WHERE session_id = ?
-               ORDER BY updated_at DESC, revision DESC
-               LIMIT ?""",
-            (session_id, limit),
-        )
-        rows = cur.fetchall()
-        return [_row_to_dict(r, cur) for r in rows]
+        with self._lock:
+            conn = self._ensure()
+            cur = conn.execute(
+                """SELECT * FROM segments
+                   WHERE session_id = ?
+                   ORDER BY updated_at DESC, revision DESC
+                   LIMIT ?""",
+                (session_id, limit),
+            )
+            rows = cur.fetchall()
+            return [_row_to_dict(r, cur) for r in rows]
 
 
 def _row_to_dict(row: tuple, cursor: sqlite3.Cursor) -> dict:

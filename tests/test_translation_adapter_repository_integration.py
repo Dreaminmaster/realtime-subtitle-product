@@ -2,6 +2,7 @@
 import pytest
 import time
 import os
+import threading
 from src.translation_adapter import TranslationAdapter
 from src.translation_scheduler import TranslationScheduler, TranslationStatus, TranslationResult
 from src.transcript_event import TranscriptPhase
@@ -50,6 +51,20 @@ class TestFinalWritesOriginal:
         seg = repo.get_latest_segment(session_id="test-session", segment_id=a._chunk_to_segment[1])
         assert seg is not None
         assert seg["original_text"] == "hello world"
+
+    def test_translation_off_persists_without_scheduling(self):
+        s, a, repo, results = _setup(max_workers=0)
+        a.on_final_text("original only", chunk_id=2, translate=False)
+
+        seg = repo.get_latest_segment(
+            session_id="test-session",
+            segment_id=a._chunk_to_segment[2],
+        )
+        assert seg is not None
+        assert seg["original_text"] == "original only"
+        assert seg["translation_status"] == "NOT_REQUESTED"
+        assert s.pending_count() == 0
+        assert results == []
 
 
 # ── 3. translation result writes to repository ────────────────────
@@ -216,3 +231,37 @@ class TestSchedulerOnRepoOn:
         seg = repo.get_latest_segment(session_id="s1", segment_id=a._chunk_to_segment[1])
         assert seg is not None
         repo.close()
+        s.shutdown(wait=True)
+
+
+class TestConcurrentRepositoryClose:
+    def test_late_translation_after_close_is_rejected_without_crash(self):
+        translation_started = threading.Event()
+        release_translation = threading.Event()
+
+        def delayed_translate(text, lang=None):
+            translation_started.set()
+            assert release_translation.wait(timeout=2.0)
+            return f"translated: {text}"
+
+        repo = SQLiteSessionRepository(":memory:")
+        repo.initialize()
+        updates = []
+        scheduler = TranslationScheduler(translator=delayed_translate, max_workers=1)
+        adapter = TranslationAdapter(
+            scheduler=scheduler,
+            on_update_text=lambda *args: updates.append(args),
+            repository=repo,
+            repository_enabled=True,
+        )
+        adapter.start_session("s1")
+        adapter.on_final_text("hello", chunk_id=1)
+        assert translation_started.wait(timeout=2.0)
+
+        # This used to race sqlite3.Connection.close() against apply_translation
+        # and reliably SIGSEGV on macOS.
+        repo.close()
+        release_translation.set()
+        scheduler.shutdown(wait=True)
+
+        assert updates == []

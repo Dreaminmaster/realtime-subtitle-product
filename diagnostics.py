@@ -41,7 +41,16 @@ class Logger:
         )
         
         # Startup log
-        self.info(f"=== App Started v1.0 ===")
+        try:
+            from version import BUILD_VERSION
+            version_label = (
+                BUILD_VERSION
+                if str(BUILD_VERSION).startswith("v")
+                else f"v{BUILD_VERSION}"
+            )
+        except ImportError:
+            version_label = "dev"
+        self.info(f"=== App Started {version_label} ===")
         self.info(f"Platform: {platform.platform()}")
         self.info(f"Python: {sys.version}")
     

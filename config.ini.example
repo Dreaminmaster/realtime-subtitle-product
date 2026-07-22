@@ -1,10 +1,13 @@
 [api]
-base_url = http://localhost:11434/v1/
-api_key = sk-talkai-bd76c0f60c6f4e50bcfa39fc1dce0efd
+# Leave blank until a translation backend is configured in the app.
+base_url =
+api_key =
 
 [translation]
-model = qwen2.5:7b
+mode = off
+model = gpt-4o-mini
 target_lang = Chinese
+timeout = 12
 threads = 4
 
 [display]
@@ -14,10 +17,10 @@ window_height = 120
 
 [transcription]
 backend = whisper
-whisper_model = base
+whisper_model = tiny
 funasr_model = iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch
-device = auto
-compute_type = float16
+device = cpu
+compute_type = int8
 source_language = auto
 transcription_workers = 4
 
@@ -34,3 +37,7 @@ streaming_step_size = 0.2
 update_interval = 0.8
 streaming_overlap = 0.3
 
+[v2.4]
+# Keep architecture migrations opt-in until enabled by a stable release.
+use_translation_scheduler = false
+use_sqlite_session_repository = false

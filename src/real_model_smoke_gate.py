@@ -50,7 +50,10 @@ def run_optional_real_model_smoke(config, transcriber_factory=None, translator=N
     try:
         if transcriber_factory is None:
             from transcriber import Transcriber
-            t = Transcriber(backend=config.backend)
+            t = Transcriber(
+                backend=config.backend,
+                model_size=config.model_name or "base",
+            )
         else:
             t = transcriber_factory(config.backend)
     except Exception as e:
@@ -68,16 +71,29 @@ def run_optional_real_model_smoke(config, transcriber_factory=None, translator=N
     try:
         from src.audio_file_smoke import iter_wav_chunks, inspect_wav_file
         info = inspect_wav_file(wav_path)
-        chunks = iter_wav_chunks(wav_path, chunk_duration_seconds=0.25)
-        all_text = []
-        for c in chunks:
-            audio_data = c.chunk if hasattr(c, 'chunk') else str(c)
-            raw = t.transcribe(audio_data, sample_rate=info.sample_rate)
-            if isinstance(raw, str):
-                all_text.append(raw)
-            elif isinstance(raw, dict):
-                all_text.append(raw.get("text", ""))
-        original = " ".join(all_text)
+        chunks = list(iter_wav_chunks(wav_path, chunk_duration_seconds=0.25))
+        if not chunks:
+            raise ValueError("WAV fixture contains no audio chunks")
+
+        # The production pipeline transcribes an accumulated utterance, not
+        # isolated 250 ms frames.  Joining the fixture prevents real Whisper
+        # from returning empty text for every undersized chunk.
+        import numpy as np
+        if info.sample_width != 2:
+            raise ValueError(f"Unsupported WAV sample width: {info.sample_width}")
+        audio_data = np.frombuffer(
+            b"".join(c.frames for c in chunks),
+            dtype="<i2",
+        ).astype(np.float32) / 32768.0
+        if info.channels > 1:
+            audio_data = audio_data.reshape(-1, info.channels).mean(axis=1)
+        raw = t.transcribe(audio_data)
+        if isinstance(raw, str):
+            original = raw
+        elif isinstance(raw, dict):
+            original = raw.get("text", "")
+        else:
+            original = ""
     except Exception as e:
         return RealModelSmokeResult(ok=False, status="error",
             reason=f"Transcriber error: {e}", backend=config.backend)
@@ -126,6 +142,7 @@ def run_optional_real_model_smoke(config, transcriber_factory=None, translator=N
         ok=True, status="passed",
         reason="Real model smoke completed.",
         backend=config.backend,
+        model_name=config.model_name,
         original_text=snap.original_text,
         translated_text=snap.translated_text,
         bilingual_text=snap.bilingual_text,

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Lifecycle simulation test for v2.3.0-rc1. Verifies state machine, stop idempotency, and no AttributeErrors."""
+"""Lifecycle simulation test for the current release."""
 import sys, os, threading, time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-print("=== v2.3.0-rc1 Lifecycle Test ===")
+print("=== Realtime Subtitle Lifecycle Test ===")
 
 # Test 1: Pipeline init
 print("\n[1] Pipeline __init__ completeness...")

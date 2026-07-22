@@ -1,30 +1,44 @@
 import configparser
 import os
+import shutil
 
 class Config:
     """Centralized configuration loaded from config.ini"""
     
     def __init__(self, config_path=None):
         if config_path is None:
-            # Look for config.ini in the same directory as this script
-            config_path = os.path.join(os.path.dirname(__file__), "config.ini")
+            from app_paths import get_config_path
+            user_config = get_config_path()
+            legacy_config = os.path.join(os.path.dirname(__file__), "config.ini")
+            if not user_config.exists() and os.path.exists(legacy_config):
+                # One-time migration from older builds that wrote inside the
+                # source/App bundle. Failure falls back to the legacy path.
+                try:
+                    user_config.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(legacy_config, user_config)
+                    os.chmod(user_config, 0o600)
+                except OSError:
+                    user_config = legacy_config
+            config_path = user_config
+
+        self.config_path = os.fspath(config_path)
         
         self.config = configparser.ConfigParser()
         
-        if os.path.exists(config_path):
+        if os.path.exists(self.config_path):
             try:
-                self.config.read(config_path)
-                print(f"[Config] Loaded from: {config_path}")
+                self.config.read(self.config_path)
+                print(f"[Config] Loaded from: {self.config_path}")
             except configparser.Error as e:
                 print(f"[Config] WARNING: failed to parse {config_path}: {e}")
                 print(f"[Config] Using defaults instead. The file will be overwritten on next save.")
                 # Backup corrupt file before replacing
                 import time
-                backup = f"{config_path}.corrupt-{int(time.time())}"
+                backup = f"{self.config_path}.corrupt-{int(time.time())}"
                 try:
-                    os.rename(config_path, backup)
+                    os.rename(self.config_path, backup)
                 except OSError:
-                    print(f"[Config] Cannot backup corrupted config at {config_path}")
+                    print(f"[Config] Cannot backup corrupted config at {self.config_path}")
                 self.config = configparser.ConfigParser()  # fresh empty config
         
         # API settings (env vars take precedence)
@@ -32,14 +46,25 @@ class Config:
         self.api_key = os.getenv("OPENAI_API_KEY") or self._get("api", "api_key") or None
         
         # Translation settings
-        self.model = self._get("translation", "model", "gpt-3.5-turbo")
+        self.model = self._get("translation", "model", "gpt-4o-mini")
         self.target_lang = self._get("translation", "target_lang", "Chinese")
         self.translation_threads = self._getint("translation", "threads", 4)
-        # Default to 'off' if no valid API key configured — don't call OpenAI with dummies
-        if not self.api_key or self.api_key in ("dummy-key-for-local", "dummy-key", "not-needed", ""):
+        configured_mode = self._get("translation", "mode", "").lower()
+        if not configured_mode:
+            # Backward compatibility: older config files had no explicit mode
+            # and treated a configured API key as online translation.
+            configured_mode = "online" if self.api_key else "off"
+        if configured_mode not in ("off", "fast", "online", "local", "custom"):
+            configured_mode = "off"
+        # Only the hosted online mode strictly requires a real key. Local and
+        # custom OpenAI-compatible endpoints often accept a blank/dummy key.
+        if configured_mode == "online" and (
+            not self.api_key
+            or self.api_key in ("dummy-key-for-local", "dummy-key", "not-needed", "")
+        ):
             self.translation_mode = "off"
         else:
-            self.translation_mode = self._get("translation", "mode", "online")
+            self.translation_mode = configured_mode
         
         # Transcription settings
         # Translation timeout (seconds)
@@ -55,7 +80,7 @@ class Config:
         self.funasr_model = self._get("transcription", "funasr_model", "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch")
         self.whisper_device = self._get("transcription", "device", "cpu")
         self.whisper_compute_type = self._get("transcription", "compute_type", "int8")
-        self.source_language = self._get("transcription", "source_language", "en")
+        self.source_language = self._get("transcription", "source_language", "auto")
         if self.source_language == "auto":
             self.source_language = None  # Whisper uses None for auto-detect
         else:

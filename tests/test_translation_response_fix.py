@@ -1,11 +1,11 @@
 """Test NoneType not subscriptable fix in OnlineAPITranslator."""
-import pytest, sys
+import pytest
 from unittest.mock import MagicMock
+from unittest.mock import patch
+from translation_engine import OnlineAPITranslator
 
 @pytest.fixture
 def translator():
-    sys.path.insert(0, '.')
-    from translation_engine import OnlineAPITranslator
     t = OnlineAPITranslator(target_lang="Chinese", base_url="http://test.local/v1",
         api_key="fake-key", model="test-model", timeout=5.0)
     return t
@@ -80,3 +80,28 @@ class TestNoAPIKeyLeak:
         assert "fake-key" not in result
         assert "test.local" not in result
         assert "Translation Failed" in result
+
+
+class TestTLSConfiguration:
+    def test_remote_endpoint_keeps_certificate_verification(self):
+        translator = OnlineAPITranslator(
+            base_url="https://api.example.com/v1", api_key="test-key"
+        )
+        with patch("httpx.Client") as http_client, patch("openai.OpenAI"):
+            translator._ensure_client()
+        assert "verify" not in http_client.call_args.kwargs
+        assert "trust_env" not in http_client.call_args.kwargs
+
+    def test_local_endpoint_bypasses_proxy_only_for_localhost(self):
+        translator = OnlineAPITranslator(
+            base_url="http://127.0.0.1:1234/v1", api_key="not-needed"
+        )
+        with patch("httpx.Client") as http_client, patch("openai.OpenAI"):
+            translator._ensure_client()
+        assert http_client.call_args.kwargs["verify"] is False
+        assert http_client.call_args.kwargs["trust_env"] is False
+
+    def test_localhost_in_remote_path_is_not_treated_as_local(self):
+        assert OnlineAPITranslator._is_local_endpoint(
+            "https://api.example.com/localhost/v1"
+        ) is False

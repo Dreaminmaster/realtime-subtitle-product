@@ -13,6 +13,7 @@ import re
 import json
 import urllib.request
 import urllib.error
+from urllib.parse import urlparse
 
 
 class BaseTranslator:
@@ -98,10 +99,7 @@ class OnlineAPITranslator(BaseTranslator):
             import httpx
             
             # Detect local endpoints and bypass system proxy
-            is_local = (self.base_url and any(
-                host in self.base_url
-                for host in ("localhost", "127.0.0.1", "::1", "0.0.0.0")
-            ))
+            is_local = self._is_local_endpoint(self.base_url)
             
             # Bounded timeouts driven by config.translation_timeout
             t = self.timeout or 12.0
@@ -110,7 +108,9 @@ class OnlineAPITranslator(BaseTranslator):
             if is_local:
                 http_client = httpx.Client(verify=False, timeout=timeout, trust_env=False)
             else:
-                http_client = httpx.Client(verify=False, timeout=timeout)
+                # Remote translation text and API credentials must always use
+                # normal certificate verification.
+                http_client = httpx.Client(timeout=timeout)
             
             self._client = OpenAI(
                 api_key=self.api_key or os.getenv("OPENAI_API_KEY", "dummy-key"),
@@ -119,6 +119,16 @@ class OnlineAPITranslator(BaseTranslator):
                 max_retries=0  # No SDK retry — we control timeout at httpx level
             )
         return self._client
+
+    @staticmethod
+    def _is_local_endpoint(base_url: str | None) -> bool:
+        if not base_url:
+            return False
+        try:
+            host = urlparse(base_url).hostname
+        except ValueError:
+            return False
+        return host in ("localhost", "127.0.0.1", "::1", "0.0.0.0")
     
     def check_health(self) -> bool:
         try:
@@ -131,8 +141,6 @@ class OnlineAPITranslator(BaseTranslator):
     def translate(self, text: str) -> str:
         if not text or not text.strip():
             return ""
-        
-        client = self._ensure_client()
         
         system_prompt = (
             f"You are a professional real-time translator. "
@@ -148,6 +156,10 @@ class OnlineAPITranslator(BaseTranslator):
             )
         
         try:
+            # Client construction can fail too (bad URL, missing dependency,
+            # proxy/TLS setup).  Keep it inside the same user-safe boundary as
+            # the network request.
+            client = self._ensure_client()
             response = client.chat.completions.create(
                 model=self.model,
                 messages=[
@@ -173,11 +185,15 @@ class OnlineAPITranslator(BaseTranslator):
             self.previous_translation = result
             return result
             
-        except BaseException as e:
+        except Exception as e:
             import logging
             log = logging.getLogger("RealtimeSubtitle")
             err_str = str(e)
-            log.error(f"Translation error: {err_str}")
+            safe_err = err_str
+            for sensitive in (self.api_key, self.base_url):
+                if sensitive:
+                    safe_err = safe_err.replace(str(sensitive), "[redacted]")
+            log.error("Translation error (%s): %s", type(e).__name__, safe_err)
             
             # Map to user-friendly messages
             if "Connection refused" in err_str or "Connection error" in err_str:
@@ -197,7 +213,7 @@ class OnlineAPITranslator(BaseTranslator):
             elif "429" in err_str:
                 return "[Translation Failed: rate limited — wait and retry]"
             else:
-                return f"[Translation Failed: {err_str[:80]}]"
+                return f"[Translation Failed: {type(e).__name__}]"
 
 
 class LocalLLMTranslator(OnlineAPITranslator):
@@ -274,8 +290,8 @@ class TranslationEngine:
         elif mode == "local":
             self._translator = LocalLLMTranslator(
                 target_lang=self.target_lang,
-                base_url=kwargs.get("base_url", "http://localhost:1234/v1"),
-                model=kwargs.get("model", "local-model"),
+                base_url=kwargs.get("base_url") or "http://localhost:1234/v1",
+                model=kwargs.get("model") or "local-model",
                 timeout=kwargs.get("timeout", 12.0)
             )
         elif mode == "custom":
@@ -292,7 +308,9 @@ class TranslationEngine:
         print(f"[TranslationEngine] Switched to '{mode}' mode ({self._translator.name})")
         return self._translator
     
-    def translate(self, text: str) -> str:
+    def translate(self, text: str, target_lang: str | None = None) -> str:
+        # ``target_lang`` is accepted for TranslationScheduler compatibility.
+        # The selected translator already owns the configured target language.
         if self._translator is None:
             self.set_mode("online")
         if self._current_mode == "off":

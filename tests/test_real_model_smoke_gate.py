@@ -9,7 +9,9 @@ from src.real_model_smoke_gate import (
 def _faux():
     class FT:
         def __init__(s, backend=None): pass
-        def transcribe(s, audio, sample_rate=None): return 'hello from fake model'
+        # Match the real Transcriber API so the smoke gate cannot accidentally
+        # rely on fake-only keyword arguments.
+        def transcribe(s, audio): return 'hello from fake model'
     return lambda b: FT(b)
 
 class TestDefaultDisabled:
@@ -19,6 +21,9 @@ class TestDefaultDisabled:
 class TestEnvFlag:
     def test_on(self): c=real_model_smoke_config_from_env(env={'REALTIME_SUBTITLE_ENABLE_REAL_MODEL_SMOKE':'1'}); assert c.enabled
     def test_backend(self): c=real_model_smoke_config_from_env(env={'REALTIME_SUBTITLE_REAL_MODEL_BACKEND':'mlx'}); assert c.backend=='mlx'
+    def test_model_name(self):
+        c=real_model_smoke_config_from_env(env={'REALTIME_SUBTITLE_REAL_MODEL_NAME':'/tmp/local-model'})
+        assert c.model_name == '/tmp/local-model'
 
 class TestDisabledNoSideEffects:
     def test_no(self): r=run_optional_real_model_smoke(RealModelSmokeConfig(enabled=False)); assert r.status=='not_run'

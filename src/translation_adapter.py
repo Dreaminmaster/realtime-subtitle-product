@@ -66,7 +66,13 @@ class TranslationAdapter:
         self.scheduler.shutdown(wait=wait)
 
     # ── called from pipeline ───────────────────────────────────
-    def on_final_text(self, text: str, chunk_id: int) -> None:
+    def on_final_text(self, text: str, chunk_id: int, *, translate: bool = True) -> None:
+        """Persist a FINAL transcript and optionally schedule translation.
+
+        ``translate=False`` is the normal path when the user selects the
+        no-translation mode.  The original still belongs in session history,
+        but no empty no-op translation job should be created.
+        """
         session_id = self.scheduler._session_id
         if session_id is None:
             return
@@ -91,12 +97,17 @@ class TranslationAdapter:
                     revision=revision,
                     status="FINAL",
                     original_text=text,
+                    translation_status="PENDING" if translate else "NOT_REQUESTED",
                 )
             except Exception:
                 import logging
                 log = logging.getLogger("RealtimeSubtitle")
                 log.exception("Repository write error (original segment)")
                 # Do NOT block — continue to scheduler + overlay
+
+        if not translate:
+            self._revision_by_segment[segment_id] = revision + 1
+            return
 
         event = TranscriptEvent(
             session_id=session_id,

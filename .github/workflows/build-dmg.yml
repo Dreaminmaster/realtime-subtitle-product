@@ -1,465 +1,150 @@
-name: Build DMG
+name: Build and publish macOS DMGs
+
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version, for example 1.0.0"
+        description: "Release version, for example 2.4.0"
         required: true
-        default: "1.0.0"
+        default: "2.4.0"
+      publish:
+        description: "Publish or update the GitHub release"
+        required: true
+        type: boolean
+        default: true
+  push:
+    tags:
+      - "v*"
 
 permissions:
   contents: write
 
 jobs:
-  build:
-    runs-on: macos-latest
+  metadata:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - id: release
+        name: Resolve release metadata
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            RAW_VERSION="${GITHUB_REF_NAME}"
+          else
+            RAW_VERSION="${{ inputs.version }}"
+          fi
+          VERSION="${RAW_VERSION#v}"
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid semantic version: ${VERSION}" >&2
+            exit 2
+          fi
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          if [[ "${VERSION}" == *-* ]]; then
+            echo "prerelease=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "prerelease=false" >> "${GITHUB_OUTPUT}"
+          fi
 
-      - name: Show environment
+  quality:
+    needs: metadata
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install test dependencies
+        run: python3 -m pip install --quiet -r requirements-core.txt pytest
+      - name: Static checks
+        run: |
+          bash -n build_dmg.sh
+          python3 -m py_compile main.py dashboard.py product_navigation.py launcher.py
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python3 -m pytest -q
+
+  build:
+    needs: [metadata, quality]
+    name: Build ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x86_64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show build host
         run: |
           sw_vers
-          python3 --version
-          pwd
-          ls -la
-
-      - name: Make build script executable
-        run: chmod +x build_dmg.sh
-
-      - name: Hard source format checks (FAIL-FAST before build)
+          uname -m
+      - name: Build and verify DMG
+        run: bash build_dmg.sh "${{ needs.metadata.outputs.version }}" "${{ matrix.arch }}"
+      - name: Verify target identity
+        shell: bash
         run: |
-          echo "=== Source format checks (BLOCKING) ==="
-          ERRORS=0
-          
-          # --- Minimum line counts ---
-          declare -A MIN_LINES=(
-            ["main.py"]=100
-            ["dashboard.py"]=100
-            ["build_dmg.sh"]=100
-            ["requirements-core.txt"]=8
-            ["requirements.txt"]=8
-          )
-          for f in "${!MIN_LINES[@]}"; do
-            L=$(wc -l < "$f")
-            MIN=${MIN_LINES[$f]}
-            if [ "$L" -lt "$MIN" ]; then
-              echo "  ❌ $f: expected ≥$MIN lines, got $L — FILE MAY BE COLLAPSED"
-              echo "     Raw preview: $(head -c 200 "$f")"
-              ERRORS=1
-            else
-              echo "  ✅ $f: $L lines"
-            fi
-          done
-          
-          # --- py_compile ---
-          python3 -m py_compile main.py && echo "  ✅ main.py syntax" || { echo "  ❌ main.py syntax"; ERRORS=1; }
-          python3 -m py_compile dashboard.py && echo "  ✅ dashboard.py syntax" || { echo "  ❌ dashboard.py syntax"; ERRORS=1; }
-          
-          # --- bash -n ---
-          bash -n build_dmg.sh && echo "  ✅ build_dmg.sh syntax" || { echo "  ❌ build_dmg.sh syntax"; ERRORS=1; }
-          
-          # --- requirements format: one package per line, no collapsing ---
-          python3 - <<'PYEOF'
-          import sys
-          from pathlib import Path
-          errs = 0
-          for fname in ["requirements-core.txt", "requirements.txt"]:
-              text = Path(fname).read_text()
-              lines = text.splitlines()
-              if "\n" not in text or len(lines) < 5:
-                  print(f"  ❌ {fname}: appears collapsed ({len(lines)} lines)")
-                  errs += 1
-                  continue
-              for i, line in enumerate(lines, 1):
-                  line = line.strip()
-                  if not line or line.startswith("#"):
-                      continue
-                  pkg = line.split(";")[0].strip()
-                  if " " in pkg:
-                      print(f"  ❌ {fname} line {i}: multiple packages collapsed: '{pkg}'")
-                      errs += 1
-              print(f"  ✅ {fname}: {len(lines)} lines, format OK")
-          if errs:
-              sys.exit(1)
-          PYEOF
-          
-          # --- workflow YAML check ---
-          WF=".github/workflows/build-dmg.yml"
-          L=$(wc -l < "$WF")
-          if [ "$L" -lt 30 ]; then
-            echo "  ❌ $WF: expected ≥30 lines, got $L — FILE MAY BE COLLAPSED"; ERRORS=1
-          else
-            echo "  ✅ $WF: $L lines"
-          fi
-          
-          if [ "$ERRORS" -ne 0 ]; then
-            echo ""
-            echo "=== FORMAT CHECKS FAILED — BUILD ABORTED ==="
-            exit 1
-          fi
-          echo "=== Format checks all passed ==="
-
-      - name: Build DMG
-        run: |
-          # Inject build identity into version.py BEFORE build
-          RAW_VERSION="${{ github.event.inputs.version }}"
-          VERSION_NO_V="${RAW_VERSION#v}"
-          BUILD_VERSION="v${VERSION_NO_V}"
-          BUILD_COMMIT="$(git rev-parse HEAD | cut -c1-10)"
-          BUILD_TS="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-          cat > version.py <<EOF
-          BUILD_VERSION = "${BUILD_VERSION}"
-          BUILD_COMMIT = "${BUILD_COMMIT}"
-          BUILD_TIME = "${BUILD_TS}"
-          EOF
-          bash build_dmg.sh "${{ github.event.inputs.version }}"
-
-      - name: List generated files
-        run: |
-          find . -name "*.dmg" -print
-          ls -la
-          ls -la dist || true
-          ls -la dist/*.dmg 2>/dev/null || true
-          find dist -maxdepth 1 -type f 2>/dev/null || true
-
-      - name: Verify app bundle (no pre-built venv, no builder paths)
-        run: |
-          echo "=== Verifying .app bundle ==="
-          APP="build/RealtimeSubtitle.app"
-          
-          # Launcher
-          if [ ! -f "${APP}/Contents/MacOS/realtime-subtitle" ]; then
-            echo "❌ Launcher MISSING"; exit 1
-          fi
-          echo "  ✅ Launcher"
-
-          # requirements.txt
-          if [ ! -f "${APP}/Contents/Resources/requirements.txt" ]; then
-            echo "❌ requirements.txt MISSING"; exit 1
-          fi
-          echo "  ✅ requirements.txt ($(wc -l < ${APP}/Contents/Resources/requirements.txt) lines)"
-
-          # main.py
-          if [ ! -f "${APP}/Contents/Resources/main.py" ]; then
-            echo "❌ main.py MISSING"; exit 1
-          fi
-          echo "  ✅ main.py"
-
-          # ---- Source code fingerprint: ensure bundle matches committed source ----
-          BUNDLE_MAIN="${APP}/Contents/Resources/main.py"
-          if ! grep -q "utterance_id\|STATE_IDLE\|Utterance.*START\|Utterance.*END" "$BUNDLE_MAIN" 2>/dev/null; then
-            echo "❌ Bundle main.py appears to be OLD version (missing utterance state machine)"
-            echo "   Bundle may not match the committed source. Aborting."
-            exit 1
-          fi
-          echo "  ✅ source fingerprint: utterance state machine present"
-
-          # Build identity
-          echo "  🔏 Build identity:"
-          echo "     git commit: $(git rev-parse HEAD | cut -c1-10)"
-          echo "     git tag: $(git describe --tags --always 2>/dev/null || echo 'none')"
-          echo "     build time: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-
-          # Portable Python
-          PORTABLE_PY="${APP}/Contents/Resources/python/bin/python3"
-          if [ ! -x "$PORTABLE_PY" ]; then
-            echo "❌ Portable Python MISSING at $PORTABLE_PY"; exit 1
-          fi
-          # Purge __pycache__ BEFORE scanning (pip install embeds runner paths)
-          find "${APP}/Contents" -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
-          find "${APP}/Contents" -name '*.pyc' -delete 2>/dev/null || true
-          echo "  ✅ purged __pycache__ from bundle"
-
-          # Verify python
-          "$PORTABLE_PY" --version &&           # Purge __pycache__ AND dist-info (pip embeds runner paths)
-          find "${APP}/Contents" -type d \( -name '__pycache__' -o -name '*.dist-info' \) -exec rm -rf {} + 2>/dev/null || true
-          find "${APP}/Contents" -name '*.pyc' -delete 2>/dev/null || true
-          echo "  ✅ cleaned bundled Python metadata"
-          
-          "$PORTABLE_PY" --version && echo "  ✅ portable python --version" || { echo "❌ Portable Python broken"; exit 1; }
-          "$PORTABLE_PY" -c "import PyQt6" && echo "  ✅ bootstrap PyQt6 present" || { echo "❌ Bootstrap PyQt6 missing"; exit 1; }
-
-          # requirements-core.txt must exist
-          REQ_CORE="${APP}/Contents/Resources/requirements-core.txt"
-          if [ ! -f "$REQ_CORE" ]; then
-            echo "❌ requirements-core.txt MISSING"; exit 1
-          fi
-          echo "  ✅ requirements-core.txt ($(wc -l < $REQ_CORE) lines)"
-
-          # NO pre-built venv — must FAIL if present
-          if [ -d "${APP}/Contents/Resources/venv" ]; then
-            echo "❌ Pre-built venv FOUND — would break on user machine"; exit 1
-          fi
-          echo "  ✅ no pre-built venv"
-
-          # NO builder machine paths in our code or Resource/*.py
-          # NOTE: portable Python's own _sysconfigdata.py may contain /Users/runner
-          # because it's the Python-build-standalone prefix. We exclude python/ dir.
-          # Launcher overrides PYTHONHOME at runtime so this never affects users.
-          if grep -RIl "/Users/runner" "${APP}/Contents" \
-               --exclude='build-dmg.yml' --exclude='build_dmg.sh' \
-               --exclude='*.md' --exclude='*.pyc' \
-               --exclude-dir='__pycache__' --exclude-dir='python' \
-               2>/dev/null | grep -q .; then
-            echo "❌ Builder path /Users/runner found in our app code"
-            grep -RIl "/Users/runner" "${APP}/Contents" --exclude-dir='python' --exclude-dir='__pycache__' 2>/dev/null
-            exit 1
-          fi
-          echo "  ✅ no builder paths in app code"
-
-          # Wheelhouse exists
-          WHEELHOUSE="${APP}/Contents/Resources/wheelhouse"
-          if [ ! -d "$WHEELHOUSE" ]; then
-            echo "❌ wheelhouse MISSING"; exit 1
-          fi
-          WHL_CNT=$(find "$WHEELHOUSE" -name '*.whl' | wc -l | tr -d ' ')
-          echo "  ✅ wheelhouse ($WHL_CNT wheels)"
-
-          # Bundled model exists
-          BUNDLED_MODEL="${APP}/Contents/Resources/models/whisper/tiny"
-          if [ ! -d "$BUNDLED_MODEL" ]; then
-            echo "❌ Bundled model MISSING"; exit 1
-          fi
-          MODEL_OK=true
-          for f in config.json model.bin tokenizer.json; do
-            [ -f "${BUNDLED_MODEL}/${f}" ] || MODEL_OK=false
-          done
-          if ! $MODEL_OK; then
-            echo "❌ Bundled model INCOMPLETE"; exit 1
-          fi
-          MODEL_SIZE=$(du -sh "${BUNDLED_MODEL}" 2>/dev/null | cut -f1)
-          echo "  ✅ bundled model tiny (${MODEL_SIZE})"
-
-          # ===================================================================
-          # rc15 EVIDENCE: Standalone --bootstrap-test (ZERO network simulation)
-          # ===================================================================
-          
-          # ---- [EVIDENCE 1] Bundled Model File Listing ----
-          echo ""
-          echo "=== [EVIDENCE 1] Bundled model file listing ==="
-          ls -la "${BUNDLED_MODEL}" 2>&1 | while IFS= read -r line; do echo "    $line"; done
-          for f in config.json model.bin tokenizer.json; do
-            SZ=$(wc -c < "${BUNDLED_MODEL}/${f}" | tr -d ' ')
-            echo "  ✅ $f: $SZ bytes"
-          done
-          [ -f "${BUNDLED_MODEL}/vocabulary.json" ] && \
-            echo "  ✅ vocabulary.json: $(wc -c < ${BUNDLED_MODEL}/vocabulary.json | tr -d ' ') bytes" || \
-            echo "  ⚠️  vocabulary.json: not present (optional, does not block bootstrap)"
-          echo "=== Model listing complete ==="
-          
-          # ---- Simulated first-launch: install core deps from wheelhouse (offline) ----
-          echo ""
-          echo "--- Simulating first-launch dependency install (wheelhouse offline) ---"
-          TMP_HOME=$(mktemp -d)
-          export HOME="$TMP_HOME"
-          USER_DATA="$HOME/Library/Application Support/RealtimeSubtitle"
-          mkdir -p "$USER_DATA"
-          
-          echo "  Creating test venv..."
-          "$PORTABLE_PY" -m venv "$USER_DATA/venv" 2>&1 | tail -1
-          
-          TEST_PY="$USER_DATA/venv/bin/python3"
-          echo "  Upgrading pip..."
-          "$TEST_PY" -m pip install --no-cache-dir --quiet --upgrade pip 2>&1 | tail -1
-          
-          echo "  Installing requirements-core.txt from wheelhouse (offline)..."
-          "$TEST_PY" -m pip install \
-              --no-index \
-              --find-links "$WHEELHOUSE" \
-              --disable-pip-version-check \
-              --no-input \
-              -r "$REQ_CORE" 2>&1 | tail -5
-          PIP_EXIT=$?
-          
-          echo "  Testing imports..."
-          "$TEST_PY" -c "import PyQt6, numpy, sounddevice, faster_whisper; print('  ✅ core imports OK')" 2>&1
-          "$TEST_PY" -c "from model_manager import model_manager; assert callable(model_manager.get_model_path); print('  ✅ get_model_path exists')" 2>&1
-          IMPORT_EXIT=$?
-          
-          # Verify dependency source is wheelhouse
-          echo "  dependency_source=wheelhouse"
-          echo "  network_required=false"
-
-          # ---- [EVIDENCE 2-3] Direct prepare-default-model + verify-model ----
-          echo ""
-          echo "=== [EVIDENCE 2] prepare-default-model direct ==="
-          RESOURCES="${APP}/Contents/Resources"
-          "$TEST_PY" "${RESOURCES}/setup_runtime.py" prepare-default-model tiny \
-            --resources-dir "${RESOURCES}" --user-data-dir "$USER_DATA" 2>&1
-          PREP_EXIT=$?
-          if [ $PREP_EXIT -ne 0 ]; then echo "❌ prepare-default-model FAILED"; exit 1; fi
-          echo "  ✅ prepare-default-model passed"
-
-          echo ""
-          echo "=== [EVIDENCE 3] verify-model direct (HF_HUB_OFFLINE=1) ==="
-          HF_HUB_OFFLINE=1 "$TEST_PY" "${RESOURCES}/setup_runtime.py" verify-model tiny \
-            --resources-dir "${RESOURCES}" --user-data-dir "$USER_DATA" 2>&1
-          VR_EXIT=$?
-          if [ $VR_EXIT -ne 0 ]; then echo "❌ verify-model FAILED"; exit 1; fi
-          echo "  ✅ verify-model passed"
-
-          # ---- [EVIDENCE 4-5] Full --bootstrap-test with metadata ----
-          echo ""
-          echo "=== [EVIDENCE 4] --bootstrap-test (clean HOME) ==="
-          BT_EXIT=0
-          "$TEST_PY" "${RESOURCES}/launcher.py" --bootstrap-test tiny > "$TMP_HOME/bootstrap_stdout.jsonl" 2>&1 || BT_EXIT=$?
-          
-          echo "--- Bootstrap stdout ---"
-          cat "$TMP_HOME/bootstrap_stdout.jsonl"
-          
-          echo ""
-          echo "=== [EVIDENCE 5] Metadata validation ==="
-          grep -q '"status"[[:space:]]*:[[:space:]]*"READY"' "$TMP_HOME/bootstrap_stdout.jsonl" && echo "  ✅ READY" || { echo "  ❌ NOT READY"; exit 1; }
-          grep -q '"dependency_source"' "$TMP_HOME/bootstrap_stdout.jsonl" && echo "  ✅ dependency_source present" || echo "  ⚠️ missing dependency_source"
-          grep -q '"network_required"[[:space:]]*:[[:space:]]*false' "$TMP_HOME/bootstrap_stdout.jsonl" && echo "  ✅ network_required=false" || { echo "  ❌ network_required != false"; exit 1; }
-          grep -q '"model_source"[[:space:]]*:[[:space:]]*"bundled"\|"model_source"[[:space:]]*:[[:space:]]*"user_cache"' "$TMP_HOME/bootstrap_stdout.jsonl" && echo "  ✅ model_source=bundled or user_cache" || { echo "  ❌ model_source != bundled or user_cache"; exit 1; }
-          grep -q '"model_id"[[:space:]]*:[[:space:]]*"tiny"' "$TMP_HOME/bootstrap_stdout.jsonl" && echo "  ✅ model_id=tiny" || echo "  ❌ model_id != tiny"
-          grep -q '"bootstrap_complete"' "$TMP_HOME/bootstrap_stdout.jsonl" && echo "  ✅ bootstrap_complete event" || echo "  ❌ missing bootstrap_complete"
-          
-          if [ $BT_EXIT -ne 0 ]; then
-            echo "  ❌ Bootstrap exit=$BT_EXIT"
-            echo "  --- Error/traceback lines ---"
-            grep -i 'error\|fail\|traceback' "$TMP_HOME/bootstrap_stdout.jsonl" | tail -20
-            exit 1
-          fi
-          echo "  ✅ First launch: READY"
-
-          # ---- [EVIDENCE 6] Second launch skip verification ----
-          echo ""
-          echo "=== [EVIDENCE 6] Second launch (skip completed stages) ==="
-          "$TEST_PY" "${RESOURCES}/launcher.py" --bootstrap-test tiny > "$TMP_HOME/bootstrap_stdout2.jsonl" 2>&1
-          echo "--- Second bootstrap stdout ---"
-          cat "$TMP_HOME/bootstrap_stdout2.jsonl"
-          grep -q '"status"[[:space:]]*:[[:space:]]*"READY"' "$TMP_HOME/bootstrap_stdout2.jsonl" && echo "  ✅ Second launch: READY" || { echo "  ❌ Second launch NOT READY"; exit 1; }
-
-          # ---- [EVIDENCE 7] ASR smoke test: real WhisperModel load offline ----
-          echo ""
-          echo "=== [EVIDENCE 7] ASR smoke test (HF_HUB_OFFLINE=1, WhisperModel load) ==="
-          HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
-            "$TEST_PY" "${RESOURCES}/launcher.py" --asr-smoke-test tiny > "$TMP_HOME/asr_smoke.jsonl" 2>&1
-          ASR_EXIT=$?
-          echo "--- ASR smoke stdout ---"
-          cat "$TMP_HOME/asr_smoke.jsonl"
-          if [ $ASR_EXIT -ne 0 ]; then
-            echo "❌ EVIDENCE 7 FAILED: ASR smoke test exit=$ASR_EXIT"
-            exit 1
-          fi
-          if grep -q 'ASR_MODEL_READY' "$TMP_HOME/asr_smoke.jsonl"; then
-            echo "  ✅ ASR_MODEL_READY"
-          else
-            echo "❌ EVIDENCE 7 FAILED: no ASR_MODEL_READY in output"
-            exit 1
-          fi
-          if grep -q 'asr_model_path' "$TMP_HOME/asr_smoke.jsonl"; then
-            echo "  ✅ asr_model_path present"
-          else
-            echo "❌ EVIDENCE 7 FAILED: no asr_model_path"
-            exit 1
-          fi
-          if grep -q 'network_required.*false\|false.*network_required' "$TMP_HOME/asr_smoke.jsonl"; then
-            echo "  ✅ network_required=false"
-          fi
-          echo "  ✅ EVIDENCE 7 PASSED: ASR model loads locally"
-
-          # ---- [EVIDENCE 8] Real app executable bootstrap test ----
-          echo ""
-          echo "=== [EVIDENCE 8] App executable --bootstrap-test ==="
-          APP_EXEC="${APP}/Contents/MacOS/realtime-subtitle"
-          if [ ! -f "$APP_EXEC" ]; then
-            echo "⚠ EVIDENCE 8 SKIPPED: app executable not found (may not exist in DMG layout)"
-            echo "  This test requires the full .app with embedded Python"
-          else
-            BT8_OUT="$TMP_HOME/bootstrap_app.jsonl"
-            env -u PYTHONHOME -u PYTHONPATH HOME="$TMP_HOME" \
-              "$APP_EXEC" --bootstrap-test tiny > "$BT8_OUT" 2>&1
-            BT8_EXIT=$?
-            echo "--- App executable bootstrap stdout ---"
-            cat "$BT8_OUT"
-            echo "  App bootstrap exit=$BT8_EXIT"
-            if [ $BT8_EXIT -ne 0 ]; then
-              echo "❌ EVIDENCE 8 FAILED: app executable bootstrap exit=$BT8_EXIT"
-              exit 1
-            fi
-            if grep -q '"status"[[:space:]]*:[[:space:]]*"READY"\|"ready"[[:space:]]*:[[:space:]]*true' "$BT8_OUT"; then
-              echo "  ✅ EVIDENCE 8 PASSED: app executable bootstrap READY"
-            else
-              echo "❌ EVIDENCE 8 FAILED: app executable bootstrap NOT READY"
-              exit 1
-            fi
-          fi
-
-          echo ""
-          echo "=== All 8 EVIDENCE sections passed ==="
-          
-          # Print diagnostic log
-          DIAG=$(find "$TMP_HOME" -name "bootstrap_test.log" 2>/dev/null | head -1)
-          if [ -n "$DIAG" ]; then
-            echo ""
-            echo "--- Bootstrap Diagnostic Log (first 60 lines) ---"
-            head -60 "$DIAG"
-          fi
-          rm -rf "$TMP_HOME"
-
-          DMG=$(ls dist/*.dmg 2>/dev/null | head -1)
-          [ -n "$DMG" ] && echo "  ✅ DMG: $DMG ($(du -h "$DMG" | cut -f1))"
-          echo "=== All checks passed ==="
-
+          APP="build/${{ matrix.arch }}/RealtimeSubtitle.app"
+          DMG="dist/RealtimeSubtitle-${{ needs.metadata.outputs.version }}-macos-${{ matrix.arch }}.dmg"
+          test -d "${APP}"
+          test -f "${DMG}"
+          test "$(plutil -extract CFBundleIconFile raw "${APP}/Contents/Info.plist")" = "AppIcon"
+          grep -q "BUILD_ARCH = \"${{ matrix.arch }}\"" "${APP}/Contents/Resources/version.py"
+          file "${APP}/Contents/Resources/python/bin/python3"
+          shasum -a 256 "${DMG}"
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
         with:
-          name: RealtimeSubtitle-DMG
-          path: dist/*.dmg
+          name: RealtimeSubtitle-${{ matrix.arch }}
+          path: dist/RealtimeSubtitle-${{ needs.metadata.outputs.version }}-macos-${{ matrix.arch }}.dmg
           if-no-files-found: error
+          retention-days: 30
 
-      - name: Generate SHA256 checksum
+  release:
+    needs: [metadata, build]
+    if: ${{ github.event_name == 'push' || inputs.publish == true }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: RealtimeSubtitle-*
+          path: release-assets
+          merge-multiple: true
+      - name: Create checksums
         run: |
-          DMG=$(ls dist/*.dmg | head -1)
-          shasum -a 256 "$DMG" > "$DMG.sha256"
-          cat "$DMG.sha256"
-          echo "checksum=$(cut -d' ' -f1 "$DMG.sha256")" >> $GITHUB_ENV
+          cd release-assets
+          sha256sum *.dmg > SHA256SUMS.txt
+          ls -lh
+          cat SHA256SUMS.txt
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+          PRERELEASE: ${{ needs.metadata.outputs.prerelease }}
+        shell: bash
+        run: |
+          TAG="v${VERSION}"
+          TITLE="Realtime Subtitle ${TAG}"
+          cat > release-notes.md <<'EOF'
+          Native macOS downloads are provided separately for Apple Silicon and Intel.
 
-      - name: Upload SHA256 checksum artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: RealtimeSubtitle-DMG-SHA256
-          path: dist/*.dmg.sha256
-          if-no-files-found: error
+          - `arm64`: Apple M1, M2, M3, M4 and newer Apple Silicon Macs
+          - `x86_64`: Intel-based Macs
 
-      - name: Create Release and Upload DMG
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.event.inputs.version }}
-          target_commitish: ${{ github.ref }}
-          name: Realtime Subtitle ${{ github.event.inputs.version }}
-          body: |
+          This community build is currently unsigned and not notarized. On first launch, Control-click the app and choose Open if macOS blocks it.
 
-            # Realtime Subtitle ${{ github.event.inputs.version }}
-
-            macOS 实时字幕翻译工具 — 无需用户额外安装 Python。App 已内置 portable Python 运行环境。
-
-            ## 📥 安装
-
-            1. 下载 `RealtimeSubtitle-${{ github.event.inputs.version }}.dmg`
-            2. 双击打开 DMG
-            3. 拖动 `RealtimeSubtitle.app` 到 `Applications` 文件夹
-            4. 首次打开：**右键 → Open**（App 未签名）
-
-            ## ✨ 核心特性
-
-            | 特性 | 描述 |
-            |------|------|
-            | 🎤 实时语音识别 | ASR 引擎，支持 whisper / mlx / FunASR |
-            | 🌐 异步翻译 | 原文立即显示，翻译延迟 1-3 秒补全 |
-            | 🪟 浮窗字幕 | 置顶、半透明、可拖动、可调整样式 |
-            | 🔄 多翻译后端 | 在线 API / 本地 LLM / 自定义 API / 关闭翻译 |
-            | 📦 模型管理 | 内置下载、删除、切换 ASR 模型 |
-            | 🎨 字幕样式 | 字体大小、颜色、透明度、双语模式 |
-
-            ## ⚠️ 注意
-
-            此 App 未进行 Apple 代码签名。首次打开时，请右键点击 App → 选择 **Open**。
-          draft: false
-          prerelease: false
-          files: dist/*.dmg
-          fail_on_unmatched_files: true
+          See the bilingual README for setup, permissions and privacy details.
+          EOF
+          PRERELEASE_ARG=()
+          if [[ "${PRERELEASE}" == "true" ]]; then
+            PRERELEASE_ARG=(--prerelease)
+          fi
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release edit "${TAG}" --title "${TITLE}" --notes-file release-notes.md "${PRERELEASE_ARG[@]}"
+            gh release upload "${TAG}" release-assets/* --clobber
+          else
+            gh release create "${TAG}" release-assets/* --title "${TITLE}" --notes-file release-notes.md "${PRERELEASE_ARG[@]}"
+          fi

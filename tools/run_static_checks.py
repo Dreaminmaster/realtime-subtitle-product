@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static analysis checks for v2.3.0-rc1."""
+"""Static analysis checks for the current Realtime Subtitle release."""
 import ast, sys, os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -10,7 +10,7 @@ files = ['main.py', 'dashboard.py', 'enhanced_overlay_window.py', 'config.py',
          'transcriber.py', 'translation_engine.py', 'transcriber_pool.py',
          'audio_capture.py', 'permission_guide.py', 'diagnostics.py', 'build_dmg.sh']
 
-print("=== v2.3.0-rc1 Static Analysis ===")
+print("=== Realtime Subtitle Static Analysis ===")
 
 # 1. Syntax check
 print("\n[1] Python syntax...")
