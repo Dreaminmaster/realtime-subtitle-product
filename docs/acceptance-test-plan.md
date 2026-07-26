@@ -53,7 +53,7 @@
 |------|--------|----------|--------|
 | 3.1 | Window title | "Realtime Subtitle — Control Center" | |
 | 3.2 | Home tab | Shows "Ready" + "▶ Launch" button | |
-| 3.3 | Audio tab | Shows device list, BlackHole | |
+| 3.3 | Audio tab | Microphone and built-in System Audio are available; no virtual driver required | |
 | 3.4 | Devices tab | Full name visible (not "Devic...") | |
 | 3.5 | Transcript tab | ASR backend, model selection | |
 | 3.6 | Translate tab | API Key, Base URL, model, Test Connection | |

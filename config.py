@@ -96,17 +96,21 @@ class Config:
             self.source_language = self.source_language  # Explicitly locked language
         
         # Audio settings
+        self.input_source = self._get("audio", "input_source", "microphone").lower()
+        if self.input_source not in ("microphone", "system_audio"):
+            self.input_source = "microphone"
         self.sample_rate = self._getint("audio", "sample_rate", 16000)
         self.silence_threshold = self._getfloat("audio", "silence_threshold", 0.01)
         self.silence_duration = self._getfloat("audio", "silence_duration", 1.0)
         self.chunk_duration = self._getfloat("audio", "chunk_duration", 0.5)
         
-        # Device index: 'auto' or empty = auto-detect BlackHole, or set a specific index
+        # Device index applies only to microphone capture. System audio uses
+        # native ScreenCaptureKit and needs no virtual audio device.
         device_idx_str = self._get("audio", "device_index", "auto")
         if device_idx_str.isdigit():
             self.device_index = int(device_idx_str)
         elif device_idx_str.lower() in ("auto", ""):
-            self.device_index = self._find_blackhole_device()
+            self.device_index = None
         else:
             self.device_index = None
             
@@ -216,6 +220,7 @@ class Config:
         print(f"  ASR Backend: {self.asr_backend}")
         print(f"  Whisper Model: {self.whisper_model}")
         print(f"  FunASR Model: {self.funasr_model}")
+        print(f"  Input Source: {self.input_source}")
         print(f"  Sample Rate: {self.sample_rate}")
 
 # Global config instance

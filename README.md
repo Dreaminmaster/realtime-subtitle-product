@@ -8,14 +8,14 @@
 
 ## 下载 / Download
 
-当前稳定版：**v2.5.2** · macOS 13 Ventura 或更高版本
+当前稳定版：**v2.6.0** · macOS 13 Ventura 或更高版本
 
-Current stable release: **v2.5.2** · macOS 13 Ventura or later
+Current stable release: **v2.6.0** · macOS 13 Ventura or later
 
 | Mac | 安装包 / Installer | 适用设备 / Hardware |
 |---|---|---|
-| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.5.2-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
-| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.5.2-macos-x86_64.dmg) | Intel-based Macs |
+| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.6.0-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
+| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.6.0-macos-x86_64.dmg) | Intel-based Macs |
 
 [查看全部版本 / View all releases](https://github.com/Dreaminmaster/realtime-subtitle-product/releases)
 
@@ -36,11 +36,11 @@ Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本�
 - 可自定义屏幕上同时显示的字幕条数；向上滚动可查看本次会话的过往字幕。
 - 默认把每次字幕保存为本机会话，像聊天记录一样回看、导出或删除；也可在开始前切换为不留记录的临时会话。
 - 应用界面支持全局中文/English 即时切换，入口位于 **System**。
-- 开始字幕后控制中心会完全隐藏，只保留悬浮字幕；字幕工具条中的 **主界面** 可随时恢复控制中心。
+- 开始字幕后控制中心会完全隐藏，只保留悬浮字幕；字幕工具条中的 **主界面 / 隐藏** 可双向切换控制中心。
 - 运行时点击控制中心红色关闭按钮只隐藏窗口，不会中断字幕；点击字幕工具条停止按钮会结束会话，`⌘Q` 会完全退出 App。
 - 在线 API、本地 LLM、OpenAI-compatible 自定义 API，以及完全关闭翻译。
 - 翻译服务通过单一 Provider 选择器配置：Agnes AI、LM Studio 或任意 OpenAI-compatible 服务。
-- 麦克风输入与 BlackHole 系统音频输入。
+- 麦克风输入与内置 macOS 系统声音采集，无需 BlackHole 或虚拟声卡。
 - 模型管理、按需权限提示、运行诊断和本地字幕记录。
 - Apple Silicon 与 Intel 分架构原生安装包。
 
@@ -51,7 +51,7 @@ Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本�
 1. 根据上表下载与你的 Mac 匹配的 DMG。
 2. 打开 DMG，把 `RealtimeSubtitle.app` 拖入 `Applications`。
 3. 首次启动若出现安全提示，Control-click App → **打开**。
-4. App 会直接进入控制中心；首次点击开始时，按 macOS 提示授予麦克风权限。
+4. App 会直接进入控制中心；首次使用麦克风或系统声音时，按 macOS 提示授予对应权限。
 5. 打开 **Audio** 选择输入设备；在 **Language** 设置识别语言和翻译模式。
 6. 回到 **Live**，点击 **Start Live Subtitles**。
 
@@ -59,13 +59,9 @@ Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本�
 
 ### 系统声音
 
-macOS 不会直接向普通应用提供其他 App 的音频。若要给视频、会议或浏览器内容加字幕，请先安装 BlackHole 2ch：
+在 **音频 → 输入来源** 选择 **系统声音（内置）**，即可给视频、会议或浏览器内容加字幕。App 使用 macOS ScreenCaptureKit 只读取音频，不保存屏幕画面，也不需要 BlackHole。
 
-```bash
-brew install blackhole-2ch
-```
-
-然后在 **Audio → System Audio** 中选择 BlackHole。你还需要在“音频 MIDI 设置”中建立多输出设备，才能在捕获声音的同时继续从扬声器或耳机收听。
+首次使用时，macOS 会要求“屏幕与系统音频录制”权限。授权后请完全退出并重新打开 Realtime Subtitle，然后再开始字幕。
 
 ### 翻译模式
 
@@ -118,11 +114,11 @@ Realtime Subtitle is a native-feeling macOS control center with an always-on-top
 - Instant app-wide English / Simplified Chinese switching under **System**.
 - Online, local-LLM, custom OpenAI-compatible, or disabled translation.
 - A single provider selector for Agnes AI, LM Studio, and custom OpenAI-compatible endpoints.
-- The control center hides completely after a session starts; use **Controls** in the caption bar to bring it back.
+- The control center hides completely after a session starts; **Controls / Hide** in the caption bar toggles it in either direction.
 - Closing the control-center window during a live session hides that window without stopping captions. Use the overlay Stop button to end the session, or `⌘Q` to quit the app completely.
 - Context-aware phrase revisions join likely unfinished speech after a short pause and retranslate the same caption instead of leaving fragmented lines.
 - Strict quoted-speech prompting, automatic retry, and response screening prevent local models from answering spoken questions as a chat assistant.
-- Microphone and BlackHole system-audio input.
+- Microphone and built-in ScreenCaptureKit system-audio input; no virtual audio driver is required.
 - Model management, permission prompts only when needed, diagnostics, and local transcripts.
 - Separate native downloads for Apple Silicon and Intel Macs.
 
@@ -131,7 +127,7 @@ Realtime Subtitle is a native-feeling macOS control center with an always-on-top
 1. Download the DMG matching your Mac from the table above.
 2. Open it and drag `RealtimeSubtitle.app` to `Applications`.
 3. If Gatekeeper blocks the unsigned build, Control-click the app and choose **Open**.
-4. The control center opens immediately; grant microphone access when you first start captions.
+4. The control center opens immediately; grant microphone or Screen & System Audio Recording access when first requested.
 5. Choose an input under **Audio**, then configure recognition and translation under **Language**.
 6. Return to **Live** and click **Start Live Subtitles**.
 
@@ -139,13 +135,9 @@ On first launch the app creates an isolated runtime under your user account. Cor
 
 ### System audio
 
-To caption audio from meetings, browsers, or media players, install BlackHole 2ch:
+Choose **System audio (built in)** under **Audio → Input Source** to caption meetings, browsers, or media players. Realtime Subtitle uses macOS ScreenCaptureKit and does not require BlackHole or a Multi-Output Device. The app consumes audio samples only; it does not save screen video.
 
-```bash
-brew install blackhole-2ch
-```
-
-Select it under **Audio → System Audio**. Create a Multi-Output Device in Audio MIDI Setup if you also want to hear the captured audio through speakers or headphones.
+macOS asks for **Screen & System Audio Recording** permission the first time. After allowing Realtime Subtitle, quit it completely and reopen it before starting captions again.
 
 ### Translation and privacy
 
@@ -196,17 +188,17 @@ Build a native DMG on a matching Mac:
 
 ```bash
 # Apple Silicon host
-bash build_dmg.sh 2.5.2 arm64
+bash build_dmg.sh 2.6.0 arm64
 
 # Intel host, or Apple Silicon with Rosetta installed
-bash build_dmg.sh 2.5.2 x86_64
+bash build_dmg.sh 2.6.0 x86_64
 ```
 
 Outputs:
 
 ```text
-dist/RealtimeSubtitle-2.5.2-macos-arm64.dmg
-dist/RealtimeSubtitle-2.5.2-macos-x86_64.dmg
+dist/RealtimeSubtitle-2.6.0-macos-arm64.dmg
+dist/RealtimeSubtitle-2.6.0-macos-x86_64.dmg
 ```
 
 The GitHub Actions release workflow builds `arm64` on an Apple Silicon runner and `x86_64` on an Intel runner, verifies the embedded architecture and app icon, creates SHA-256 checksums, and publishes both DMGs to one release.
@@ -229,7 +221,7 @@ Control Center
 ## 已知限制 / Known limitations
 
 - The public community builds are unsigned and not notarized.
-- System-audio capture requires a virtual device such as BlackHole.
+- System-audio capture requires macOS 13 or later and the user's Screen & System Audio Recording permission.
 - Intel recognition is supported but generally slower than Apple Silicon.
 - The current product targets macOS only.
 - MLX Whisper is optional and Apple Silicon-only; the packaged default uses `faster-whisper` for both architectures.

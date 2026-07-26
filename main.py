@@ -130,6 +130,11 @@ def main():
     # The control center may be hidden while the subtitle overlay remains
     # active.  Window closure is handled explicitly by Dashboard.closeEvent.
     app.setQuitOnLastWindowClosed(False)
+    from single_instance import SingleInstance
+    instance = SingleInstance(parent=app)
+    if not instance.is_primary:
+        log.info("Existing Realtime Subtitle instance notified; exiting duplicate launch")
+        return
     try:
         from PyQt6.QtGui import QIcon
         icon_path = os.path.join(
@@ -167,6 +172,10 @@ def main():
     else:
         from dashboard import Dashboard
         dash = Dashboard()
+        instance.message_received.connect(
+            lambda message: dash._show_control_center()
+            if message == "show-controls" else None
+        )
         dash.show()
     
     timer = QTimer()
@@ -229,8 +238,14 @@ def create_pipeline():
             log.info("Pipeline: initializing audio capture...")
             config.print_config()
             
-            self.audio = AudioCapture(
-                device_index=config.device_index,
+            capture_class = AudioCapture
+            capture_options = {"device_index": config.device_index}
+            if getattr(config, "input_source", "microphone") == "system_audio":
+                from system_audio_capture import SystemAudioCapture
+                capture_class = SystemAudioCapture
+                capture_options = {}
+
+            self.audio = capture_class(
                 sample_rate=config.sample_rate,
                 silence_threshold=config.silence_threshold,
                 silence_duration=config.silence_duration,
@@ -239,7 +254,8 @@ def create_pipeline():
                 streaming_mode=config.streaming_mode,
                 streaming_interval=config.streaming_interval,
                 streaming_step_size=config.streaming_step_size,
-                streaming_overlap=config.streaming_overlap
+                streaming_overlap=config.streaming_overlap,
+                **capture_options,
             )
             log.info("Pipeline: audio capture initialized")
             if self.audio and not self.running:

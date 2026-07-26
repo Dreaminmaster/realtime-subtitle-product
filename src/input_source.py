@@ -1,7 +1,7 @@
 """Input source abstraction for v2.4.0 architecture.
 
-Phase 1c: only MicrophoneSource is fully implemented.
-SystemAudioSource and FileSource are declared but raise NotImplementedError.
+Microphone and native macOS system audio are implemented. File input remains a
+declared future source.
 """
 
 from __future__ import annotations
@@ -198,27 +198,18 @@ class MicrophoneSource(InputSource):
             t.join(timeout=1.0)
 
 
-# ── SystemAudioSource (NOT IMPLEMENTED in Phase 1c) ────────────────
-class SystemAudioSource(InputSource):
+# ── SystemAudioSource ──────────────────────────────────────────────
+class SystemAudioSource(MicrophoneSource):
+    """Pump native ScreenCaptureKit audio through the common source contract."""
+
+    @staticmethod
+    def _default_factory():
+        from system_audio_capture import SystemAudioCapture
+        return SystemAudioCapture()
 
     @property
     def source_type(self) -> str:
         return "system_audio"
-
-    def is_running(self) -> bool:
-        raise InputSourceNotImplemented(
-            "SystemAudioSource is not implemented in Phase 1c"
-        )
-
-    def start(self) -> None:
-        raise InputSourceNotImplemented(
-            "SystemAudioSource is not implemented in Phase 1c"
-        )
-
-    def stop(self) -> None:
-        raise InputSourceNotImplemented(
-            "SystemAudioSource is not implemented in Phase 1c"
-        )
 
 
 # ── FileSource (NOT IMPLEMENTED in Phase 1c) ───────────────────────

@@ -21,7 +21,10 @@ import time
 
 # macOS: show on all Spaces
 try:
-    from AppKit import NSWindowCollectionBehaviorCanJoinAllSpaces, NSWindowCollectionBehaviorStationary
+    from AppKit import (
+        NSWindowCollectionBehaviorCanJoinAllSpaces,
+        NSWindowCollectionBehaviorFullScreenAuxiliary,
+    )
     import objc
     from ctypes import c_void_p
     HAS_APPKIT = True
@@ -280,14 +283,17 @@ class EnhancedOverlayWindow(QWidget):
             ns_view = objc.objc_object(c_void_p=c_void_p(win_id))
             ns_window = ns_view.window()
             ns_window.setCollectionBehavior_(
-                NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorStationary
+                NSWindowCollectionBehaviorCanJoinAllSpaces
+                | NSWindowCollectionBehaviorFullScreenAuxiliary
             )
+            ns_window.setHidesOnDeactivate_(False)
         except Exception as e:
             print(f"[Overlay] Could not set all-spaces: {e}")
     
     def init_ui(self):
         # Window flags
         self.setWindowFlags(
+            Qt.WindowType.Tool |
             Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.WindowStaysOnTopHint |
             Qt.WindowType.WindowDoesNotAcceptFocus
@@ -394,23 +400,26 @@ class EnhancedOverlayWindow(QWidget):
         
         control_bar.addStretch()
         
-        # Save button
-        self.save_btn = QPushButton("Save")
-        self.save_btn.setToolTip("Save a text copy of this transcript")
-        self.save_btn.setFixedSize(48, 28)
+        # Export is separate from automatic Saved Session history. It writes
+        # an extra, human-readable TXT snapshot on demand.
+        self.save_btn = QPushButton(self._localized("导出", "Export"))
+        self.save_btn.setToolTip(self._localized(
+            "将当前字幕另存为 TXT 文件",
+            "Export the current subtitles as a TXT file",
+        ))
+        self.save_btn.setFixedSize(58, 28)
         self.save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.save_btn.setStyleSheet(self._control_btn_style())
         self.save_btn.clicked.connect(self._save_transcript)
         control_bar.addWidget(self.save_btn)
 
         self.control_center_btn = QPushButton(
-            "主界面" if self.subtitle_style.get("ui_language") == "zh-Hans" else "Controls"
+            self._localized("主界面", "Controls")
         )
         self.control_center_btn.setToolTip(
-            "显示主界面" if self.subtitle_style.get("ui_language") == "zh-Hans"
-            else "Show Control Center"
+            self._localized("显示或隐藏主界面", "Show or hide the control center")
         )
-        self.control_center_btn.setFixedSize(58, 28)
+        self.control_center_btn.setFixedSize(72, 28)
         self.control_center_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.control_center_btn.setStyleSheet(self._control_btn_style())
         self.control_center_btn.clicked.connect(self.control_center_requested.emit)
@@ -466,6 +475,20 @@ class EnhancedOverlayWindow(QWidget):
         y = max(screen.y(), min(y, screen.y() + screen.height() - h))
         
         self.move(x, y)
+
+    def _localized(self, chinese, english):
+        return chinese if self.subtitle_style.get("ui_language") == "zh-Hans" else english
+
+    def set_control_center_visible(self, visible):
+        """Keep the overlay toggle aligned with the dashboard window state."""
+        self.control_center_btn.setText(
+            self._localized("隐藏", "Hide") if visible
+            else self._localized("主界面", "Controls")
+        )
+        self.control_center_btn.setToolTip(
+            self._localized("隐藏主界面", "Hide the control center") if visible
+            else self._localized("显示主界面", "Show the control center")
+        )
 
     def _apply_surface_style(self):
         # The overlay is a collection of opaque-enough subtitle cards, not a
@@ -657,8 +680,11 @@ class EnhancedOverlayWindow(QWidget):
             )
     
     def _save_transcript(self):
-        """Save transcript to file"""
+        """Export a human-readable snapshot without changing session mode."""
         if not self.transcript_data:
+            original_text = self.save_btn.text()
+            self.save_btn.setText(self._localized("暂无内容", "Empty"))
+            QTimer.singleShot(1400, lambda: self.save_btn.setText(original_text))
             return
         
         from app_paths import get_transcript_dir
@@ -679,13 +705,18 @@ class EnhancedOverlayWindow(QWidget):
                     f.write("-" * 40 + "\n")
             
             original_text = self.save_btn.text()
-            self.save_btn.setText("✓")
-            self.save_btn.setToolTip(f"Saved to {filename}")
+            self.save_btn.setText(self._localized("已导出", "Exported"))
+            self.save_btn.setToolTip(
+                self._localized(f"已导出到 {filename}", f"Exported to {filename}")
+            )
             QTimer.singleShot(2000, lambda: self.save_btn.setText(original_text))
             
         except Exception as e:
             self.save_btn.setText("✗")
-            QTimer.singleShot(2000, lambda: self.save_btn.setText("Save"))
+            QTimer.singleShot(
+                2000,
+                lambda: self.save_btn.setText(self._localized("导出", "Export")),
+            )
             print(f"[Overlay] Save error: {e}")
     
     # Dragging

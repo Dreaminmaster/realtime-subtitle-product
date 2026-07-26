@@ -92,6 +92,31 @@ def request_microphone_access(timeout=30.0, cancelled=None):
     return decision["granted"]
 
 
+def screen_capture_permission_state() -> str:
+    """Return authorized/denied-or-undetermined for system audio capture."""
+    if platform.system() != "Darwin":
+        return "not_applicable"
+    try:
+        import Quartz
+        return "authorized" if Quartz.CGPreflightScreenCaptureAccess() else "not_authorized"
+    except Exception:
+        return "unknown"
+
+
+def request_screen_capture_access():
+    """Ask macOS for Screen & System Audio Recording access."""
+    state = screen_capture_permission_state()
+    if state == "authorized":
+        return True
+    if state in {"not_applicable", "unknown"}:
+        return None
+    try:
+        import Quartz
+        return bool(Quartz.CGRequestScreenCaptureAccess())
+    except Exception:
+        return None
+
+
 def _check_microphone_raw():
     state = microphone_permission_state()
     if state == "authorized":
@@ -194,9 +219,9 @@ def create_permission_guide(parent=None):
             layout.addWidget(acc_card)
             
             screen_card = self._create_card(
-                "Screen Recording",
-                "Optional (future)",
-                "Would enable system audio capture for translating other apps.",
+                "Screen & System Audio Recording",
+                "Required for system audio",
+                "Enables built-in translation of audio playing in other apps.",
                 "ScreenCapture",
             )
             layout.addWidget(screen_card)

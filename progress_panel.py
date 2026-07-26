@@ -87,4 +87,4 @@ class ProgressPanel(QFrame):
         else:
             self.cancel_btn.hide()
             self.retry_btn.hide()
-            self.dismiss_btn.hide()
+            self.dismiss_btn.setVisible(event.stage in {"cancelled", "succeeded"})

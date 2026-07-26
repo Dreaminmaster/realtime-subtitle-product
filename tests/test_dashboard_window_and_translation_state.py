@@ -126,3 +126,55 @@ def test_overlay_has_explicit_localized_control_center_return(app):
     assert overlay.control_center_btn.text() == "主界面"
     assert requested == [True]
     _dispose(overlay, app)
+
+
+def test_overlay_control_toggles_dashboard_both_directions(app):
+    dashboard = Dashboard()
+    overlay = EnhancedOverlayWindow({"ui_language": "zh-Hans"})
+    dashboard.overlay_window = overlay
+    dashboard.pipeline = object()
+    overlay.control_center_requested.connect(dashboard._toggle_control_center)
+
+    dashboard._hide_control_center_for_session()
+    overlay.control_center_btn.click()
+    app.processEvents()
+    assert dashboard.isVisible()
+    assert overlay.control_center_btn.text() == "隐藏"
+
+    overlay.control_center_btn.click()
+    app.processEvents()
+    assert not dashboard.isVisible()
+    assert overlay.control_center_btn.text() == "主界面"
+
+    dashboard.pipeline = None
+    dashboard.overlay_window = None
+    _dispose(overlay, app)
+    _dispose(dashboard, app)
+
+
+def test_overlay_is_nonactivating_tool_window(app):
+    overlay = EnhancedOverlayWindow()
+    assert overlay.windowFlags() & Qt.WindowType.Tool
+    assert overlay.windowFlags() & Qt.WindowType.WindowDoesNotAcceptFocus
+    assert overlay.testAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+    _dispose(overlay, app)
+
+
+def test_export_button_explains_empty_transcript(app):
+    overlay = EnhancedOverlayWindow({"ui_language": "zh-Hans"})
+    assert overlay.save_btn.text() == "导出"
+    overlay.save_btn.click()
+    assert overlay.save_btn.text() == "暂无内容"
+    _dispose(overlay, app)
+
+
+def test_appearance_apply_has_local_feedback(app, monkeypatch):
+    dashboard = Dashboard()
+    dashboard.show()
+    dashboard.tabs._section_buttons["Appearance"].click()
+    app.processEvents()
+    monkeypatch.setattr(dashboard, "_save_display_preferences", lambda _style: None)
+    dashboard._apply_style()
+    assert dashboard.appearance_feedback.isVisible()
+    assert dashboard.apply_style_btn.text() in {"Applied", "已应用"}
+    _dispose(dashboard, app)

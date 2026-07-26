@@ -234,7 +234,6 @@ class Dashboard(QWidget):
         self.init_home_tab()
         self.init_history_tab()
         self.init_audio_tab()
-        self.init_device_manager_tab()
         self.init_transcription_tab()
         self.init_translation_tab()
         self.init_model_tab()
@@ -342,9 +341,13 @@ class Dashboard(QWidget):
         summary_values = (
             (
                 "INPUT",
-                "Default microphone"
-                if config.device_index is None
-                else str(config.device_index),
+                "System audio"
+                if getattr(config, "input_source", "microphone") == "system_audio"
+                else (
+                    "Default microphone"
+                    if config.device_index is None
+                    else str(config.device_index)
+                ),
             ),
             ("RECOGNITION", f"Whisper · {config.whisper_model}"),
             (
@@ -493,46 +496,75 @@ class Dashboard(QWidget):
 
     def init_audio_tab(self):
         tab = QWidget()
-        layout = QGridLayout() # Use Grid for organized form
+        layout = QGridLayout()
+        layout.setContentsMargins(28, 26, 28, 26)
         layout.setSpacing(15)
-        
+
+        layout.addWidget(QLabel("Input Source:"), 0, 0)
+        self.input_source_combo = QComboBox()
+        self.input_source_combo.addItem("Microphone", "microphone")
+        self.input_source_combo.addItem("System audio (built in)", "system_audio")
+        source_index = self.input_source_combo.findData(
+            getattr(config, "input_source", "microphone")
+        )
+        self.input_source_combo.setCurrentIndex(max(0, source_index))
+        self.input_source_combo.currentIndexChanged.connect(self._on_input_source_changed)
+        layout.addWidget(self.input_source_combo, 0, 1, 1, 2)
+
+        self.system_audio_hint = QLabel(
+            "Uses macOS ScreenCaptureKit. No BlackHole or virtual audio device is required."
+        )
+        self.system_audio_hint.setObjectName("Muted")
+        self.system_audio_hint.setWordWrap(True)
+        layout.addWidget(self.system_audio_hint, 1, 1, 1, 2)
+
         # Device Selection
-        layout.addWidget(QLabel("Input Device:"), 0, 0)
+        self.device_label = QLabel("Input Device:")
+        layout.addWidget(self.device_label, 2, 0)
         self.device_combo = QComboBox()
         self.populate_devices()
-        layout.addWidget(self.device_combo, 0, 1)
+        layout.addWidget(self.device_combo, 2, 1)
         
         # Refresh Button
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.setFixedWidth(80)
-        refresh_btn.clicked.connect(self.populate_devices)
-        layout.addWidget(refresh_btn, 0, 2)
+        self.audio_refresh_btn = QPushButton("Refresh")
+        self.audio_refresh_btn.setObjectName("SecondaryButton")
+        self.audio_refresh_btn.setFixedWidth(90)
+        self.audio_refresh_btn.clicked.connect(self.populate_devices)
+        layout.addWidget(self.audio_refresh_btn, 2, 2)
         
         # Sample Rate
-        layout.addWidget(QLabel("Sample Rate:"), 1, 0)
+        layout.addWidget(QLabel("Sample Rate:"), 3, 0)
         self.sample_rate = QSpinBox()
         self.sample_rate.setRange(8000, 48000)
         self.sample_rate.setValue(config.sample_rate)
-        layout.addWidget(self.sample_rate, 1, 1)
+        layout.addWidget(self.sample_rate, 3, 1)
 
         # Silence Threshold
-        layout.addWidget(QLabel("Silence Threshold:"), 2, 0)
+        layout.addWidget(QLabel("Silence Threshold:"), 4, 0)
         self.silence_thresh = QDoubleSpinBox()
         self.silence_thresh.setRange(0.001, 1.0)
         self.silence_thresh.setSingleStep(0.001)
         self.silence_thresh.setDecimals(3)
         self.silence_thresh.setValue(config.silence_threshold)
-        layout.addWidget(self.silence_thresh, 2, 1)
+        layout.addWidget(self.silence_thresh, 4, 1)
         
-        layout.addWidget(QLabel("Silence Duration (s):"), 3, 0)
+        layout.addWidget(QLabel("Silence Duration (s):"), 5, 0)
         self.silence_dur = QDoubleSpinBox()
         self.silence_dur.setValue(config.silence_duration)
-        layout.addWidget(self.silence_dur, 3, 1)
+        layout.addWidget(self.silence_dur, 5, 1)
         
-        layout.setRowStretch(4, 1) # Push to top
+        layout.setRowStretch(6, 1)
         
         tab.setLayout(layout)
         self.tabs.addTab(tab, "Audio")
+        self._on_input_source_changed()
+
+    def _on_input_source_changed(self):
+        system_audio = self.input_source_combo.currentData() == "system_audio"
+        self.device_label.setEnabled(not system_audio)
+        self.device_combo.setEnabled(not system_audio)
+        self.audio_refresh_btn.setEnabled(not system_audio)
+        self.system_audio_hint.setVisible(system_audio)
 
     def init_device_manager_tab(self):
         """Audio Device Manager - Create/Manage Multi-Output Devices"""
@@ -1612,6 +1644,10 @@ class Dashboard(QWidget):
                 else f"{model_id} · installed"
             )
             self.model_mgmt_status.setStyleSheet("color: #a6e3a1; font-size: 12px;")
+            QTimer.singleShot(
+                1200,
+                lambda mid=model_id: self._dismiss_completed_progress(mid),
+            )
         elif terminal_state == CANCELLED:
             log.info(f"Model download cancelled: {model_id}")
             self.model_mgmt_status.setText(
@@ -1629,6 +1665,11 @@ class Dashboard(QWidget):
         if hasattr(self, '_active_downloads'):
             self._active_downloads.pop(model_id, None)
         self._refresh_model_list()
+
+    def _dismiss_completed_progress(self, model_id):
+        """Remove a completed progress surface unless another task replaced it."""
+        if self._progress_model_id == model_id and model_id not in self._active_downloads:
+            self._dismiss_progress_panel()
     
     def _emit_channel_status(self, channel, status, attempt, error):
         """Translate DownloadTask status string to ProgressEvent and emit."""
@@ -1813,9 +1854,13 @@ class Dashboard(QWidget):
         layout.addRow("Display Mode:", self.display_mode)
         
         # Apply button
-        apply_btn = QPushButton("Apply Style")
-        apply_btn.clicked.connect(self._apply_style)
-        layout.addRow(apply_btn)
+        self.apply_style_btn = QPushButton("Apply Style")
+        self.apply_style_btn.clicked.connect(self._apply_style)
+        layout.addRow(self.apply_style_btn)
+        self.appearance_feedback = QLabel("")
+        self.appearance_feedback.setObjectName("StatusPill")
+        self.appearance_feedback.hide()
+        layout.addRow(self.appearance_feedback)
         
         scroll.setWidget(content)
         
@@ -1841,6 +1886,17 @@ class Dashboard(QWidget):
             self.overlay_window.set_style(style)
         self._save_display_preferences(style)
         self._set_localized_text(self.status_label, "Appearance applied")
+        self._set_localized_text(
+            self.appearance_feedback,
+            "Applied — the subtitle window is updated",
+        )
+        self.appearance_feedback.show()
+        self._set_localized_text(self.apply_style_btn, "Applied")
+        QTimer.singleShot(1800, self._reset_appearance_feedback)
+
+    def _reset_appearance_feedback(self):
+        self.appearance_feedback.hide()
+        self._set_localized_text(self.apply_style_btn, "Apply Style")
 
     def _save_display_preferences(self, style):
         import configparser
@@ -2165,6 +2221,8 @@ class Dashboard(QWidget):
         
         # Audio
         idx = self.device_combo.currentData()
+        input_source = str(self.input_source_combo.currentData() or "microphone")
+        cp.set("audio", "input_source", input_source)
         cp.set("audio", "device_index", str(idx) if idx is not None else "auto")
         cp.set("audio", "sample_rate", str(self.sample_rate.value()))
         cp.set("audio", "silence_threshold", str(self.silence_thresh.value()))
@@ -2209,6 +2267,7 @@ class Dashboard(QWidget):
         # screen.  Previously this only updated disk, causing Live to launch
         # with stale provider/model values after a successful connection test.
         config.device_index = idx
+        config.input_source = input_source
         config.sample_rate = self.sample_rate.value()
         config.silence_threshold = self.silence_thresh.value()
         config.silence_duration = self.silence_dur.value()
@@ -2304,7 +2363,7 @@ class Dashboard(QWidget):
             if hasattr(self.overlay_window, 'style_changed'):
                 self.overlay_window.style_changed.connect(self._on_style_changed)
             if hasattr(self.overlay_window, 'control_center_requested'):
-                self.overlay_window.control_center_requested.connect(self._show_control_center)
+                self.overlay_window.control_center_requested.connect(self._toggle_control_center)
             
             # Connect lifecycle signals BEFORE pipeline.start()
             if hasattr(signals, 'pipeline_failed'):
@@ -2403,6 +2462,15 @@ class Dashboard(QWidget):
         self._control_center_hidden_for_session = True
         self.setWindowState(self.windowState() & ~Qt.WindowState.WindowMinimized)
         self.hide()
+        if getattr(self, "overlay_window", None):
+            self.overlay_window.set_control_center_visible(False)
+
+    def _toggle_control_center(self):
+        """The overlay control is a true show/hide toggle."""
+        if self.isVisible():
+            self._hide_control_center_for_session()
+        else:
+            self._show_control_center()
 
     def _show_control_center(self):
         """Explicit user path back from the overlay to the main controls."""
@@ -2410,6 +2478,8 @@ class Dashboard(QWidget):
         self.showNormal()
         self.raise_()
         self.activateWindow()
+        if getattr(self, "overlay_window", None):
+            self.overlay_window.set_control_center_visible(True)
     
     def _on_audio_failed(self, message):
         """Audio device failure. Show error, disable Retry until cleanup."""

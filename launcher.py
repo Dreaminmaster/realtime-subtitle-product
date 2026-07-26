@@ -372,6 +372,9 @@ class LauncherWindow(QMainWindow):
 
     def _launch_dashboard(self):
         QApplication.quit()
+        coordinator = getattr(self, "_single_instance", None)
+        if coordinator is not None:
+            coordinator.release()
         venv_py = os.path.expanduser(
             "~/Library/Application Support/RealtimeSubtitle/venv/bin/python3")
         resources = os.path.dirname(os.path.abspath(__file__))
@@ -417,6 +420,10 @@ if __name__ == "__main__":
     from diagnostic_logger import log_diagnostic
     log_diagnostic("launcher", "Bootstrap started")
     app = QApplication(sys.argv)
+    from single_instance import SingleInstance
+    instance = SingleInstance(parent=app)
+    if not instance.is_primary:
+        sys.exit(0)
     app.setStyle("Fusion")
     try:
         from PyQt6.QtGui import QIcon
@@ -429,5 +436,9 @@ if __name__ == "__main__":
     except Exception:
         pass
     launcher = LauncherWindow()
+    launcher._single_instance = instance
+    instance.message_received.connect(
+        lambda _message: (launcher.showNormal(), launcher.raise_(), launcher.activateWindow())
+    )
     launcher.show()
     sys.exit(app.exec())

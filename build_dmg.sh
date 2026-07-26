@@ -164,6 +164,27 @@ EOF
 echo "  Build identity: v${VERSION_NO_V} (${BUILD_COMMIT}, ${ARCH})"
 echo "  Done."
 
+# Build a tiny native ScreenCaptureKit bridge so system audio works without
+# BlackHole or any separately installed virtual sound device.
+echo "[2.2/8] Building native system-audio helper…"
+SYSTEM_AUDIO_BIN="${RESOURCES}/bin/system-audio-capture"
+mkdir -p "$(dirname "${SYSTEM_AUDIO_BIN}")"
+xcrun swiftc -O -parse-as-library \
+    -target "${ARCH}-apple-macos13.0" \
+    "${SCRIPT_DIR}/native/SystemAudioCapture.swift" \
+    -framework ScreenCaptureKit \
+    -framework AVFoundation \
+    -framework CoreMedia \
+    -o "${SYSTEM_AUDIO_BIN}"
+chmod +x "${SYSTEM_AUDIO_BIN}"
+SYSTEM_AUDIO_INFO=$(file "${SYSTEM_AUDIO_BIN}")
+if [[ "${ARCH}" = "arm64" && "${SYSTEM_AUDIO_INFO}" != *"arm64"* ]] \
+   || [[ "${ARCH}" = "x86_64" && "${SYSTEM_AUDIO_INFO}" != *"x86_64"* ]]; then
+    echo "  ERROR: system-audio helper architecture mismatch: ${SYSTEM_AUDIO_INFO}"
+    exit 1
+fi
+echo "  ✅ native system audio (${ARCH})"
+
 # ---- Step 2.5: Build wheelhouse (offline dependency bundle) ----
 echo "[2.5/8] Building wheelhouse…"
 WHEELHOUSE_DIR="${RESOURCES}/wheelhouse"
@@ -362,6 +383,8 @@ cat > "${CONTENTS}/Info.plist" << PLIST
     <string>13.0</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Realtime Subtitle needs microphone access for real-time speech recognition and translation.</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>Realtime Subtitle needs Screen &amp; System Audio Recording access when System Audio is selected as the input.</string>
     <key>NSHighResolutionCapable</key>
     <true/>
 </dict>
@@ -491,6 +514,20 @@ if [ ! -f "${APP_BUNDLE}/Contents/MacOS/realtime-subtitle" ]; then
     echo "  ❌ launcher missing"; FAIL=true
 else
     echo "  ✅ launcher present"
+fi
+
+# Native system-audio helper is bundled for the selected architecture.
+SYSTEM_AUDIO_HELPER="${APP_BUNDLE}/Contents/Resources/bin/system-audio-capture"
+if [ ! -x "${SYSTEM_AUDIO_HELPER}" ]; then
+    echo "  ❌ native system-audio helper missing"; FAIL=true
+else
+    SYSTEM_AUDIO_VERIFY=$(file "${SYSTEM_AUDIO_HELPER}")
+    if [[ "${ARCH}" = "arm64" && "${SYSTEM_AUDIO_VERIFY}" != *"arm64"* ]] \
+       || [[ "${ARCH}" = "x86_64" && "${SYSTEM_AUDIO_VERIFY}" != *"x86_64"* ]]; then
+        echo "  ❌ system-audio helper architecture mismatch: ${SYSTEM_AUDIO_VERIFY}"; FAIL=true
+    else
+        echo "  ✅ native system audio ${ARCH}"
+    fi
 fi
 
 # No builder paths in source code (excluding build scripts that contain this check)

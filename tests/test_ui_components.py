@@ -53,3 +53,12 @@ def test_model_progress_messages_follow_chinese_ui_language():
     channel = ModelProgressChannel("tiny", language="zh-Hans")
     assert channel.on_start().message == "正在连接模型仓库…"
     assert channel.on_success(1).message == "下载完成"
+
+
+def test_terminal_download_progress_can_be_dismissed(app):
+    panel = ProgressPanel()
+    panel.set_progress(ProgressEvent(
+        "tiny", "succeeded", "Download complete", percent=100, can_cancel=False
+    ))
+    assert panel.dismiss_btn.isVisible() is False  # parent is not shown yet
+    assert panel.dismiss_btn.isHidden() is False

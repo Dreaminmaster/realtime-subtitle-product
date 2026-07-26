@@ -216,13 +216,13 @@ class TestMicrophoneSource:
         assert call_count[0] == 2
 
 
-class TestNotImplementedSources:
+class TestAdditionalSources:
     def test_system_audio(self):
-        s = SystemAudioSource()
+        s = SystemAudioSource(capture_factory=FakeAudioCapture)
         assert s.source_type == "system_audio"
-        for m in [s.start, s.stop, s.is_running]:
-            with pytest.raises(InputSourceNotImplemented, match="SystemAudioSource"):
-                m()
+        s.start()
+        s.stop()
+        assert s.status == ModuleStatus.STOPPED
 
     def test_file_source(self):
         s = FileSource()

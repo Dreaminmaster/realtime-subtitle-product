@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version, for example 2.5.2"
+        description: "Release version, for example 2.6.0"
         required: true
-        default: "2.5.2"
+        default: "2.6.0"
       publish:
         description: "Publish or update the GitHub release"
         required: true
@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   metadata:
-    runs-on: ubuntu-latest
+    runs-on: macos-15
     outputs:
       version: ${{ steps.release.outputs.version }}
       prerelease: ${{ steps.release.outputs.prerelease }}
@@ -95,6 +95,9 @@ jobs:
           test "$(plutil -extract CFBundleIconFile raw "${APP}/Contents/Info.plist")" = "AppIcon"
           grep -q "BUILD_ARCH = \"${{ matrix.arch }}\"" "${APP}/Contents/Resources/version.py"
           file "${APP}/Contents/Resources/python/bin/python3"
+          HELPER="${APP}/Contents/Resources/bin/system-audio-capture"
+          test -x "${HELPER}"
+          file "${HELPER}" | grep -q "${{ matrix.arch }}"
           shasum -a 256 "${DMG}"
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
@@ -107,7 +110,7 @@ jobs:
   release:
     needs: [metadata, build]
     if: ${{ github.event_name == 'push' || inputs.publish == true }}
-    runs-on: ubuntu-latest
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -118,7 +121,7 @@ jobs:
       - name: Create checksums
         run: |
           cd release-assets
-          sha256sum *.dmg > SHA256SUMS.txt
+          shasum -a 256 *.dmg > SHA256SUMS.txt
           ls -lh
           cat SHA256SUMS.txt
       - name: Publish GitHub release
@@ -131,6 +134,14 @@ jobs:
           TAG="v${VERSION}"
           TITLE="Realtime Subtitle ${TAG}"
           cat > release-notes.md <<'EOF'
+          Realtime Subtitle 2.6.0 focuses on a quieter, native macOS experience.
+
+          - Built-in system-audio capture with ScreenCaptureKit; BlackHole is no longer required.
+          - The overlay Controls button now toggles the control center in both directions.
+          - Single-instance and non-activating overlay behavior prevent windows from stealing focus.
+          - The transcript action is now clearly labeled Export and writes a TXT snapshot.
+          - Completed model-download progress closes automatically, and Appearance shows applied feedback.
+
           Native macOS downloads are provided separately for Apple Silicon and Intel.
 
           - `arm64`: Apple M1, M2, M3, M4 and newer Apple Silicon Macs
