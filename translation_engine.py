@@ -52,40 +52,29 @@ class OfflineTranslator(BaseTranslator):
     
     name = "System Translation (macOS)"
     
-    def __init__(self, target_lang="zh-Hans"):
+    def __init__(self, target_lang="zh-Hans", source_lang="auto", timeout=20.0):
         self.target_lang = target_lang
-        self._available = None
+        self.source_lang = source_lang
+        self.timeout = timeout
     
     def check_health(self) -> bool:
-        if self._available is not None:
-            return self._available
-        
-        try:
-            import objc
-            from Foundation import NSLinguisticTagger
-            self._available = True
-        except ImportError:
-            self._available = False
-        return self._available
+        from mac_translation import availability
+        return availability()[0]
     
     def translate(self, text: str) -> str:
         if not text or not text.strip():
             return ""
         
-        # macOS system translation is limited - for now use
-        # simple approach: try Apple's Translation framework if available
         try:
-            import objc
-            from Foundation import NSLinguisticTagger, NSString
-            
-            # NSLinguisticTagger can identify language but full translation
-            # requires Translation.framework (macOS 11+)
-            # For now, fallback to online or local
-            raise NotImplementedError("macOS Translation framework requires native Swift bridge")
-        except ImportError:
-            pass
-        
-        return "[System Translation: requires macOS 11+ Translation.framework]"
+            from mac_translation import translate
+            return translate(
+                text,
+                source_language=self.source_lang,
+                target_language=self.target_lang,
+                timeout=self.timeout,
+            )
+        except Exception as exc:
+            return f"[Translation Failed: {exc}]"
 
 
 class OnlineAPITranslator(BaseTranslator):
@@ -328,7 +317,11 @@ class TranslationEngine:
         if mode == "off":
             self._translator = NoopTranslator()
         elif mode == "fast":
-            self._translator = OfflineTranslator(target_lang=self.target_lang)
+            self._translator = OfflineTranslator(
+                target_lang=self.target_lang,
+                source_lang=kwargs.get("source_language", "auto"),
+                timeout=kwargs.get("timeout", 20.0),
+            )
         elif mode == "online":
             self._translator = OnlineAPITranslator(
                 target_lang=self.target_lang,

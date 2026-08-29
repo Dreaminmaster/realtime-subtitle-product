@@ -8,14 +8,14 @@
 
 ## 下载 / Download
 
-当前稳定版：**v2.6.0** · macOS 13 Ventura 或更高版本
+当前稳定版：**v2.7.0** · macOS 13 Ventura 或更高版本
 
-Current stable release: **v2.6.0** · macOS 13 Ventura or later
+Current stable release: **v2.7.0** · macOS 13 Ventura or later
 
 | Mac | 安装包 / Installer | 适用设备 / Hardware |
 |---|---|---|
-| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.6.0-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
-| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.6.0-macos-x86_64.dmg) | Intel-based Macs |
+| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.7.0-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
+| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.7.0-macos-x86_64.dmg) | Intel-based Macs |
 
 [查看全部版本 / View all releases](https://github.com/Dreaminmaster/realtime-subtitle-product/releases)
 
@@ -35,13 +35,16 @@ Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本�
 - 翻译提示把所有输入严格视为“待翻译语音”，问句不会被本地模型误当成聊天请求；异常回答会自动重试并拦截。
 - 可自定义屏幕上同时显示的字幕条数；向上滚动可查看本次会话的过往字幕。
 - 默认把每次字幕保存为本机会话，像聊天记录一样回看、导出或删除；也可在开始前切换为不留记录的临时会话。
-- 应用界面支持全局中文/English 即时切换，入口位于 **System**。
+- 保存会话可选“录制完整音频”；结束后可在会话时间轴中回放，点击任意字幕即可跳转到对应声音。临时会话不会录音。
+- 外观页提供与悬浮字幕一致的实时预览；文字颜色使用 macOS 原生颜色面板，文字颜色与背景透明度互不影响。
+- 应用界面支持全局中文/English 即时切换，入口位于 **设置 → 系统**。
 - 开始字幕后控制中心会完全隐藏，只保留悬浮字幕；字幕工具条中的 **主界面 / 隐藏** 可双向切换控制中心。
 - 运行时点击控制中心红色关闭按钮只隐藏窗口，不会中断字幕；点击字幕工具条停止按钮会结束会话，`⌘Q` 会完全退出 App。
 - 在线 API、本地 LLM、OpenAI-compatible 自定义 API，以及完全关闭翻译。
+- macOS 26 及以上可使用 Apple Translation 本地翻译；语言包由系统管理，识别文字无需发送给第三方。
 - 翻译服务通过单一 Provider 选择器配置：Agnes AI、LM Studio 或任意 OpenAI-compatible 服务。
 - 麦克风输入与内置 macOS 系统声音采集，无需 BlackHole 或虚拟声卡。
-- 模型管理、按需权限提示、运行诊断和本地字幕记录。
+- 模型中心分为内置推荐与 Hugging Face 搜索；可粘贴 `organization/model` 或模型链接，兼容性检查通过后直接下载并选用 faster-whisper 社区模型。
 - Apple Silicon 与 Intel 分架构原生安装包。
 
 ![Realtime Subtitle floating overlay](docs/images/subtitle-overlay.png)
@@ -52,7 +55,7 @@ Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本�
 2. 打开 DMG，把 `RealtimeSubtitle.app` 拖入 `Applications`。
 3. 首次启动若出现安全提示，Control-click App → **打开**。
 4. App 会直接进入控制中心；首次使用麦克风或系统声音时，按 macOS 提示授予对应权限。
-5. 打开 **Audio** 选择输入设备；在 **Language** 设置识别语言和翻译模式。
+5. 打开 **设置**，在 **音频 / 识别 / 翻译** 中完成配置。
 6. 回到 **Live**，点击 **Start Live Subtitles**。
 
 首次启动会在用户目录创建独立运行环境，所需核心依赖和默认模型已包含在 App 中。这个过程通常需要一两分钟，不会修改系统 Python。
@@ -71,6 +74,7 @@ Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本�
 | Online API | OpenAI 或兼容服务；通常体验最好 |
 | Local LLM | LM Studio、Ollama 等本地 OpenAI-compatible 服务 |
 | Custom API | 自定义 Base URL、模型与 API Key |
+| Apple Translation | macOS 26+ 系统本地翻译；需要已安装对应语言包 |
 
 在 Provider 中选择 **Agnes AI** 会使用官方接口 `https://apihub.agnes-ai.com/v1` 与
 `agnes-2.0-flash`；选择 **LM Studio / 本地服务** 会使用
@@ -88,6 +92,7 @@ Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本�
 | 运行环境 | `~/Library/Application Support/RealtimeSubtitle/venv` |
 | 日志 | `~/Library/Logs/RealtimeSubtitle` |
 | 保存的会话 | `~/Library/Application Support/RealtimeSubtitle/realtime_subtitle.sqlite3` |
+| 会话录音 | `~/Library/Application Support/RealtimeSubtitle/recordings` |
 | 手动保存的字幕 | `~/Documents/Realtime Subtitle/Transcripts` |
 
 API Key 保存在本机配置文件中。共享诊断信息前，请先检查其中是否包含设备名称、路径或服务地址。
@@ -111,15 +116,18 @@ Realtime Subtitle is a native-feeling macOS control center with an always-on-top
 - Draggable, resizable bilingual overlay with original-only and translation-only modes.
 - Adjustable visible-row count with in-session scrollback for older captions.
 - Chat-style local session history with view, export and delete actions, plus a no-history Temporary mode.
+- Optional full-session audio for Saved sessions, with synchronized playback and click-to-seek transcript lines.
+- A live appearance preview and native macOS color panel; text colors remain independent from background opacity.
 - Instant app-wide English / Simplified Chinese switching under **System**.
 - Online, local-LLM, custom OpenAI-compatible, or disabled translation.
+- Apple on-device Translation on macOS 26+ when the required language assets are installed.
 - A single provider selector for Agnes AI, LM Studio, and custom OpenAI-compatible endpoints.
 - The control center hides completely after a session starts; **Controls / Hide** in the caption bar toggles it in either direction.
 - Closing the control-center window during a live session hides that window without stopping captions. Use the overlay Stop button to end the session, or `⌘Q` to quit the app completely.
 - Context-aware phrase revisions join likely unfinished speech after a short pause and retranslate the same caption instead of leaving fragmented lines.
 - Strict quoted-speech prompting, automatic retry, and response screening prevent local models from answering spoken questions as a chat assistant.
 - Microphone and built-in ScreenCaptureKit system-audio input; no virtual audio driver is required.
-- Model management, permission prompts only when needed, diagnostics, and local transcripts.
+- Recommended offline recognition models plus Hugging Face search/custom repository installation with faster-whisper compatibility validation.
 - Separate native downloads for Apple Silicon and Intel Macs.
 
 ### Install and start
@@ -128,7 +136,7 @@ Realtime Subtitle is a native-feeling macOS control center with an always-on-top
 2. Open it and drag `RealtimeSubtitle.app` to `Applications`.
 3. If Gatekeeper blocks the unsigned build, Control-click the app and choose **Open**.
 4. The control center opens immediately; grant microphone or Screen & System Audio Recording access when first requested.
-5. Choose an input under **Audio**, then configure recognition and translation under **Language**.
+5. Open **Settings** and configure **Audio**, **Recognition**, and **Translation**.
 6. Return to **Live** and click **Start Live Subtitles**.
 
 On first launch the app creates an isolated runtime under your user account. Core dependencies and the default model are bundled, and the system Python installation is not modified.
@@ -142,6 +150,8 @@ macOS asks for **Screen & System Audio Recording** permission the first time. Af
 ### Translation and privacy
 
 Audio is transcribed locally. When online translation is enabled, only recognized text is sent to the provider configured by the user; this project does not upload the audio. Select **Off** for a fully local transcription path.
+
+On macOS 26 or later, **Apple Translation** uses Apple's on-device Translation framework and system-managed language assets. Realtime Subtitle does not download those assets itself. If the selected language pair is supported but not installed, macOS reports that the language assets are missing; use the system Translation features once to install them, then test again in the app.
 
 The Agnes AI provider uses `https://apihub.agnes-ai.com/v1` with
 `agnes-2.0-flash`. The LM Studio provider uses `http://127.0.0.1:1234/v1`.
@@ -188,17 +198,17 @@ Build a native DMG on a matching Mac:
 
 ```bash
 # Apple Silicon host
-bash build_dmg.sh 2.6.0 arm64
+bash build_dmg.sh 2.7.0 arm64
 
 # Intel host, or Apple Silicon with Rosetta installed
-bash build_dmg.sh 2.6.0 x86_64
+bash build_dmg.sh 2.7.0 x86_64
 ```
 
 Outputs:
 
 ```text
-dist/RealtimeSubtitle-2.6.0-macos-arm64.dmg
-dist/RealtimeSubtitle-2.6.0-macos-x86_64.dmg
+dist/RealtimeSubtitle-2.7.0-macos-arm64.dmg
+dist/RealtimeSubtitle-2.7.0-macos-x86_64.dmg
 ```
 
 The GitHub Actions release workflow builds `arm64` on an Apple Silicon runner and `x86_64` on an Intel runner, verifies the embedded architecture and app icon, creates SHA-256 checksums, and publishes both DMGs to one release.
@@ -211,11 +221,11 @@ Audio input → local ASR → utterance lifecycle → subtitle overlay
 
 Control Center
 ├── Live
-├── History
-├── Audio: Input / System Audio
-├── Language: Recognition / Translation / Models
-├── Appearance
-└── System
+├── Sessions: transcript / synchronized recording playback
+└── Settings
+    ├── Audio / Recognition / Translation / Models
+    ├── Appearance
+    └── System
 ```
 
 ## 已知限制 / Known limitations
@@ -225,6 +235,7 @@ Control Center
 - Intel recognition is supported but generally slower than Apple Silicon.
 - The current product targets macOS only.
 - MLX Whisper is optional and Apple Silicon-only; the packaged default uses `faster-whisper` for both architectures.
+- Apple Translation inside Realtime Subtitle requires macOS 26 or later; older supported macOS versions can use local LM Studio or an online/custom provider.
 
 ## License and acknowledgements
 

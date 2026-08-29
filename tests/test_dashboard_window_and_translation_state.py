@@ -171,7 +171,8 @@ def test_export_button_explains_empty_transcript(app):
 def test_appearance_apply_has_local_feedback(app, monkeypatch):
     dashboard = Dashboard()
     dashboard.show()
-    dashboard.tabs._section_buttons["Appearance"].click()
+    dashboard.tabs._section_buttons["Settings"].click()
+    dashboard.tabs._section_widgets["Settings"].setCurrentIndex(4)
     app.processEvents()
     monkeypatch.setattr(dashboard, "_save_display_preferences", lambda _style: None)
     dashboard._apply_style()

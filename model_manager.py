@@ -221,7 +221,7 @@ class ModelManager:
             if cached_path and os.path.isdir(cached_path) and self._is_valid_whisper_dir(cached_path):
                 return cached_path
             
-            repo_id = f"Systran/faster-whisper-{model_id}"
+            repo_id = model_id if "/" in model_id else f"Systran/faster-whisper-{model_id}"
             try:
                 from huggingface_hub import snapshot_download
                 path = snapshot_download(
@@ -238,8 +238,8 @@ class ModelManager:
                 return app_dir
             # Fallback: manual HF cache resolution
             from pathlib import Path
-            cache_base = Path.home() / ".cache" / "huggingface" / "hub" / \
-                         f"models--Systran--faster-whisper-{model_id}"
+            cache_slug = repo_id.replace("/", "--")
+            cache_base = Path.home() / ".cache" / "huggingface" / "hub" / f"models--{cache_slug}"
             if cache_base.exists():
                 snaps = cache_base / "snapshots"
                 if snaps.is_dir():
@@ -291,6 +291,22 @@ class ModelManager:
                 "installed_size_mb": installed_size,
                 "backend": backend
             })
+        for model_id, cached in self._cache.items():
+            if cached.get("backend", "whisper") != backend or model_id in model_dict:
+                continue
+            installed_size = self.get_installed_size(model_id, backend)
+            models.append({
+                "id": model_id,
+                "name": model_id,
+                "size_mb": installed_size or "—",
+                "speed": "Community model",
+                "accuracy": "Varies",
+                "best_for": "Installed from Hugging Face",
+                "recommended": False,
+                "downloaded": self.is_downloaded(model_id, backend),
+                "installed_size_mb": installed_size,
+                "backend": backend,
+            })
         
         return models
     
@@ -303,11 +319,16 @@ class ModelManager:
     
     def _is_whisper_model_downloaded(self, model_id: str) -> bool:
         """Check if faster-whisper model is cached"""
+        cached = self._cache.get(model_id, {})
+        cached_path = cached.get("snapshot_path")
+        if cached_path and self._is_valid_whisper_dir(cached_path):
+            return True
         # faster-whisper caches models in its own directory
         cache_dir = os.path.expanduser(f"~/.cache/huggingface/hub")
         import glob
         # Look for model files
-        model_dir = os.path.join(cache_dir, f"models--Systran--faster-whisper-{model_id}")
+        repo_id = model_id if "/" in model_id else f"Systran/faster-whisper-{model_id}"
+        model_dir = os.path.join(cache_dir, f"models--{repo_id.replace('/', '--')}")
         if os.path.exists(model_dir):
             return True
         
@@ -336,8 +357,13 @@ class ModelManager:
             model_dir = model_id.replace("/", "--")
             full_path = os.path.join(cache_dir, f"models--{model_dir}")
         else:
-            cache_dir = os.path.expanduser("~/.cache/huggingface/hub")
-            full_path = os.path.join(cache_dir, f"models--Systran--faster-whisper-{model_id}")
+            cached_path = self._cache.get(model_id, {}).get("snapshot_path")
+            if cached_path and os.path.exists(cached_path):
+                full_path = cached_path
+            else:
+                cache_dir = os.path.expanduser("~/.cache/huggingface/hub")
+                repo_id = model_id if "/" in model_id else f"Systran/faster-whisper-{model_id}"
+                full_path = os.path.join(cache_dir, f"models--{repo_id.replace('/', '--')}")
             if not os.path.exists(full_path):
                 whisper_cache = os.path.expanduser("~/.cache/whisper")
                 full_path = os.path.join(whisper_cache, f"{model_id}.pt")
@@ -404,7 +430,11 @@ class ModelManager:
     def _download_whisper_model(self, model_id, progress_callback=None):
         """Download faster-whisper model via explicit snapshot_download.
         Returns (snapshot_path, repo_id) on success."""
-        repo_id = f"Systran/faster-whisper-{model_id}"
+        if "/" in model_id:
+            from model_catalog import validate_faster_whisper_repo
+            repo_id = validate_faster_whisper_repo(model_id)
+        else:
+            repo_id = f"Systran/faster-whisper-{model_id}"
         if progress_callback:
             progress_callback("downloading", 10)
         
@@ -461,7 +491,8 @@ class ModelManager:
                     shutil.rmtree(full_path)
             else:
                 cache_dir = os.path.expanduser("~/.cache/huggingface/hub")
-                full_path = os.path.join(cache_dir, f"models--Systran--faster-whisper-{model_id}")
+                repo_id = model_id if "/" in model_id else f"Systran/faster-whisper-{model_id}"
+                full_path = os.path.join(cache_dir, f"models--{repo_id.replace('/', '--')}")
                 if os.path.exists(full_path):
                     shutil.rmtree(full_path)
                 

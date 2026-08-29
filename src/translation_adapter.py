@@ -50,6 +50,7 @@ class TranslationAdapter:
         self._repo_enabled = bool(repository_enabled and repository is not None)
         self._chunk_to_segment: dict[int, str] = {}
         self._revision_by_segment: dict[str, int] = {}
+        self._timing_by_segment: dict[str, tuple[float | None, float | None]] = {}
 
         scheduler._on_result = self._on_result
         scheduler._on_error = self._on_error
@@ -60,16 +61,20 @@ class TranslationAdapter:
         *,
         source_language: str | None = None,
         target_language: str | None = None,
+        metadata: dict | None = None,
     ) -> None:
         self.scheduler.start_session(session_id)
         self._chunk_to_segment.clear()
         self._revision_by_segment.clear()
+        self._timing_by_segment.clear()
         if self._repo_enabled:
-            self._repository.create_session(
-                session_id,
-                source_language=source_language or "Auto",
-                target_language=target_language,
-            )
+            create_options = {
+                "source_language": source_language or "Auto",
+                "target_language": target_language,
+            }
+            if metadata is not None:
+                create_options["metadata"] = metadata
+            self._repository.create_session(session_id, **create_options)
 
     def stop_session(self) -> None:
         self.scheduler.stop_session()
@@ -78,7 +83,15 @@ class TranslationAdapter:
         self.scheduler.shutdown(wait=wait)
 
     # ── called from pipeline ───────────────────────────────────
-    def on_final_text(self, text: str, chunk_id: int, *, translate: bool = True) -> None:
+    def on_final_text(
+        self,
+        text: str,
+        chunk_id: int,
+        *,
+        translate: bool = True,
+        start_offset: float | None = None,
+        end_offset: float | None = None,
+    ) -> None:
         """Persist a FINAL transcript and optionally schedule translation.
 
         ``translate=False`` is the normal path when the user selects the
@@ -98,6 +111,14 @@ class TranslationAdapter:
             self._revision_by_segment[segment_id] = 1
 
         revision = self._revision_by_segment.get(segment_id, 1)
+        previous_start, previous_end = self._timing_by_segment.get(
+            segment_id, (None, None)
+        )
+        starts = [value for value in (previous_start, start_offset) if value is not None]
+        ends = [value for value in (previous_end, end_offset) if value is not None]
+        segment_start = min(starts) if starts else None
+        segment_end = max(ends) if ends else None
+        self._timing_by_segment[segment_id] = (segment_start, segment_end)
 
         # ── repository write (before scheduler, best-effort) ──
         if self._repo_enabled:
@@ -110,6 +131,8 @@ class TranslationAdapter:
                     status="FINAL",
                     original_text=text,
                     translation_status="PENDING" if translate else "NOT_REQUESTED",
+                    start_offset=segment_start,
+                    end_offset=segment_end,
                 )
             except Exception:
                 import logging

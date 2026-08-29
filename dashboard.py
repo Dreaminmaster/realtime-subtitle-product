@@ -3,7 +3,8 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QSpinBox, QDoubleSpinBox, QGridLayout,
                              QScrollArea, QSizePolicy, QSpacerItem, QFormLayout, QApplication,
                              QMessageBox, QTextEdit, QDialog, QSlider,
-                             QListWidget, QListWidgetItem, QSplitter, QFileDialog)
+                             QListWidget, QListWidgetItem, QSplitter, QFileDialog,
+                             QCheckBox)
 from PyQt6.QtCore import Qt, QSize, pyqtSignal, QThread, QTimer
 from PyQt6.QtGui import QFont, QIcon, QColor, QPixmap
 import sys
@@ -12,7 +13,8 @@ import sounddevice as sd
 from config import config
 from localization import apply_language, normalize_language, translate as ui_translate
 from product_navigation import ProductNavigation
-from ui_components import ColorButton, ProviderSelector, ThemedComboBox
+from ui_components import ColorButton, ProviderSelector, SubtitlePreview, ThemedComboBox
+from session_history_player import SessionHistoryPlayer
 
 # Use one popup implementation everywhere so menus cannot revert to the
 # unreadable native light palette or clip long provider/model names.
@@ -80,6 +82,12 @@ QPushButton#ModelDownload { background: #d98246; color: #1d1712; }
 QFrame#HeroCard, QFrame#SummaryCard, QFrame#SettingsCard {
     background: #22211f; border: 1px solid #3a3833; border-radius: 12px;
 }
+QFrame#Workbench { background: #211f1c; border: 1px solid #3d3933; border-radius: 18px; }
+QFrame#ControlColumn { background: transparent; border: none; }
+QFrame#SettingStrip { background: #1e1d1a; border: 1px solid #34322e; border-radius: 12px; }
+QFrame#SubtitlePreviewStage { background: #151514; border: 1px solid #34322e; border-radius: 14px; }
+QFrame#Transport { background: #22211f; border: 1px solid #3d3933; border-radius: 11px; }
+QLabel#HistoryTitle { color: #f3efe7; font-size: 18px; font-weight: 700; }
 QLabel#HeroTitle { color: #f6f2e9; font-size: 24px; font-weight: 700; }
 QLabel#HeroCopy, QLabel#Muted { color: #b6b0a6; font-size: 12px; }
 QLabel#StatusPill {
@@ -98,6 +106,9 @@ QListWidget::item { padding: 10px; border-radius: 7px; }
 QListWidget::item:selected { background: #44352b; color: #ffbd80; }
 QSlider::groove:horizontal { height: 5px; background: #46423b; border-radius: 2px; }
 QSlider::handle:horizontal { width: 17px; margin: -6px 0; background: #ec9251; border-radius: 8px; }
+QCheckBox { spacing: 9px; color: #ded9cf; }
+QCheckBox::indicator { width: 18px; height: 18px; border: 1px solid #57524a; border-radius: 5px; background: #25231f; }
+QCheckBox::indicator:checked { background: #d98246; border-color: #d98246; }
 QGroupBox { border: 1px solid #3f3c37; border-radius: 9px; margin-top: 12px; padding-top: 12px; }
 QGroupBox::title { subcontrol-origin: margin; padding: 0 7px; color: #d99a69; }
 """
@@ -110,6 +121,7 @@ class Dashboard(QWidget):
     progress_event = pyqtSignal(object)  # ProgressEvent — update ProgressPanel
     translation_test_finished = pyqtSignal(int, bool, str)
     model_list_finished = pyqtSignal(bool, object, str)
+    model_search_finished = pyqtSignal(bool, object, str)
 
     FORCE_QUIT = "force_quit"
     RETRY = "retry"
@@ -246,6 +258,7 @@ class Dashboard(QWidget):
         self.progress_event.connect(self.progress_panel.set_progress)
         self.translation_test_finished.connect(self._on_translation_test_finished)
         self.model_list_finished.connect(self._on_model_list_finished)
+        self.model_search_finished.connect(self._on_model_search_finished)
         apply_language(self, self.ui_language)
 
     def _set_localized_text(self, widget, source):
@@ -275,37 +288,49 @@ class Dashboard(QWidget):
 
     def init_home_tab(self):
         tab = QWidget()
-        layout = QVBoxLayout()
-        layout.setContentsMargins(26, 24, 26, 24)
-        layout.setSpacing(18)
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(24, 22, 24, 24)
+        layout.setSpacing(14)
 
-        hero = QFrame()
-        hero.setObjectName("HeroCard")
-        hero_layout = QVBoxLayout(hero)
-        hero_layout.setContentsMargins(30, 28, 30, 28)
-        hero_layout.setSpacing(12)
-
-        title = QLabel("Live subtitles")
-        title.setObjectName("HeroTitle")
-        hero_layout.addWidget(title)
-
-        copy = QLabel(
-            "Choose an input, then start. The subtitle window stays above your other apps."
-        )
+        heading = QLabel("Live subtitles")
+        heading.setObjectName("HeroTitle")
+        layout.addWidget(heading)
+        copy = QLabel("Start once, then keep only the floating subtitles above your other apps.")
         copy.setObjectName("HeroCopy")
-        copy.setWordWrap(True)
-        hero_layout.addWidget(copy)
+        layout.addWidget(copy)
+
+        workbench = QFrame()
+        workbench.setObjectName("Workbench")
+        workbench_layout = QHBoxLayout(workbench)
+        workbench_layout.setContentsMargins(24, 24, 24, 24)
+        workbench_layout.setSpacing(24)
+
+        controls = QFrame()
+        controls.setObjectName("ControlColumn")
+        hero_layout = QVBoxLayout(controls)
+        hero_layout.setContentsMargins(0, 0, 0, 0)
+        hero_layout.setSpacing(13)
+        eyebrow = QLabel("CAPTION SESSION")
+        eyebrow.setObjectName("SummaryLabel")
+        hero_layout.addWidget(eyebrow)
+        prompt = QLabel("Ready when you are")
+        prompt.setStyleSheet("font-size: 21px; font-weight: 700; color: #f4f0e7;")
+        hero_layout.addWidget(prompt)
+        explanation = QLabel("Audio remains on this Mac. Saved sessions can keep a transcript and an optional recording.")
+        explanation.setObjectName("Muted")
+        explanation.setWordWrap(True)
+        hero_layout.addWidget(explanation)
 
         action_row = QHBoxLayout()
-        action_row.setSpacing(12)
+        action_row.setSpacing(10)
         self.start_btn = QPushButton("Start Live Subtitles")
-        self.start_btn.setFixedSize(210, 46)
+        self.start_btn.setMinimumSize(205, 44)
         self.start_btn.clicked.connect(self.on_start)
         action_row.addWidget(self.start_btn)
 
         self.stop_btn = QPushButton("Stop Session")
         self.stop_btn.setObjectName("DangerButton")
-        self.stop_btn.setFixedSize(160, 46)
+        self.stop_btn.setMinimumSize(145, 44)
         self.stop_btn.clicked.connect(self.on_stop)
         self.stop_btn.hide()
         action_row.addWidget(self.stop_btn)
@@ -316,8 +341,9 @@ class Dashboard(QWidget):
         action_row.addStretch()
         hero_layout.addLayout(action_row)
 
-        session_row = QHBoxLayout()
-        session_row.addWidget(QLabel("Session:"))
+        mode_label = QLabel("Session type")
+        mode_label.setObjectName("SummaryLabel")
+        hero_layout.addWidget(mode_label)
         self.session_mode_combo = QComboBox()
         self.session_mode_combo.addItem("Saved session", "saved")
         self.session_mode_combo.addItem("Temporary session", "temporary")
@@ -327,17 +353,29 @@ class Dashboard(QWidget):
         self.session_mode_combo.setToolTip(
             "Saved sessions remain on this Mac. Temporary sessions disappear when stopped."
         )
-        session_row.addWidget(self.session_mode_combo)
-        session_row.addStretch()
-        hero_layout.addLayout(session_row)
-        session_hint = QLabel("Saved locally · switch to Temporary for private one-off captions")
-        session_hint.setObjectName("Muted")
-        session_hint.setWordWrap(True)
-        hero_layout.addWidget(session_hint)
-        layout.addWidget(hero)
+        self.session_mode_combo.currentIndexChanged.connect(self._on_session_mode_changed)
+        hero_layout.addWidget(self.session_mode_combo)
+        self.record_audio_check = QCheckBox("Record full audio for playback")
+        self.record_audio_check.setChecked(bool(getattr(config, "record_session_audio", False)))
+        self.record_audio_check.setToolTip("Uses the same audio stream as captions; no second microphone is opened.")
+        hero_layout.addWidget(self.record_audio_check)
+        self.record_audio_hint = QLabel("")
+        self.record_audio_hint.setObjectName("Muted")
+        self.record_audio_hint.setWordWrap(True)
+        hero_layout.addWidget(self.record_audio_hint)
+        hero_layout.addStretch()
+        workbench_layout.addWidget(controls, 5)
 
-        summaries = QHBoxLayout()
-        summaries.setSpacing(12)
+        self.live_preview = SubtitlePreview()
+        self.live_preview.set_preview_style(self._current_appearance_style_from_config())
+        workbench_layout.addWidget(self.live_preview, 6)
+        layout.addWidget(workbench, 1)
+
+        strip = QFrame()
+        strip.setObjectName("SettingStrip")
+        summaries = QHBoxLayout(strip)
+        summaries.setContentsMargins(17, 11, 17, 11)
+        summaries.setSpacing(14)
         summary_values = (
             (
                 "INPUT",
@@ -355,12 +393,12 @@ class Dashboard(QWidget):
                 "Off" if config.translation_mode == "off" else config.target_lang,
             ),
         )
-        for label_text, value_text in summary_values:
-            card = QFrame()
-            card.setObjectName("SummaryCard")
+        for index, (label_text, value_text) in enumerate(summary_values):
+            card = QWidget()
+            card.setStyleSheet("background: transparent;")
             card_layout = QVBoxLayout(card)
-            card_layout.setContentsMargins(18, 15, 18, 15)
-            card_layout.setSpacing(5)
+            card_layout.setContentsMargins(5, 2, 5, 2)
+            card_layout.setSpacing(3)
             label = QLabel(label_text)
             label.setObjectName("SummaryLabel")
             value = QLabel(value_text)
@@ -369,12 +407,36 @@ class Dashboard(QWidget):
             card_layout.addWidget(label)
             card_layout.addWidget(value)
             summaries.addWidget(card, 1)
-        layout.addLayout(summaries)
+            if index < len(summary_values) - 1:
+                divider = QFrame()
+                divider.setFrameShape(QFrame.Shape.VLine)
+                divider.setStyleSheet("color: #36332f;")
+                summaries.addWidget(divider)
+        layout.addWidget(strip)
 
-        layout.addStretch()
-
-        tab.setLayout(layout)
         self.tabs.addTab(tab, "Home")
+        self._on_session_mode_changed()
+
+    def _current_appearance_style_from_config(self):
+        return {
+            "original_font_size": getattr(config, "original_font_size", 20),
+            "translation_font_size": getattr(config, "translation_font_size", 17),
+            "original_color": getattr(config, "original_color", "#ffffff"),
+            "translation_color": getattr(config, "translation_color", "#d99a69"),
+            "window_opacity": getattr(config, "window_opacity", 0.94),
+            "window_width": getattr(config, "window_width", 620),
+            "visible_subtitles": getattr(config, "visible_subtitles", 3),
+            "display_mode": getattr(config, "display_mode", "bilingual"),
+        }
+
+    def _on_session_mode_changed(self, *_):
+        saved = (self.session_mode_combo.currentData() or "saved") == "saved"
+        self.record_audio_check.setEnabled(saved)
+        if not saved:
+            self.record_audio_check.setChecked(False)
+            self.record_audio_hint.setText("Temporary sessions leave no transcript or recording.")
+        else:
+            self.record_audio_hint.setText("Optional · recording stays only on this Mac.")
 
     def init_history_tab(self):
         """Chat-style local transcript library with saved/temporary sessions."""
@@ -412,10 +474,9 @@ class Dashboard(QWidget):
         self.history_list.setMinimumWidth(220)
         self.history_list.currentItemChanged.connect(self._show_history_session)
         splitter.addWidget(self.history_list)
-        self.history_text = QTextEdit()
-        self.history_text.setReadOnly(True)
-        self.history_text.setPlaceholderText("Your saved transcript will appear here.")
-        splitter.addWidget(self.history_text)
+        self.history_player = SessionHistoryPlayer(language=self.ui_language)
+        self.history_player.status_changed.connect(self._set_history_status)
+        splitter.addWidget(self.history_player)
         splitter.setSizes([260, 650])
         root.addWidget(splitter, 1)
 
@@ -451,9 +512,14 @@ class Dashboard(QWidget):
                 self.history_list.setCurrentRow(0)
             self.history_status.setText(f"{len(sessions)} saved session(s)")
             if not sessions:
-                self.history_text.setPlainText("No saved sessions yet. Start Live with ‘Saved session’ selected.")
+                self.history_player.clear_session(
+                    "No saved sessions yet. Start Live with ‘Saved session’ selected."
+                )
         except Exception as exc:
             self.history_status.setText(f"History unavailable: {exc}")
+
+    def _set_history_status(self, message):
+        self.history_status.setText(message)
 
     def _show_history_session(self, current, previous=None):
         del previous
@@ -464,9 +530,12 @@ class Dashboard(QWidget):
             repo = self._open_history_repository()
             snapshot = SegmentAPI(repo).get_session_snapshot(current.data(Qt.ItemDataRole.UserRole))
             repo.close()
-            self.history_text.setPlainText(snapshot.bilingual_text if snapshot else "")
+            if snapshot:
+                self.history_player.set_session(snapshot.session, snapshot.segments)
+            else:
+                self.history_player.clear_session("This session is unavailable.")
         except Exception as exc:
-            self.history_text.setPlainText(f"Unable to read this session: {exc}")
+            self.history_player.clear_session(f"Unable to read this session: {exc}")
 
     def _delete_history_session(self):
         item = self.history_list.currentItem()
@@ -475,8 +544,18 @@ class Dashboard(QWidget):
         reply = QMessageBox.question(self, "Delete Session", "Delete this saved transcript?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if reply == QMessageBox.StandardButton.Yes:
             repo = self._open_history_repository()
-            repo.delete_session(item.data(Qt.ItemDataRole.UserRole))
+            session_id = item.data(Qt.ItemDataRole.UserRole)
+            session = repo.get_session(session_id)
+            repo.delete_session(session_id)
             repo.close()
+            if session:
+                import json
+                from session_recording import delete_session_recording
+                try:
+                    metadata = json.loads(session.get("metadata_json") or "{}")
+                except (TypeError, ValueError):
+                    metadata = {}
+                delete_session_recording(metadata.get("audio_path"))
             self._refresh_history()
 
     def _export_history_session(self):
@@ -963,7 +1042,16 @@ class Dashboard(QWidget):
         
         # Whisper Model
         self.whisper_model = QComboBox()
+        self.whisper_model.setEditable(True)
         self.whisper_model.addItems(["tiny", "tiny.en", "base", "base.en", "small", "small.en", "medium", "medium.en", "large-v3", "turbo"])
+        try:
+            from model_manager import model_manager
+            for installed in model_manager.get_models("whisper"):
+                model_id = installed["id"]
+                if installed.get("downloaded") and self.whisper_model.findText(model_id) < 0:
+                    self.whisper_model.addItem(model_id)
+        except Exception:
+            pass
         self.whisper_model.setCurrentText(config.whisper_model)
         layout.addRow("Whisper Model:", self.whisper_model)
         
@@ -1104,6 +1192,7 @@ class Dashboard(QWidget):
 
         self.translation_mode = ProviderSelector()
         self.translation_mode.addItem("No translation", "off")
+        self.translation_mode.addItem("Apple Translation", "fast")
         self.translation_mode.addItem("Agnes AI", "online")
         self.translation_mode.addItem("LM Studio / local server", "local")
         self.translation_mode.addItem("Custom API", "custom")
@@ -1244,10 +1333,10 @@ class Dashboard(QWidget):
                 "color: #8f8a82; font-size: 12px; padding-top: 5px;"
             )
         if hasattr(self, "test_trans_btn"):
-            endpoint_mode = (self.translation_mode.currentData() or "off") in {
-                "online", "local", "custom",
+            testable_mode = (self.translation_mode.currentData() or "off") in {
+                "fast", "online", "local", "custom",
             }
-            self.test_trans_btn.setEnabled(endpoint_mode)
+            self.test_trans_btn.setEnabled(testable_mode)
             self._set_localized_text(self.test_trans_btn, "Test Connection")
         
     def update_translation_mode_label(self, *_):
@@ -1258,7 +1347,7 @@ class Dashboard(QWidget):
         self.model.setEnabled(endpoint_mode)
         self.refresh_models_btn.setEnabled(endpoint_mode)
         self.target_lang.setEnabled(mode != "off")
-        self.test_trans_btn.setEnabled(endpoint_mode)
+        self.test_trans_btn.setEnabled(mode != "off")
         api_key = self.api_key.text().strip()
         base_url = self.base_url.text().strip()
         model = self.model.currentText().strip()
@@ -1270,6 +1359,11 @@ class Dashboard(QWidget):
         elif mode == "online" and (not api_key or api_key == "sk-..."):
             self.trans_mode_label.setText(
                 "翻译：关闭 · 请先填写 API 密钥" if zh else "Translation: Off · API key required"
+            )
+        elif mode == "fast":
+            self.trans_mode_label.setText(
+                "翻译：Apple 本地翻译 · 需 macOS 26 与已下载语言包" if zh
+                else "Translation: Apple on-device · macOS 26 and installed language assets required"
             )
         elif mode == "online":
             endpoint = base_url or "OpenAI default endpoint"
@@ -1348,7 +1442,11 @@ class Dashboard(QWidget):
         
         is_local = any(h in base_url for h in ("localhost", "127.0.0.1", "::1"))
         
-        endpoint_label = base_url or "OpenAI default endpoint"
+        endpoint_label = (
+            "Apple Translation"
+            if mode == "fast"
+            else (base_url or "OpenAI default endpoint")
+        )
         self.trans_test_result.setText(
             f"正在测试 {endpoint_label}…" if self.ui_language == "zh-Hans"
             else f"Testing {endpoint_label}…"
@@ -1362,12 +1460,19 @@ class Dashboard(QWidget):
             try:
                 engine = TranslationEngine()
                 engine.target_lang = target_lang
-                engine.set_mode(mode, base_url=base_url, api_key=api_key, model=model)
+                engine.set_mode(
+                    mode,
+                    base_url=base_url,
+                    api_key=api_key,
+                    model=model,
+                    source_language="auto",
+                )
                 sample = engine.translate("The connection is working.")
                 if sample and not sample.startswith("[Translation Failed:"):
                     prefix = "连接成功" if self.ui_language == "zh-Hans" else "Connected"
+                    provider_label = "Apple Translation" if mode == "fast" else model
                     self.translation_test_finished.emit(
-                        request_generation, True, f"{prefix} · {model}\n{sample[:120]}"
+                        request_generation, True, f"{prefix} · {provider_label}\n{sample[:120]}"
                     )
                 else:
                     hint = ""
@@ -1431,6 +1536,41 @@ class Dashboard(QWidget):
         self.refresh_model_btn.clicked.connect(self._refresh_model_list)
         filter_layout.addWidget(self.refresh_model_btn)
         layout.addWidget(filter_card)
+
+        discover = QFrame()
+        discover.setObjectName("SettingsCard")
+        discover_layout = QVBoxLayout(discover)
+        discover_layout.setContentsMargins(16, 14, 16, 14)
+        discover_layout.setSpacing(9)
+        discover_title = QLabel("Find a community model")
+        discover_title.setStyleSheet("font-size: 14px; font-weight: 700;")
+        discover_layout.addWidget(discover_title)
+        discover_copy = QLabel(
+            "Search Hugging Face or paste an organization/model URL. Only faster-whisper compatible models can be installed."
+        )
+        discover_copy.setObjectName("Muted")
+        discover_copy.setWordWrap(True)
+        discover_layout.addWidget(discover_copy)
+        search_row = QHBoxLayout()
+        self.model_search_input = QLineEdit()
+        self.model_search_input.setPlaceholderText("e.g. large-v3 Chinese or organization/model")
+        self.model_search_input.returnPressed.connect(self._search_model_catalog)
+        search_row.addWidget(self.model_search_input, 1)
+        self.model_search_btn = QPushButton("Search")
+        self.model_search_btn.setObjectName("SecondaryButton")
+        self.model_search_btn.clicked.connect(self._search_model_catalog)
+        search_row.addWidget(self.model_search_btn)
+        discover_layout.addLayout(search_row)
+        result_row = QHBoxLayout()
+        self.model_search_results = QComboBox()
+        self.model_search_results.setPlaceholderText("Search results")
+        result_row.addWidget(self.model_search_results, 1)
+        self.model_search_download = QPushButton("Download selected")
+        self.model_search_download.setEnabled(False)
+        self.model_search_download.clicked.connect(self._download_selected_search_model)
+        result_row.addWidget(self.model_search_download)
+        discover_layout.addLayout(result_row)
+        layout.addWidget(discover)
         
         # Model list
         self.model_list_widget = QWidget()
@@ -1465,6 +1605,48 @@ class Dashboard(QWidget):
         layout.addWidget(self.progress_panel)
         
         self._refresh_model_list()
+
+    def _search_model_catalog(self):
+        query = self.model_search_input.text().strip()
+        if not query:
+            self.model_mgmt_status.setText("Enter a model name or Hugging Face URL")
+            return
+        if self.model_backend_combo.currentText() != "whisper":
+            self.model_backend_combo.setCurrentText("whisper")
+        self.model_search_btn.setEnabled(False)
+        self.model_search_download.setEnabled(False)
+        self.model_search_results.clear()
+        self.model_mgmt_status.setText("Searching Hugging Face…")
+
+        def work():
+            try:
+                from model_catalog import search_faster_whisper
+                results = search_faster_whisper(query, limit=10)
+                self.model_search_finished.emit(True, results, "")
+            except Exception as exc:
+                self.model_search_finished.emit(False, [], str(exc))
+
+        import threading
+        threading.Thread(target=work, daemon=True, name="model-search").start()
+
+    def _on_model_search_finished(self, ok, results, error):
+        self.model_search_btn.setEnabled(True)
+        self.model_search_results.clear()
+        if not ok:
+            self.model_mgmt_status.setText(f"Search failed: {error}")
+            return
+        for model_id in results:
+            self.model_search_results.addItem(model_id, model_id)
+        self.model_search_download.setEnabled(bool(results))
+        self.model_mgmt_status.setText(
+            f"Found {len(results)} compatible model(s)" if results
+            else "No compatible faster-whisper models found"
+        )
+
+    def _download_selected_search_model(self):
+        model_id = self.model_search_results.currentData()
+        if model_id:
+            self._download_model(str(model_id), "whisper")
     
     def _refresh_model_list(self):
         """Refresh model list display"""
@@ -1644,6 +1826,10 @@ class Dashboard(QWidget):
                 else f"{model_id} · installed"
             )
             self.model_mgmt_status.setStyleSheet("color: #a6e3a1; font-size: 12px;")
+            if self.model_backend_combo.currentText() == "whisper":
+                if self.whisper_model.findText(model_id) < 0:
+                    self.whisper_model.addItem(model_id)
+                self.whisper_model.setCurrentText(model_id)
             QTimer.singleShot(
                 1200,
                 lambda mid=model_id: self._dismiss_completed_progress(mid),
@@ -1783,20 +1969,33 @@ class Dashboard(QWidget):
         self._refresh_model_list()
 
     def init_style_tab(self):
-        """Subtitle style customization tab"""
+        """Subtitle appearance editor with a live, transparent preview."""
         tab = QWidget()
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea { border: none; }")
-        
-        content = QWidget()
-        layout = QFormLayout()
-        layout.setSpacing(10)
-        content.setLayout(layout)
-        
-        header = QLabel("Subtitle Appearance")
-        header.setStyleSheet("font-size: 16px; font-weight: bold; color: #fab387;")
-        layout.addRow(header)
+        root = QVBoxLayout(tab)
+        root.setContentsMargins(18, 20, 18, 20)
+        root.setSpacing(14)
+
+        header = QLabel("Subtitle appearance")
+        header.setObjectName("HeroTitle")
+        root.addWidget(header)
+        intro = QLabel("Adjust the floating subtitle window and see every change before applying it.")
+        intro.setObjectName("Muted")
+        root.addWidget(intro)
+
+        editor = QHBoxLayout()
+        editor.setSpacing(16)
+        controls_scroll = QScrollArea()
+        controls_scroll.setWidgetResizable(True)
+        controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        controls_scroll.setMinimumWidth(280)
+        controls_scroll.setMaximumWidth(390)
+        controls = QFrame()
+        controls.setObjectName("SettingsCard")
+        layout = QFormLayout(controls)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setHorizontalSpacing(14)
+        layout.setVerticalSpacing(14)
+        layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         
         # Font size
         self.original_font_size = QSpinBox()
@@ -1852,27 +2051,51 @@ class Dashboard(QWidget):
         mode_index = self.display_mode.findData(getattr(config, "display_mode", "bilingual"))
         self.display_mode.setCurrentIndex(max(0, mode_index))
         layout.addRow("Display Mode:", self.display_mode)
-        
-        # Apply button
-        self.apply_style_btn = QPushButton("Apply Style")
-        self.apply_style_btn.clicked.connect(self._apply_style)
-        layout.addRow(self.apply_style_btn)
+
+        controls_scroll.setWidget(controls)
+        editor.addWidget(controls_scroll, 4)
+
+        preview_column = QVBoxLayout()
+        preview_label = QLabel("LIVE PREVIEW")
+        preview_label.setObjectName("SummaryLabel")
+        preview_column.addWidget(preview_label)
+        self.appearance_preview = SubtitlePreview()
+        preview_column.addWidget(self.appearance_preview, 1)
+        preview_hint = QLabel("The checker-free preview shows the real text colors and background opacity independently.")
+        preview_hint.setObjectName("Muted")
+        preview_hint.setWordWrap(True)
+        preview_column.addWidget(preview_hint)
+        editor.addLayout(preview_column, 6)
+        root.addLayout(editor, 1)
+
+        footer = QHBoxLayout()
         self.appearance_feedback = QLabel("")
         self.appearance_feedback.setObjectName("StatusPill")
         self.appearance_feedback.hide()
-        layout.addRow(self.appearance_feedback)
-        
-        scroll.setWidget(content)
-        
-        tab_layout = QVBoxLayout()
-        tab_layout.addWidget(scroll)
-        tab.setLayout(tab_layout)
-        
+        footer.addWidget(self.appearance_feedback)
+        footer.addStretch()
+        self.apply_style_btn = QPushButton("Apply Style")
+        self.apply_style_btn.setMinimumWidth(150)
+        self.apply_style_btn.clicked.connect(self._apply_style)
+        footer.addWidget(self.apply_style_btn)
+        root.addLayout(footer)
+
+        for signal in (
+            self.original_font_size.valueChanged,
+            self.translation_font_size.valueChanged,
+            self.original_color.colorChanged,
+            self.translation_color.colorChanged,
+            self.window_opacity.valueChanged,
+            self.window_width.valueChanged,
+            self.visible_subtitles.valueChanged,
+            self.display_mode.currentIndexChanged,
+        ):
+            signal.connect(self._update_appearance_preview)
+        self._update_appearance_preview()
         self.tabs.addTab(tab, "Style")
-    
-    def _apply_style(self):
-        """Apply subtitle style to overlay window"""
-        style = {
+
+    def _appearance_style_from_controls(self):
+        return {
             "original_font_size": self.original_font_size.value(),
             "translation_font_size": self.translation_font_size.value(),
             "original_color": self.original_color.currentText(),
@@ -1882,9 +2105,19 @@ class Dashboard(QWidget):
             "visible_subtitles": self.visible_subtitles.value(),
             "display_mode": self.display_mode.currentData() or "bilingual",
         }
+
+    def _update_appearance_preview(self, *_):
+        if hasattr(self, "appearance_preview"):
+            self.appearance_preview.set_preview_style(self._appearance_style_from_controls())
+
+    def _apply_style(self):
+        """Apply subtitle style to overlay window"""
+        style = self._appearance_style_from_controls()
         if hasattr(self, 'overlay_window') and self.overlay_window:
             self.overlay_window.set_style(style)
         self._save_display_preferences(style)
+        if hasattr(self, "live_preview"):
+            self.live_preview.set_preview_style(style)
         self._set_localized_text(self.status_label, "Appearance applied")
         self._set_localized_text(
             self.appearance_feedback,
@@ -2251,6 +2484,10 @@ class Dashboard(QWidget):
         cp.set("app", "language", self.ui_language)
         session_mode = str(self.session_mode_combo.currentData() or "saved")
         cp.set("app", "session_mode", session_mode)
+        record_session_audio = bool(
+            session_mode == "saved" and self.record_audio_check.isChecked()
+        )
+        cp.set("app", "record_session_audio", str(record_session_audio).lower())
         cp.set("display", "window_width", str(self.window_width.value()))
         cp.set("display", "visible_subtitles", str(self.visible_subtitles.value()))
         cp.set("display", "history_limit", str(getattr(config, "subtitle_history_limit", 250)))
@@ -2284,6 +2521,7 @@ class Dashboard(QWidget):
         config.target_lang = str(self.target_lang.currentData() or self.target_lang.currentText())
         config.translation_mode = translation_mode
         config.session_mode = session_mode
+        config.record_session_audio = record_session_audio
         config.use_translation_scheduler = session_mode == "saved"
         config.use_sqlite_session_repository = session_mode == "saved"
         config.use_segment_api_for_history = session_mode == "saved"

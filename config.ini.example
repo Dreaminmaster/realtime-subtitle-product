@@ -1,5 +1,7 @@
 [app]
 language = en
+session_mode = saved
+record_session_audio = false
 
 [api]
 # Leave blank until a translation backend is configured in the app.

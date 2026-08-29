@@ -8,3 +8,4 @@ venv
 build
 dist
 runtime/artifacts/
+native/mac-translation

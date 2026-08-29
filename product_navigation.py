@@ -80,16 +80,16 @@ class ProductNavigation(QFrame):
 
     _ROUTES = {
         "Home": ("Live", "Live", None),
-        "History": ("History", "History", None),
-        "Audio": ("Audio", "Audio", "Input"),
-        "Devices": ("Audio", "Audio", "System Audio"),
-        "Transcript": ("Language", "Language", "Recognition"),
-        "Translate": ("Language", "Language", "Translation"),
-        "Models": ("Language", "Language", "Models"),
-        "Style": ("Appearance", "Appearance", None),
-        "Diag": ("System", "System", None),
+        "History": ("Sessions", "Sessions", None),
+        "Audio": ("Settings", "Settings", "Audio"),
+        "Devices": ("Settings", "Settings", "System Audio"),
+        "Transcript": ("Settings", "Settings", "Recognition"),
+        "Translate": ("Settings", "Settings", "Translation"),
+        "Models": ("Settings", "Settings", "Models"),
+        "Style": ("Settings", "Settings", "Appearance"),
+        "Diag": ("Settings", "Settings", "System"),
     }
-    _MULTI_SECTIONS = {"Audio", "Language"}
+    _MULTI_SECTIONS = {"Settings"}
 
     def __init__(self, parent=None):
         super().__init__(parent)

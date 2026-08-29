@@ -66,6 +66,17 @@ class TestListSegments:
         assert len(segs) == 1
         assert isinstance(segs[0], SegmentView)
 
+    def test_exposes_recording_offsets(self, repo, api):
+        repo.create_session("s1")
+        repo.upsert_original_segment(
+            session_id="s1", segment_id="seg1", revision=1,
+            status="FINAL", original_text="hello",
+            start_offset=0.75, end_offset=2.25,
+        )
+        segment = api.list_segments("s1")[0]
+        assert segment.start_offset == pytest.approx(0.75)
+        assert segment.end_offset == pytest.approx(2.25)
+
 
 # ── 5. get_latest_segment ─────────────────────────────────────
 class TestGetLatestSegment:

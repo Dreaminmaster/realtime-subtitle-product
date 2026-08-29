@@ -4,7 +4,7 @@ Phase 1f: provides persistence for sessions, segments, translations.
 Does NOT replace runtime state unless feature flag is enabled.
 Default: false.
 
-Schema version: 1
+Schema version: 2
 """
 
 from __future__ import annotations
@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS segments (
     updated_at REAL NOT NULL,
     finalized_at REAL,
     translated_at REAL,
+    start_offset REAL,
+    end_offset REAL,
     PRIMARY KEY (session_id, segment_id, revision),
     FOREIGN KEY (session_id) REFERENCES sessions(session_id)
 );
@@ -96,7 +98,22 @@ class SQLiteSessionRepository:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.executescript(SCHEMA_SQL)
+            # Forward-only, additive migration for databases created by 2.6
+            # and earlier. SQLite has no ADD COLUMN IF NOT EXISTS syntax on
+            # every supported macOS version, so inspect first.
+            self._ensure_column("segments", "start_offset", "REAL")
+            self._ensure_column("segments", "end_offset", "REAL")
             self._conn.commit()
+
+    def _ensure_column(self, table: str, column: str, declaration: str) -> None:
+        conn = self._conn
+        if conn is None:
+            return
+        existing = {
+            row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
 
     def close(self) -> None:
         with self._lock:
@@ -153,6 +170,28 @@ class SQLiteSessionRepository:
             )
             conn.commit()
 
+    def update_session_metadata(self, session_id: str, updates: dict) -> bool:
+        """Merge durable recording/playback metadata into a saved session."""
+        with self._lock:
+            conn = self._ensure()
+            row = conn.execute(
+                "SELECT metadata_json FROM sessions WHERE session_id = ?", (session_id,)
+            ).fetchone()
+            if row is None:
+                return False
+            try:
+                metadata = json.loads(row[0] or "{}")
+            except (json.JSONDecodeError, TypeError):
+                metadata = {}
+            metadata.update(dict(updates or {}))
+            now = time.time()
+            conn.execute(
+                "UPDATE sessions SET metadata_json = ?, updated_at = ? WHERE session_id = ?",
+                (json.dumps(metadata), now, session_id),
+            )
+            conn.commit()
+            return True
+
     def get_session(self, session_id: str) -> dict | None:
         with self._lock:
             conn = self._ensure()
@@ -202,6 +241,8 @@ class SQLiteSessionRepository:
         status: str,
         original_text: str,
         translation_status: str = "PENDING",
+        start_offset: float | None = None,
+        end_offset: float | None = None,
     ) -> None:
         now = time.time()
         with self._lock:
@@ -209,8 +250,8 @@ class SQLiteSessionRepository:
             conn.execute(
                 """INSERT OR REPLACE INTO segments
                    (session_id, segment_id, revision, status, original_text,
-                    translation_status, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    translation_status, created_at, updated_at, start_offset, end_offset)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     session_id,
                     segment_id,
@@ -220,6 +261,8 @@ class SQLiteSessionRepository:
                     translation_status,
                     now,
                     now,
+                    start_offset,
+                    end_offset,
                 ),
             )
             conn.execute(

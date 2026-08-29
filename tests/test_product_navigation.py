@@ -14,7 +14,7 @@ def app():
     yield instance
 
 
-def test_eight_feature_pages_are_grouped_into_five_sections(app):
+def test_eight_feature_pages_are_grouped_into_live_and_settings(app):
     navigation = ProductNavigation()
     labels = [
         "🏠 Home",
@@ -31,21 +31,17 @@ def test_eight_feature_pages_are_grouped_into_five_sections(app):
         navigation.addTab(QWidget(), label)
 
     assert navigation.count() == 8
-    assert navigation.stack.count() == 5
+    assert navigation.stack.count() == 2
     assert list(navigation._section_buttons) == [
         "Live",
-        "Audio",
-        "Language",
-        "Appearance",
-        "System",
+        "Settings",
     ]
-    assert isinstance(navigation._section_widgets["Audio"], SectionTabs)
-    assert navigation._section_widgets["Audio"].count() == 2
-    assert navigation._section_widgets["Language"].count() == 3
+    assert isinstance(navigation._section_widgets["Settings"], SectionTabs)
+    assert navigation._section_widgets["Settings"].count() == 7
     assert [
-        navigation._section_widgets["Language"].tabText(index)
-        for index in range(3)
-    ] == ["Recognition", "Translation", "Models"]
+        navigation._section_widgets["Settings"].tabText(index)
+        for index in range(7)
+    ] == ["Audio", "System Audio", "Recognition", "Translation", "Models", "Appearance", "System"]
 
 
 def test_first_section_is_selected_and_tooltip_reaches_page(app):

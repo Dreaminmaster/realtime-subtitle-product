@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version, for example 2.6.0"
+        description: "Release version, for example 2.7.0"
         required: true
-        default: "2.6.0"
+        default: "2.7.0"
       publish:
         description: "Publish or update the GitHub release"
         required: true
@@ -59,7 +59,10 @@ jobs:
       - name: Static checks
         run: |
           bash -n build_dmg.sh
-          .ci-venv/bin/python -m py_compile main.py dashboard.py product_navigation.py launcher.py
+          .ci-venv/bin/python -m py_compile \
+            main.py dashboard.py product_navigation.py launcher.py \
+            session_history_player.py session_recording.py mac_translation.py \
+            model_catalog.py model_manager.py translation_engine.py
       - name: Test
         env:
           QT_QPA_PLATFORM: offscreen
@@ -98,6 +101,9 @@ jobs:
           HELPER="${APP}/Contents/Resources/bin/system-audio-capture"
           test -x "${HELPER}"
           file "${HELPER}" | grep -q "${{ matrix.arch }}"
+          TRANSLATION_HELPER="${APP}/Contents/Resources/bin/mac-translation"
+          test -x "${TRANSLATION_HELPER}"
+          file "${TRANSLATION_HELPER}" | grep -q "${{ matrix.arch }}"
           shasum -a 256 "${DMG}"
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
@@ -134,13 +140,14 @@ jobs:
           TAG="v${VERSION}"
           TITLE="Realtime Subtitle ${TAG}"
           cat > release-notes.md <<'EOF'
-          Realtime Subtitle 2.6.0 focuses on a quieter, native macOS experience.
+          Realtime Subtitle 2.7.0 turns the control center into a focused caption workspace.
 
-          - Built-in system-audio capture with ScreenCaptureKit; BlackHole is no longer required.
-          - The overlay Controls button now toggles the control center in both directions.
-          - Single-instance and non-activating overlay behavior prevent windows from stealing focus.
-          - The transcript action is now clearly labeled Export and writes a TXT snapshot.
-          - Completed model-download progress closes automatically, and Appearance shows applied feedback.
+          - Realtime Subtitles is now the primary workspace, with Sessions and one unified Settings area.
+          - Saved sessions can optionally record audio and provide synchronized, click-to-seek transcript playback.
+          - Appearance includes a faithful live preview and the native macOS color panel.
+          - Apple on-device Translation is available on macOS 26+ with installed language assets.
+          - Model discovery supports recommended choices plus compatible Hugging Face faster-whisper repositories.
+          - Built-in ScreenCaptureKit system audio remains included; no BlackHole driver is required.
 
           Native macOS downloads are provided separately for Apple Silicon and Intel.
 

@@ -49,6 +49,11 @@ class Config:
         self.session_mode = self._get("app", "session_mode", "saved").lower()
         if self.session_mode not in ("saved", "temporary"):
             self.session_mode = "saved"
+        self.record_session_audio = (
+            self._get("app", "record_session_audio", "false").lower() == "true"
+        )
+        if self.session_mode != "saved":
+            self.record_session_audio = False
         
         # API settings (env vars take precedence)
         self.api_base_url = os.getenv("OPENAI_BASE_URL") or self._get("api", "base_url") or None

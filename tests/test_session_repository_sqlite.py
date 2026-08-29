@@ -129,6 +129,17 @@ class TestUpsertOriginal:
         assert seg["revision"] == 2
         assert seg["original_text"] == "rev2"
 
+    def test_timing_offsets_roundtrip(self, repo):
+        repo.create_session("s1")
+        repo.upsert_original_segment(
+            session_id="s1", segment_id="seg1", revision=1,
+            status="FINAL", original_text="timed",
+            start_offset=1.25, end_offset=3.5,
+        )
+        seg = repo.get_latest_segment(session_id="s1", segment_id="seg1")
+        assert seg["start_offset"] == pytest.approx(1.25)
+        assert seg["end_offset"] == pytest.approx(3.5)
+
 
 # ── 7-8. apply translation ─────────────────────────────────────────
 class TestApplyTranslation:
@@ -277,3 +288,16 @@ class TestMetadata:
         repo.create_session("s1", metadata={"model": "small", "mode": "test"})
         s = repo.get_session("s1")
         assert s["metadata"] == {"model": "small", "mode": "test"}
+
+    def test_metadata_update_merges_existing_values(self, repo):
+        repo.create_session("s1", metadata={"record_audio": True, "audio_path": "a.wav"})
+        assert repo.update_session_metadata("s1", {"audio_duration": 12.5}) is True
+        session = repo.get_session("s1")
+        assert session["metadata"] == {
+            "record_audio": True,
+            "audio_path": "a.wav",
+            "audio_duration": 12.5,
+        }
+
+    def test_metadata_update_missing_session_is_false(self, repo):
+        assert repo.update_session_metadata("missing", {"value": 1}) is False

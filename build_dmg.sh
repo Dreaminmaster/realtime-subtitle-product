@@ -139,6 +139,7 @@ rsync -av --exclude='.git' \
       --exclude='SPEAKER_RECOGNITION.md' \
       --exclude='requirements_spec.md' \
       --exclude='runtime/test_reports' \
+      --exclude='native/mac-translation' \
       --exclude='assets/icon/*-chroma.png' \
       --exclude='python' \
       --exclude='venv' \
@@ -184,6 +185,26 @@ if [[ "${ARCH}" = "arm64" && "${SYSTEM_AUDIO_INFO}" != *"arm64"* ]] \
     exit 1
 fi
 echo "  ✅ native system audio (${ARCH})"
+
+# Apple's Translation framework is exposed through a tiny Swift command-line
+# bridge.  The Python process stays portable while the actual translation and
+# downloaded language assets remain entirely inside macOS.
+echo "[2.3/8] Building Apple Translation helper…"
+TRANSLATION_BIN="${RESOURCES}/bin/mac-translation"
+xcrun swiftc -O -parse-as-library \
+    -target "${ARCH}-apple-macos15.0" \
+    "${SCRIPT_DIR}/native/MacTranslation.swift" \
+    -framework Translation \
+    -framework NaturalLanguage \
+    -o "${TRANSLATION_BIN}"
+chmod +x "${TRANSLATION_BIN}"
+TRANSLATION_INFO=$(file "${TRANSLATION_BIN}")
+if [[ "${ARCH}" = "arm64" && "${TRANSLATION_INFO}" != *"arm64"* ]] \
+   || [[ "${ARCH}" = "x86_64" && "${TRANSLATION_INFO}" != *"x86_64"* ]]; then
+    echo "  ERROR: Apple Translation helper architecture mismatch: ${TRANSLATION_INFO}"
+    exit 1
+fi
+echo "  ✅ Apple Translation (${ARCH})"
 
 # ---- Step 2.5: Build wheelhouse (offline dependency bundle) ----
 echo "[2.5/8] Building wheelhouse…"
@@ -527,6 +548,20 @@ else
         echo "  ❌ system-audio helper architecture mismatch: ${SYSTEM_AUDIO_VERIFY}"; FAIL=true
     else
         echo "  ✅ native system audio ${ARCH}"
+    fi
+fi
+
+# Native Apple Translation helper is bundled for the selected architecture.
+TRANSLATION_HELPER="${APP_BUNDLE}/Contents/Resources/bin/mac-translation"
+if [ ! -x "${TRANSLATION_HELPER}" ]; then
+    echo "  ❌ Apple Translation helper missing"; FAIL=true
+else
+    TRANSLATION_VERIFY=$(file "${TRANSLATION_HELPER}")
+    if [[ "${ARCH}" = "arm64" && "${TRANSLATION_VERIFY}" != *"arm64"* ]] \
+       || [[ "${ARCH}" = "x86_64" && "${TRANSLATION_VERIFY}" != *"x86_64"* ]]; then
+        echo "  ❌ Apple Translation helper architecture mismatch: ${TRANSLATION_VERIFY}"; FAIL=true
+    else
+        echo "  ✅ Apple Translation ${ARCH}"
     fi
 fi
 

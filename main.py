@@ -274,7 +274,8 @@ def create_pipeline():
                 base_url=config.api_base_url,
                 api_key=config.api_key or "",
                 model=config.model,
-                timeout=getattr(config, 'translation_timeout', 12.0)
+                timeout=getattr(config, 'translation_timeout', 12.0),
+                source_language=config.source_language or "auto",
             )
             log.info(f"Pipeline: translation engine ({trans_mode}) initialized")
 
@@ -284,6 +285,8 @@ def create_pipeline():
             self._repository = None
             self._repo_owned = False
             self._translation_session_id = None
+            self.session_recorder = None
+            self._recording_duration = 0.0
             from src.runtime_settings_guard import RuntimeSettingsGuard, settings_from_config
             self._runtime_decision = RuntimeSettingsGuard().evaluate(settings_from_config(config))
 
@@ -316,10 +319,28 @@ def create_pipeline():
                 )
                 import uuid
                 self._translation_session_id = uuid.uuid4().hex
+                session_metadata = {
+                    "record_audio": bool(getattr(config, "record_session_audio", False)),
+                    "input_source": getattr(config, "input_source", "microphone"),
+                }
+                if session_metadata["record_audio"]:
+                    from session_recording import (
+                        SessionAudioRecorder,
+                        get_session_recording_path,
+                    )
+                    recording_path = get_session_recording_path(
+                        self._translation_session_id
+                    )
+                    self.session_recorder = SessionAudioRecorder(
+                        recording_path, config.sample_rate
+                    )
+                    session_metadata["audio_path"] = str(recording_path)
+                    session_metadata["audio_format"] = "wav"
                 self.translation_adapter.start_session(
                     self._translation_session_id,
                     source_language=config.source_language or "Auto",
                     target_language=config.target_lang if trans_mode != "off" else None,
+                    metadata=session_metadata,
                 )
                 log.info("Pipeline: v2.4 TranslationScheduler wired (use_translation_scheduler=true)")
 
@@ -346,6 +367,8 @@ def create_pipeline():
             self._stopping = False  # reset for new session
             self.running = True     # reset from previous stop
             self.audio.prepare_start()
+            if self.session_recorder is not None:
+                self.session_recorder.start()
             self.thread = threading.Thread(target=self.processing_loop, daemon=True, name="PipelineLoop")
             self.thread.start()
         
@@ -362,6 +385,8 @@ def create_pipeline():
                 if self.thread.is_alive():
                     log.error("Pipeline loop did not stop within timeout")
                     return False
+            if self.session_recorder is not None:
+                self._recording_duration = self.session_recorder.stop()
             # Session invalidation ONLY after clean shutdown
             self._session_generation += 1
             if hasattr(self, 'translation_adapter'):
@@ -372,6 +397,11 @@ def create_pipeline():
             if self._repo_owned and self._repository is not None:
                 try:
                     if self._translation_session_id is not None:
+                        if self.session_recorder is not None:
+                            self._repository.update_session_metadata(
+                                self._translation_session_id,
+                                {"audio_duration": self._recording_duration},
+                            )
                         self._repository.close_session(self._translation_session_id)
                 except Exception as exc:
                     log.warning(f"Pipeline: session close error: {exc}")
@@ -442,7 +472,11 @@ def create_pipeline():
                     if task_type == "final":
                         qwait = (t0 - task["created_at"]) * 1000
                         log.info(f"Utterance[{uid}] FINAL started queue_wait_ms={qwait:.0f}")
-                        self._process_final_v3(audio, uid, gen, prompt, translate_executor, lifecycle_lock, session_gen)
+                        self._process_final_v3(
+                            audio, uid, gen, prompt, translate_executor,
+                            lifecycle_lock, session_gen,
+                            task.get("start_offset"), task.get("end_offset"),
+                        )
                         inference_ms = (time.time() - t0) * 1000
                         total_ms = (time.time() - task["created_at"]) * 1000
                         log.info(f"Utterance[{uid}] FINAL completed inference_ms={inference_ms:.0f} total_ms={total_ms:.0f}")
@@ -477,6 +511,8 @@ def create_pipeline():
             utterance_id = 1
             utterance_generation = 0
             last_partial_time = 0.0
+            audio_cursor = 0.0
+            utterance_start_offset = 0.0
             
             SILENCE_DUR_SEC = config.silence_duration
             MIN_UTTERANCE_DUR = 1.0
@@ -513,6 +549,12 @@ def create_pipeline():
                         except Exception:
                             log.critical("pipeline_started signal broken")
                     
+                    chunk_start = audio_cursor
+                    chunk_end = chunk_start + len(audio_chunk) / self.audio.sample_rate
+                    if self.session_recorder is not None:
+                        chunk_start, chunk_end = self.session_recorder.write(audio_chunk)
+                    audio_cursor = chunk_end
+
                     chunk_rms = float(np.sqrt(np.mean(audio_chunk**2)))
                     is_speech = chunk_rms > self.audio.silence_threshold
                     now = time.time()
@@ -535,6 +577,10 @@ def create_pipeline():
                             self._utt_lifecycle[utterance_id] = {"generation": utterance_generation, "state": "recording"}
                             log.info(f"Utterance[{utterance_id}] START gen={utterance_generation} state=recording rms={chunk_rms:.4f} pre_roll_ms={len(pre_roll)/self.audio.sample_rate*1000:.0f}")
                             buffer = pre_roll.copy()
+                            utterance_start_offset = max(
+                                0.0,
+                                chunk_end - len(buffer) / self.audio.sample_rate,
+                            )
                             pre_roll = np.array([], dtype=np.float32)
                             state = STATE_RECORDING
                             silence_counter = 0
@@ -584,6 +630,8 @@ def create_pipeline():
                                 "audio": buffer.copy(),
                                 "prompt": self.last_final_text,
                                 "created_at": time.time(),
+                                "start_offset": utterance_start_offset,
+                                "end_offset": audio_cursor,
                             }
                             log.info(f"Utterance[{uid}] FINAL queued priority=0")
                             asr_queue.put((0, self._seq_counter, task))  # priority 0 = FINAL
@@ -648,7 +696,9 @@ def create_pipeline():
                     self._seq_counter += 1
                     task = {"type": "final", "uid": uid, "gen": gen,
                             "audio": buffer.copy(), "prompt": self.last_final_text,
-                            "created_at": time.time()}
+                            "created_at": time.time(),
+                            "start_offset": utterance_start_offset,
+                            "end_offset": audio_cursor}
                     asr_queue.put((0, self._seq_counter, task))
                 
                 # Invalidate all pending partials
@@ -672,6 +722,8 @@ def create_pipeline():
                 
                 translate_executor.shutdown(wait=False, cancel_futures=True)
                 log.info("Translation executor shut down (cancelled pending tasks)")
+                if self.session_recorder is not None:
+                    self._recording_duration = self.session_recorder.stop()
                 
                 self._cleanup_in_progress = True
                 cleanup_ok = not asr_thread.is_alive()
@@ -760,8 +812,11 @@ def create_pipeline():
             except Exception:
                 log.exception(f"Utterance[{chunk_id}] PARTIAL error")
         
-        def _process_final_v3(self, audio_data, chunk_id, gen, prompt="",
-                              translate_executor=None, lifecycle_lock=None, session_gen=None):
+        def _process_final_v3(
+            self, audio_data, chunk_id, gen, prompt="",
+            translate_executor=None, lifecycle_lock=None, session_gen=None,
+            start_offset=None, end_offset=None,
+        ):
             """Final with lifecycle tracking, thread-safe, session-aware."""
             with lifecycle_lock or self._lifecycle_lock:
                 self._latest_partial_seq.pop(chunk_id, None)
@@ -819,7 +874,12 @@ def create_pipeline():
                     if trans_active:
                         self.signals.update_text.emit(display_chunk_id, display_text, "…")
                         if hasattr(self, 'translation_adapter'):
-                            self.translation_adapter.on_final_text(display_text, display_chunk_id)
+                            self.translation_adapter.on_final_text(
+                                display_text,
+                                display_chunk_id,
+                                start_offset=start_offset,
+                                end_offset=end_offset,
+                            )
                         elif translate_executor:
                             translate_executor.submit(
                                 self._run_translation_safe,
@@ -834,7 +894,11 @@ def create_pipeline():
                             # Translation-off mode still records the original
                             # transcript in the v2.4 session repository.
                             self.translation_adapter.on_final_text(
-                                display_text, display_chunk_id, translate=False,
+                                display_text,
+                                display_chunk_id,
+                                translate=False,
+                                start_offset=start_offset,
+                                end_offset=end_offset,
                             )
                 
                 with lifecycle_lock or self._lifecycle_lock:

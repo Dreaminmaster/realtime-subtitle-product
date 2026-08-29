@@ -38,6 +38,8 @@ class SegmentView:
     updated_at: float = 0.0
     finalized_at: float | None = None
     translated_at: float | None = None
+    start_offset: float | None = None
+    end_offset: float | None = None
 
 
 @dataclass(frozen=True)
@@ -90,6 +92,8 @@ def _segment_view(row: dict) -> SegmentView:
         updated_at=row.get("updated_at", 0.0),
         finalized_at=row.get("finalized_at"),
         translated_at=row.get("translated_at"),
+        start_offset=row.get("start_offset"),
+        end_offset=row.get("end_offset"),
     )
 
 
@@ -145,15 +149,27 @@ class SegmentAPI:
                     latest[seg.segment_id] = seg
         return latest
 
+    @staticmethod
+    def _ordered_segments(latest: dict[str, SegmentView]) -> list[SegmentView]:
+        """Prefer sample-accurate recording order, falling back to legacy timestamps."""
+        return sorted(
+            latest.values(),
+            key=lambda segment: (
+                0 if segment.start_offset is not None else 1,
+                segment.start_offset if segment.start_offset is not None else segment.updated_at,
+                segment.segment_id,
+            ),
+        )
+
     # ── transcripts ──────────────────────────────────────────
     def get_latest_transcript(self, session_id: str) -> str:
         latest = self._latest_segments_map(session_id)
-        ordered = sorted(latest.values(), key=lambda s: (s.updated_at, s.segment_id))
+        ordered = self._ordered_segments(latest)
         return "\n".join(s.original_text for s in ordered if s.original_text.strip())
 
     def get_translated_transcript(self, session_id: str) -> str:
         latest = self._latest_segments_map(session_id)
-        ordered = sorted(latest.values(), key=lambda s: (s.updated_at, s.segment_id))
+        ordered = self._ordered_segments(latest)
         lines = []
         for s in ordered:
             if s.translated_text and s.translation_status == "DONE":
@@ -169,7 +185,7 @@ class SegmentAPI:
         if session is None:
             return None
         latest = self._latest_segments_map(session_id)
-        ordered = sorted(latest.values(), key=lambda s: (s.updated_at, s.segment_id))
+        ordered = self._ordered_segments(latest)
 
         original_lines = [s.original_text for s in ordered if s.original_text.strip()]
         translated_lines = []
@@ -224,6 +240,8 @@ class SegmentAPI:
                         "original_text": s.original_text,
                         "translated_text": s.translated_text,
                         "translation_status": s.translation_status,
+                        "start_offset": s.start_offset,
+                        "end_offset": s.end_offset,
                     }
                     for s in snap.segments
                 ],
