@@ -94,6 +94,12 @@ class Config:
         self.funasr_model = self._get("transcription", "funasr_model", "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch")
         self.whisper_device = self._get("transcription", "device", "cpu")
         self.whisper_compute_type = self._get("transcription", "compute_type", "int8")
+        self.enhanced_accuracy = (
+            self._get("transcription", "enhanced_accuracy", "false").lower() == "true"
+        )
+        self.accuracy_profile = self._get("transcription", "accuracy_profile", "auto").lower()
+        if self.accuracy_profile not in ("auto", "fast", "balanced", "accurate"):
+            self.accuracy_profile = "auto"
         self.source_language = self._get("transcription", "source_language", "auto")
         if self.source_language == "auto":
             self.source_language = None  # Whisper uses None for auto-detect
@@ -225,6 +231,7 @@ class Config:
         print(f"  ASR Backend: {self.asr_backend}")
         print(f"  Whisper Model: {self.whisper_model}")
         print(f"  FunASR Model: {self.funasr_model}")
+        print(f"  Enhanced Accuracy: {self.enhanced_accuracy} ({self.accuracy_profile})")
         print(f"  Input Source: {self.input_source}")
         print(f"  Sample Rate: {self.sample_rate}")
 

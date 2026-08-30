@@ -8,14 +8,14 @@
 
 ## 下载 / Download
 
-当前稳定版：**v2.8.1** · macOS 13 Ventura 或更高版本
+当前稳定版：**v2.9.0** · macOS 13 Ventura 或更高版本
 
-Current stable release: **v2.8.1** · macOS 13 Ventura or later
+Current stable release: **v2.9.0** · macOS 13 Ventura or later
 
 | Mac | 安装包 / Installer | 适用设备 / Hardware |
 |---|---|---|
-| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.8.1-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
-| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.8.1-macos-x86_64.dmg) | Intel-based Macs |
+| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.9.0-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
+| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.9.0-macos-x86_64.dmg) | Intel-based Macs |
 
 [查看全部版本 / View all releases](https://github.com/Dreaminmaster/realtime-subtitle-product/releases)
 
@@ -30,6 +30,8 @@ Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本�
 ### 主要功能
 
 - 本地实时语音识别，内置 `faster-whisper tiny` 模型，安装后即可开始。
+- 新增可选的**增强准确率**：当前小模型先即时显示，大模型在后台复听同一段音频，并在原字幕位置修正文字、翻译与保存记录，不会产生重复字幕。
+- 自动根据 Mac 架构与内存推荐增强方案：Intel 使用 `small`，主流 Apple Silicon 使用 `turbo`，24 GB 及以上 Apple Silicon 使用 `large-v3`。增强模型仅在开启功能后按需下载，不会增大基础安装包。
 - 悬浮字幕窗始终置顶，支持拖动、缩放、双语/仅原文/仅翻译显示。
 - 上下文断句会识别短暂停顿后的未完句，在同一条字幕中续接并重新翻译，避免把半句话永久切开。
 - 翻译提示把所有输入严格视为“待翻译语音”，问句不会被本地模型误当成聊天请求；异常回答会自动重试并拦截。
@@ -91,6 +93,14 @@ Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本�
 
 语音只在本机识别。只有启用在线翻译时，识别出的文本才会发送到你配置的服务；音频不会由本项目上传。
 
+### 增强识别准确率
+
+在 **设置 → 识别** 中把“准确率增强”切换为“增强”。“自动匹配（推荐）”会读取本机架构与物理内存，显示准备使用的修正模型及下载大小。首次开启时可直接下载；点击开始字幕但模型尚未安装时，App 也会询问是否下载，并在完成后自动继续启动。
+
+增强模式不会拖慢第一屏字幕：当前识别模型继续负责局部预览和快速结果，推荐的大模型由独立的单线程队列完成最终复听。修正会更新同一个字幕编号，因此悬浮字幕、上下文合句、翻译调度和保存的会话记录保持一致。模型加载或修正失败时会安全退回标准结果，不会中断会话。
+
+也可手动选择：**快速**（`small`）、**均衡**（`turbo`）或**高准确率**（`large-v3`）。大模型会增加内存、CPU 占用与最终修正等待时间；低配置设备建议使用快速方案或保持标准模式。
+
 ### 数据与隐私
 
 | 数据 | 默认位置 |
@@ -120,6 +130,8 @@ Realtime Subtitle is a native-feeling macOS control center with an always-on-top
 ### Highlights
 
 - Local live transcription with a bundled `faster-whisper tiny` model.
+- Optional **Enhanced accuracy** keeps the selected small model responsive, then re-runs finalized audio through a larger local model and corrects the original subtitle position, translation, and saved revision.
+- Hardware-aware recommendations choose `small` for Intel, `turbo` for mainstream Apple Silicon, and `large-v3` for Apple Silicon with at least 24 GB of memory. Larger models are downloaded only after the feature is enabled.
 - Draggable, resizable bilingual overlay with original-only and translation-only modes.
 - An appearance preview that renders the exact selected number of visible rows, with in-session scrollback for older captions.
 - Three explicit session outcomes before starting: **Temporary**, **Save subtitles**, or **Subtitles + recording**.
@@ -175,6 +187,12 @@ Connection results are scoped to the exact provider, credential, endpoint,
 model, and target language. Editing any of them immediately invalidates the old
 result, and a late response from an earlier test cannot reappear as success.
 
+### Enhanced recognition accuracy
+
+Open **Settings → Recognition** and switch **Accuracy enhancement** to **Enhanced**. The recommended Auto profile reports the detected hardware, refinement model, download size, and readiness. If the model is missing when Live starts, the app offers to download it and resumes startup automatically when installation succeeds.
+
+The live model still produces partial and immediate captions. A dedicated one-worker refinement queue runs the larger model over finalized utterance audio and updates the same caption ID. Phrase composition, translation revisions, session persistence, and exports therefore converge on the corrected text without duplicate lines. A load or inference error safely preserves the standard result.
+
 ## 从源码运行 / Run from source
 
 Python 3.10–3.12 is recommended.
@@ -202,6 +220,10 @@ python main.py --diagnostics
 
 # Test suite
 QT_QPA_PLATFORM=offscreen python -m pytest -q
+
+# Compare two installed models on the same local 16-bit PCM WAV
+python tools/compare_recognition_quality.py recording.wav \
+  --draft tiny --refiner turbo --reference "expected words"
 ```
 
 ## 构建 / Build
@@ -210,17 +232,17 @@ Build a native DMG on a matching Mac:
 
 ```bash
 # Apple Silicon host
-bash build_dmg.sh 2.8.1 arm64
+bash build_dmg.sh 2.9.0 arm64
 
 # Intel host, or Apple Silicon with Rosetta installed
-bash build_dmg.sh 2.8.1 x86_64
+bash build_dmg.sh 2.9.0 x86_64
 ```
 
 Outputs:
 
 ```text
-dist/RealtimeSubtitle-2.8.1-macos-arm64.dmg
-dist/RealtimeSubtitle-2.8.1-macos-x86_64.dmg
+dist/RealtimeSubtitle-2.9.0-macos-arm64.dmg
+dist/RealtimeSubtitle-2.9.0-macos-x86_64.dmg
 ```
 
 The GitHub Actions release workflow builds `arm64` on an Apple Silicon runner and `x86_64` on an Intel runner, verifies the embedded architecture and app icon, creates SHA-256 checksums, and publishes both DMGs to one release.
@@ -228,8 +250,9 @@ The GitHub Actions release workflow builds `arm64` on an Apple Silicon runner an
 ## 项目结构 / Architecture
 
 ```text
-Audio input → local ASR → utterance lifecycle → subtitle overlay
-                              └→ translation scheduler → translation provider
+Audio input → fast local ASR → utterance lifecycle → subtitle overlay
+                                ├→ optional accurate local pass → same-line revision
+                                └→ translation scheduler → translation provider
 
 Control Center
 ├── Live
@@ -245,6 +268,7 @@ Control Center
 - The public community builds are unsigned and not notarized.
 - System-audio capture requires macOS 13 or later and the user's Screen & System Audio Recording permission.
 - Intel recognition is supported but generally slower than Apple Silicon.
+- Enhanced accuracy runs a second local CPU pass and can use substantially more memory; its Fast/Balanced/Accurate models are optional downloads.
 - The current product targets macOS only.
 - MLX Whisper is optional and Apple Silicon-only; the packaged default uses `faster-whisper` for both architectures.
 - Apple Translation inside Realtime Subtitle requires macOS 26 or later; older supported macOS versions can use local LM Studio or an online/custom provider.

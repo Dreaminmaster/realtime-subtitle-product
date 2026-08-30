@@ -68,3 +68,16 @@ def test_korean_continuation_keeps_word_spacing():
     composer.compose(1, "하지만", now=1.0)
     decision = composer.compose(2, "다시 해볼게요.", now=2.0)
     assert decision.text == "하지만 다시 해볼게요."
+
+
+def test_join_parts_uses_the_same_language_aware_rules():
+    assert ContextualPhraseComposer.join_parts(["我觉得", "这样更好。"] ) == "我觉得这样更好。"
+    assert ContextualPhraseComposer.join_parts(["we should.", "continue"]) == "we should continue"
+
+
+def test_revise_current_changes_the_base_for_a_later_join():
+    composer = ContextualPhraseComposer()
+    first = composer.compose(1, "I think that", now=1)
+    assert composer.revise_current(first.chunk_id, "I believe that") is True
+    second = composer.compose(2, "we should go.", now=2)
+    assert second.text == "I believe that we should go."

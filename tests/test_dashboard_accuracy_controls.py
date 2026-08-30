@@ -1,0 +1,47 @@
+import os
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from PyQt6.QtWidgets import QApplication
+
+from config import config
+from dashboard import Dashboard
+from model_download_task import SUCCEEDED
+from model_manager import model_manager
+
+_APP = None
+
+def _app():
+    global _APP
+    _APP = QApplication.instance() or QApplication([])
+    return _APP
+
+
+def test_enhanced_controls_follow_config_and_show_download(monkeypatch):
+    _app()
+    monkeypatch.setattr(config, "enhanced_accuracy", True)
+    monkeypatch.setattr(config, "accuracy_profile", "fast")
+    monkeypatch.setattr(model_manager, "is_downloaded", lambda *args: False)
+    dashboard = Dashboard()
+    try:
+        assert dashboard.enhanced_accuracy_mode.currentData() is True
+        assert dashboard.accuracy_profile.currentData() == "fast"
+        assert dashboard.accuracy_profile.isEnabled() is True
+        assert dashboard.accuracy_download_btn.isEnabled() is True
+        assert "small" in dashboard.accuracy_download_btn.text()
+    finally:
+        dashboard.close()
+
+
+def test_accuracy_download_does_not_replace_the_live_model(monkeypatch):
+    _app()
+    dashboard = Dashboard()
+    try:
+        dashboard.whisper_model.setCurrentText("tiny")
+        dashboard._accuracy_download_model_id = "turbo"
+        monkeypatch.setattr(dashboard, "_refresh_model_list", lambda: None)
+        monkeypatch.setattr(dashboard, "_update_accuracy_plan_ui", lambda: None)
+        dashboard._on_model_done("turbo", SUCCEEDED, None, 1)
+        assert dashboard.whisper_model.currentText() == "tiny"
+    finally:
+        dashboard.close()

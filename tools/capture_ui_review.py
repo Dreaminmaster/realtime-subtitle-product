@@ -65,6 +65,11 @@ def main() -> int:
     dashboard.grab().save(str(args.output / "03-system.png"))
     dashboard.language_card.grab().save(str(args.output / "03a-language-card.png"))
 
+    dashboard.tabs.showRoute("Settings", "Recognition")
+    dashboard.enhanced_accuracy_mode.setCurrentIndex(1)
+    app.processEvents()
+    dashboard.grab().save(str(args.output / "04-enhanced-recognition.png"))
+
     from src.segment_api import SegmentView, SessionView
     from session_recording import SessionAudioRecorder
     import numpy as np

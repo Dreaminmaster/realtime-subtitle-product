@@ -240,6 +240,8 @@ class Dashboard(QWidget):
         self._active_downloads = {}
         self._progress_model_id = None
         self._progress_backend = None
+        self._accuracy_download_model_id = None
+        self._pending_start_after_accuracy_download = False
         
         from progress_panel import ProgressPanel
         self.progress_panel = ProgressPanel()
@@ -271,6 +273,7 @@ class Dashboard(QWidget):
         self.model_list_finished.connect(self._on_model_list_finished)
         self.model_search_finished.connect(self._on_model_search_finished)
         apply_language(self, self.ui_language)
+        self._update_accuracy_plan_ui()
 
     def _set_localized_text(self, widget, source):
         """Set dynamic text while retaining a reversible source string."""
@@ -1192,6 +1195,43 @@ class Dashboard(QWidget):
         layout.addRow(quality_row)
         self.whisper_model.currentTextChanged.connect(self._update_recognition_quality_hint)
         self._update_recognition_quality_hint(self.whisper_model.currentText())
+
+        self.enhanced_accuracy_mode = SegmentedControl()
+        self.enhanced_accuracy_mode.addItem("Standard", False)
+        self.enhanced_accuracy_mode.addItem("Enhanced", True)
+        enhanced_index = self.enhanced_accuracy_mode.findData(
+            bool(getattr(config, "enhanced_accuracy", False))
+        )
+        self.enhanced_accuracy_mode.setCurrentIndex(max(0, enhanced_index))
+        layout.addRow("Accuracy enhancement:", self.enhanced_accuracy_mode)
+
+        self.accuracy_profile = QComboBox()
+        self.accuracy_profile.addItem("Auto (recommended)", "auto")
+        self.accuracy_profile.addItem("Fast", "fast")
+        self.accuracy_profile.addItem("Balanced", "balanced")
+        self.accuracy_profile.addItem("Accurate", "accurate")
+        accuracy_index = self.accuracy_profile.findData(
+            getattr(config, "accuracy_profile", "auto")
+        )
+        self.accuracy_profile.setCurrentIndex(max(0, accuracy_index))
+        layout.addRow("Hardware profile:", self.accuracy_profile)
+
+        accuracy_status_row = QWidget()
+        accuracy_status_layout = QHBoxLayout(accuracy_status_row)
+        accuracy_status_layout.setContentsMargins(0, 0, 0, 0)
+        accuracy_status_layout.setSpacing(10)
+        self.accuracy_plan_label = QLabel("")
+        self.accuracy_plan_label.setObjectName("Muted")
+        self.accuracy_plan_label.setWordWrap(True)
+        accuracy_status_layout.addWidget(self.accuracy_plan_label, 1)
+        self.accuracy_download_btn = QPushButton("Download accuracy model")
+        self.accuracy_download_btn.setObjectName("SecondaryButton")
+        self.accuracy_download_btn.clicked.connect(self._download_accuracy_model)
+        accuracy_status_layout.addWidget(self.accuracy_download_btn)
+        layout.addRow(accuracy_status_row)
+        self.enhanced_accuracy_mode.currentIndexChanged.connect(self._update_accuracy_plan_ui)
+        self.accuracy_profile.currentIndexChanged.connect(self._update_accuracy_plan_ui)
+        self._update_accuracy_plan_ui()
         
         # FunASR Model
         self.funasr_model = QComboBox()
@@ -1300,6 +1340,68 @@ class Dashboard(QWidget):
             self.recognition_quality_hint.setStyleSheet("color: #9a958c; font-size: 12px;")
             self.open_recognition_models_btn.hide()
         self._set_localized_text(self.recognition_quality_hint, source)
+
+    def _selected_accuracy_plan(self):
+        from recognition_quality import detect_hardware, resolve_accuracy_plan
+        hardware = detect_hardware()
+        profile = str(self.accuracy_profile.currentData() or "auto")
+        return hardware, resolve_accuracy_plan(profile, hardware)
+
+    def _update_accuracy_plan_ui(self, *_):
+        if not hasattr(self, "accuracy_plan_label"):
+            return
+        from model_manager import model_manager
+        enabled = bool(self.enhanced_accuracy_mode.currentData())
+        self.accuracy_profile.setEnabled(enabled)
+        hardware, plan = self._selected_accuracy_plan()
+        installed = model_manager.is_downloaded(plan.model_id, "whisper")
+        if not enabled:
+            text = (
+                "Enhanced mode shows a fast draft first, then corrects the same subtitle line "
+                "with a larger local model."
+            )
+            self._set_localized_text(self.accuracy_plan_label, text)
+            self.accuracy_download_btn.hide()
+            return
+        if self.ui_language == "zh-Hans":
+            state = "已安装" if installed else "需要下载"
+            hardware_label = (
+                f"Apple Silicon · {hardware.memory_gb:.0f} GB 内存"
+                if hardware.apple_silicon else
+                f"Intel / 兼容架构 · {hardware.memory_gb:.0f} GB 内存"
+            )
+            text = (
+                f"检测到 {hardware_label} · 推荐 {plan.model_id}（{plan.size_label}）· {state}。"
+                "当前模型负责即时显示，推荐模型随后原位置修正。"
+            )
+        else:
+            state = "installed" if installed else "download required"
+            text = (
+                f"Detected {hardware.label} · {plan.model_id} ({plan.size_label}) · {state}. "
+                "Your current model stays responsive; this model corrects the same line afterward."
+            )
+        self.accuracy_plan_label.setText(text)
+        self.accuracy_download_btn.setProperty("i18n_source_text", "Download accuracy model")
+        self.accuracy_download_btn.setText(
+            ui_translate("Accuracy model ready", self.ui_language)
+            if installed else
+            f"{ui_translate('Download', self.ui_language)} {plan.model_id} · {plan.size_label}"
+        )
+        self.accuracy_download_btn.setEnabled(not installed)
+        self.accuracy_download_btn.show()
+
+    def _download_accuracy_model(self):
+        _, plan = self._selected_accuracy_plan()
+        if self._active_downloads and plan.model_id not in self._active_downloads:
+            self._pending_start_after_accuracy_download = False
+            self._set_localized_text(self.status_label, "Wait…")
+            self.model_mgmt_status.setText(
+                "请等待当前模型下载完成" if self.ui_language == "zh-Hans"
+                else "Wait for the current model download to finish"
+            )
+            return
+        self._accuracy_download_model_id = plan.model_id
+        self._download_model(plan.model_id, "whisper")
     
     def _check_funasr_mps_compatibility(self):
         """Check if MPS device is used with FunASR and enforce float32"""
@@ -2056,7 +2158,8 @@ class Dashboard(QWidget):
                 else f"{model_id} · installed"
             )
             self.model_mgmt_status.setStyleSheet("color: #a6e3a1; font-size: 12px;")
-            if self.model_backend_combo.currentText() == "whisper":
+            is_accuracy_download = model_id == self._accuracy_download_model_id
+            if self.model_backend_combo.currentText() == "whisper" and not is_accuracy_download:
                 if self.whisper_model.findText(model_id) < 0:
                     self.whisper_model.addItem(model_id)
                 self.whisper_model.setCurrentText(model_id)
@@ -2081,6 +2184,14 @@ class Dashboard(QWidget):
         if hasattr(self, '_active_downloads'):
             self._active_downloads.pop(model_id, None)
         self._refresh_model_list()
+        if hasattr(self, "accuracy_plan_label"):
+            self._update_accuracy_plan_ui()
+        if model_id == self._accuracy_download_model_id:
+            should_start = terminal_state == SUCCEEDED and self._pending_start_after_accuracy_download
+            self._accuracy_download_model_id = None
+            self._pending_start_after_accuracy_download = False
+            if should_start:
+                QTimer.singleShot(250, self.on_start)
 
     def _dismiss_completed_progress(self, model_id):
         """Remove a completed progress surface unless another task replaced it."""
@@ -2526,6 +2637,8 @@ class Dashboard(QWidget):
         if hasattr(self, "trans_mode_label"):
             self._invalidate_translation_test()
             self.update_translation_mode_label()
+        if hasattr(self, "accuracy_plan_label"):
+            self._update_accuracy_plan_ui()
 
     def _save_ui_language(self):
         import configparser
@@ -2708,6 +2821,10 @@ class Dashboard(QWidget):
         cp.set("transcription", "funasr_model", self.funasr_model.currentText())
         cp.set("transcription", "device", self.device_type.currentText())
         cp.set("transcription", "compute_type", self.compute_type.currentText())
+        enhanced_accuracy = bool(self.enhanced_accuracy_mode.currentData())
+        accuracy_profile = str(self.accuracy_profile.currentData() or "auto")
+        cp.set("transcription", "enhanced_accuracy", str(enhanced_accuracy).lower())
+        cp.set("transcription", "accuracy_profile", accuracy_profile)
         source_language = str(
             self.source_language.currentData() or self.source_language.currentText()
         )
@@ -2756,6 +2873,8 @@ class Dashboard(QWidget):
         config.funasr_model = self.funasr_model.currentText()
         config.whisper_device = self.device_type.currentText()
         config.whisper_compute_type = self.compute_type.currentText()
+        config.enhanced_accuracy = enhanced_accuracy
+        config.accuracy_profile = accuracy_profile
         source = source_language
         config.source_language = None if source == "auto" else source
         config.api_key = self.api_key.text().strip()
@@ -2792,6 +2911,27 @@ class Dashboard(QWidget):
         log = logging.getLogger("RealtimeSubtitle")
         log.info("Launch Translator clicked")
         self.save_config()
+
+        if bool(getattr(config, "enhanced_accuracy", False)):
+            from model_manager import model_manager
+            _, plan = self._selected_accuracy_plan()
+            if not model_manager.is_downloaded(plan.model_id, "whisper"):
+                title = ui_translate("Download enhanced model?", self.ui_language)
+                detail = ui_translate(
+                    "Enhanced accuracy needs the recommended local model before this session can start.",
+                    self.ui_language,
+                )
+                reply = QMessageBox.question(
+                    self,
+                    title,
+                    f"{detail}\n\n{plan.model_id} · {plan.size_label}",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                    QMessageBox.StandardButton.Yes,
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    self._pending_start_after_accuracy_download = True
+                    self._download_accuracy_model()
+                return
         
         # Update UI to Loading State
         self._set_localized_text(self.status_label, "Initializing…")

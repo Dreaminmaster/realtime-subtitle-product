@@ -220,6 +220,7 @@ def create_pipeline():
             # Utterance lifecycle tracking — generation-guarded, pruned, thread-safe
             import threading as _threading_mod
             self._lifecycle_lock = _threading_mod.RLock()
+            self._phrase_lock = _threading_mod.RLock()
             self._utt_lifecycle = {}  # uid -> {"generation": int, "state": str}
             self._finalizing_uids = set()
             self._finalized_uids = set()
@@ -228,6 +229,14 @@ def create_pipeline():
             self.last_final_text = ""        # context prompt across utterances
             from src.contextual_phrase_composer import ContextualPhraseComposer
             self.phrase_composer = ContextualPhraseComposer(join_window=5.5)
+            from src.accuracy_refinement import AccuracyRefinementCoordinator
+            self.accuracy_coordinator = AccuracyRefinementCoordinator(
+                self.phrase_composer,
+                self._session_generation,
+            )
+            self.accuracy_transcriber = None
+            self.accuracy_plan = None
+            self._accuracy_accepting = False
             self._latest_translation_revision = {}
             self._cleanup_in_progress = False
             self._failed = False
@@ -264,6 +273,20 @@ def create_pipeline():
             # Use global singleton — no reload on relaunch
             self.transcriber = get_or_create_transcriber()
             log.info("Pipeline: transcriber ready (pooled)")
+
+            try:
+                from accuracy_transcriber import create_accuracy_transcriber
+                accuracy_runtime = create_accuracy_transcriber()
+                if accuracy_runtime is not None:
+                    self.accuracy_plan, self.accuracy_transcriber = accuracy_runtime
+                    log.info(
+                        "Pipeline: enhanced ASR ready (%s)",
+                        self.accuracy_plan.model_id,
+                    )
+            except Exception:
+                # Accuracy enhancement is optional.  A memory or model error
+                # must never prevent the normal live-caption path from starting.
+                log.exception("Pipeline: enhanced ASR unavailable; using standard recognition")
             
             from translation_engine import translation_engine
             self.translation_engine = translation_engine
@@ -449,8 +472,14 @@ def create_pipeline():
             log.info("Pipeline: processing loop started (state-machine mode)")
             
             translate_executor = ThreadPoolExecutor(max_workers=config.translation_threads)
+            accuracy_executor = (
+                ThreadPoolExecutor(max_workers=1, thread_name_prefix="accuracy")
+                if self.accuracy_transcriber is not None else None
+            )
             lifecycle_lock = self._lifecycle_lock
             session_gen = self._session_generation  # snapshot for this session
+            self.accuracy_coordinator.reset(session_gen)
+            self._accuracy_accepting = accuracy_executor is not None
             
             # ---- Priority ASR queue: FINAL(0) > PARTIAL(1) ----
             import queue as pyqueue
@@ -485,6 +514,7 @@ def create_pipeline():
                             audio, uid, gen, prompt, translate_executor,
                             lifecycle_lock, session_gen,
                             task.get("start_offset"), task.get("end_offset"),
+                            accuracy_executor=accuracy_executor,
                         )
                         inference_ms = (time.time() - t0) * 1000
                         total_ms = (time.time() - task["created_at"]) * 1000
@@ -730,6 +760,10 @@ def create_pipeline():
                 else:
                     log.info("ASR worker stopped")
                 
+                self._accuracy_accepting = False
+                if accuracy_executor is not None:
+                    accuracy_executor.shutdown(wait=False, cancel_futures=True)
+                    log.info("Accuracy executor shut down (cancelled pending tasks)")
                 translate_executor.shutdown(wait=False, cancel_futures=True)
                 log.info("Translation executor shut down (cancelled pending tasks)")
                 if self.session_recorder is not None:
@@ -831,6 +865,7 @@ def create_pipeline():
             self, audio_data, chunk_id, gen, prompt="",
             translate_executor=None, lifecycle_lock=None, session_gen=None,
             start_offset=None, end_offset=None,
+            accuracy_executor=None,
         ):
             """Final with lifecycle tracking, thread-safe, session-aware."""
             with lifecycle_lock or self._lifecycle_lock:
@@ -874,9 +909,16 @@ def create_pipeline():
                     log.warning(f"Utterance[{chunk_id}] FINAL empty: dur={dur:.1f}s rms={rms:.4f} peak={peak:.3f} samples={len(audio_data)} reason=whisper_no_text")
                 
                 if text:
-                    decision = self.phrase_composer.compose(chunk_id, text)
-                    display_chunk_id = decision.chunk_id
-                    display_text = decision.text
+                    with self._phrase_lock:
+                        decision = self.phrase_composer.compose(chunk_id, text)
+                        display_chunk_id = decision.chunk_id
+                        display_text = decision.text
+                        self.accuracy_coordinator.register(
+                            decision,
+                            text,
+                            start_offset=start_offset,
+                            end_offset=end_offset,
+                        )
                     self._latest_translation_revision[display_chunk_id] = decision.revision
                     if decision.merged and decision.source_chunk_id != display_chunk_id:
                         # A PARTIAL bubble may already exist for the new audio
@@ -918,6 +960,15 @@ def create_pipeline():
                                 start_offset=start_offset,
                                 end_offset=end_offset,
                             )
+                    if accuracy_executor is not None and self._accuracy_accepting:
+                        accuracy_executor.submit(
+                            self._refine_final_text,
+                            audio_data.copy(),
+                            decision.source_chunk_id,
+                            prompt,
+                            session_gen,
+                            translate_executor,
+                        )
                 
                 with lifecycle_lock or self._lifecycle_lock:
                     while len(self._utt_lifecycle) > 50:
@@ -931,6 +982,73 @@ def create_pipeline():
             finally:
                 with lifecycle_lock or self._lifecycle_lock:
                     self._finalizing_uids.discard(chunk_id)
+
+        def _refine_final_text(
+            self,
+            audio_data,
+            source_chunk_id,
+            prompt,
+            session_gen,
+            translate_executor,
+        ):
+            """Run the larger local model and revise the existing subtitle row."""
+            if not self._accuracy_accepting or self._session_generation != session_gen:
+                return
+            try:
+                started = time.time()
+                corrected = self.accuracy_transcriber.transcribe(audio_data, prompt=prompt)
+                if not self._accuracy_accepting or self._session_generation != session_gen:
+                    return
+                with self._phrase_lock:
+                    update = self.accuracy_coordinator.apply(
+                        source_chunk_id,
+                        corrected,
+                        session_generation=session_gen,
+                    )
+                if update is None:
+                    return
+                log.info(
+                    "Accuracy[%s→%s] corrected in %.0fms revision=%s",
+                    source_chunk_id,
+                    update.display_chunk_id,
+                    (time.time() - started) * 1000,
+                    update.revision,
+                )
+                self._latest_translation_revision[update.display_chunk_id] = update.revision
+                if len(update.text) >= 4:
+                    self.last_final_text = update.text[-240:]
+                trans_active = self.translation_engine.current_mode != "off"
+                if trans_active:
+                    self.signals.update_text.emit(update.display_chunk_id, update.text, "…")
+                    if hasattr(self, "translation_adapter"):
+                        self.translation_adapter.on_final_text(
+                            update.text,
+                            update.display_chunk_id,
+                            start_offset=update.start_offset,
+                            end_offset=update.end_offset,
+                        )
+                    elif translate_executor is not None and self._accuracy_accepting:
+                        translate_executor.submit(
+                            self._run_translation_safe,
+                            update.text,
+                            update.display_chunk_id,
+                            session_gen,
+                            update.revision,
+                        )
+                else:
+                    self.signals.update_text.emit(update.display_chunk_id, update.text, "")
+                    if hasattr(self, "translation_adapter"):
+                        self.translation_adapter.on_final_text(
+                            update.text,
+                            update.display_chunk_id,
+                            translate=False,
+                            start_offset=update.start_offset,
+                            end_offset=update.end_offset,
+                        )
+            except Exception:
+                # The standard result is already visible.  Refinement failure
+                # is intentionally non-fatal and only disables this correction.
+                log.exception("Accuracy[%s] refinement failed", source_chunk_id)
         
         def _run_translation_safe(self, text, chunk_id, session_gen, revision=None):
             """Session-safe translation. Discards result if session changed."""

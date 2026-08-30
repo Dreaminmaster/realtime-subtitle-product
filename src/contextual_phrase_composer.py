@@ -90,6 +90,30 @@ class ContextualPhraseComposer:
         combined = self._join(first, second)
         return len(combined) <= self.max_chars and len(_WORD_RE.findall(combined)) <= self.max_words
 
+    @classmethod
+    def join_parts(cls, parts) -> str:
+        """Join independently recognized utterances using subtitle punctuation rules."""
+        clean_parts = [" ".join((part or "").strip().split()) for part in parts]
+        clean_parts = [part for part in clean_parts if part]
+        if not clean_parts:
+            return ""
+        combined = clean_parts[0]
+        for part in clean_parts[1:]:
+            combined = cls._join(combined, part)
+        return combined
+
+    def revise_current(self, chunk_id: int, corrected_text: str) -> bool:
+        """Revise the active phrase so later joins build on the corrected text."""
+        clean = " ".join((corrected_text or "").strip().split())
+        if self._chunk_id != int(chunk_id) or not clean:
+            return False
+        if clean == self._text:
+            return True
+        self._text = clean
+        self._complete = self.looks_complete(clean)
+        self._revision += 1
+        return True
+
     @staticmethod
     def _join(first: str, second: str) -> str:
         first = first.rstrip()

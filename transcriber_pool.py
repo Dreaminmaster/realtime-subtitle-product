@@ -4,6 +4,14 @@ log = logging.getLogger("RealtimeSubtitle")
 _transcriber_singleton = None
 _transcriber_config_hash = None
 
+
+def _model_name_for_backend(settings):
+    return (
+        settings.whisper_model
+        if settings.asr_backend in ("whisper", "mlx")
+        else settings.funasr_model
+    )
+
 def _config_hash():
     from config import config
     return hash((config.asr_backend, config.whisper_model, config.funasr_model,
@@ -19,7 +27,7 @@ def get_or_create_transcriber():
     from config import config
     
     asr_backend = config.asr_backend
-    model_name = config.whisper_model if asr_backend == "whisper" else config.funasr_model
+    model_name = _model_name_for_backend(config)
     
     # Resolve model to local path if available — critical for offline first-launch
     resolved_model = model_name

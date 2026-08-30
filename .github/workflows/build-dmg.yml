@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version, for example 2.8.1"
+        description: "Release version, for example 2.9.0"
         required: true
-        default: "2.8.1"
+        default: "2.9.0"
       publish:
         description: "Publish or update the GitHub release"
         required: true
@@ -63,7 +63,10 @@ jobs:
             main.py dashboard.py product_navigation.py launcher.py \
             audio_playback.py session_export.py session_history_player.py \
             session_recording.py ui_components.py mac_translation.py \
-            model_catalog.py model_manager.py translation_engine.py
+            model_catalog.py model_manager.py translation_engine.py \
+            recognition_quality.py accuracy_transcriber.py \
+            transcriber_pool.py src/accuracy_refinement.py \
+            src/contextual_phrase_composer.py
       - name: Test
         env:
           QT_QPA_PLATFORM: offscreen
@@ -141,16 +144,15 @@ jobs:
           TAG="v${VERSION}"
           TITLE="Realtime Subtitle ${TAG}"
           cat > release-notes.md <<'EOF'
-          Realtime Subtitle 2.8.1 makes session recording, model purpose, and local translation setup explicit.
+          Realtime Subtitle 2.9.0 adds an opt-in, hardware-aware second recognition pass that improves final captions without sacrificing immediate feedback.
 
-          - Live now offers three unambiguous choices: Temporary, Save subtitles, and Subtitles + recording. Playback is available only for the third choice.
-          - Session transcripts use an adaptive lyrics layout without per-line bubbles; the active line uses a restrained accent and follows recording playback.
-          - The appearance preview displays the exact selected number of subtitle rows from 1 to 8.
-          - Apple Translation failures now provide in-app language-installation guidance, a System Settings shortcut, and official Apple Help.
-          - “Translate into” replaces ambiguous target-language wording.
-          - Speech-recognition downloads and translation-service models are clearly separated. LM Studio/API models can be loaded and selected on the Translation page.
-          - Tiny/Base recognition now carries an accuracy warning with guidance toward Small or Turbo.
-          - Built-in ScreenCaptureKit system audio remains included; no BlackHole driver is required.
+          - Enhanced accuracy is optional and keeps the selected fast model responsible for partial and immediate captions.
+          - A larger local model then re-runs finalized utterance audio and corrects the same subtitle position instead of adding a duplicate line.
+          - Auto mode recommends Small on Intel, Turbo on mainstream Apple Silicon, and Large-v3 on Apple Silicon Macs with at least 24 GB of memory.
+          - Large models are downloaded only after the feature is enabled; missing models are offered at startup and the session resumes automatically after download.
+          - Corrected text supersedes stale translation work and updates the same saved-session revision, including phrases joined across short pauses.
+          - Refinement is isolated in a single-worker queue and safely falls back to the standard result after load, inference, stop, or stale-session failures.
+          - A same-WAV comparison tool reports both transcripts and optional word error rate for repeatable local evaluation.
 
           Native macOS downloads are provided separately for Apple Silicon and Intel.
 
