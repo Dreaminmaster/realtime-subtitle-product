@@ -30,6 +30,18 @@ def test_translate_invokes_native_helper(monkeypatch, tmp_path):
     assert calls[0][0][1:] == ["en", "zh-Hans", "Good morning."]
 
 
+def test_same_language_translation_is_a_noop_without_helper(monkeypatch):
+    monkeypatch.setattr(mac_translation, "availability", lambda: (True, "ready"))
+    monkeypatch.setattr(
+        mac_translation.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("helper should not run")),
+    )
+    assert mac_translation.translate(
+        "Already English.", source_language="English", target_language="English"
+    ) == "Already English."
+
+
 def test_offline_translator_returns_user_safe_error(monkeypatch):
     def fail(*args, **kwargs):
         raise RuntimeError("language assets are not installed")

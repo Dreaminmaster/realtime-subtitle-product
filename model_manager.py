@@ -318,31 +318,14 @@ class ModelManager:
             return self._is_whisper_model_downloaded(model_id)
     
     def _is_whisper_model_downloaded(self, model_id: str) -> bool:
-        """Check if faster-whisper model is cached"""
-        cached = self._cache.get(model_id, {})
-        cached_path = cached.get("snapshot_path")
-        if cached_path and self._is_valid_whisper_dir(cached_path):
-            return True
-        # faster-whisper caches models in its own directory
-        cache_dir = os.path.expanduser(f"~/.cache/huggingface/hub")
-        import glob
-        # Look for model files
-        repo_id = model_id if "/" in model_id else f"Systran/faster-whisper-{model_id}"
-        model_dir = os.path.join(cache_dir, f"models--{repo_id.replace('/', '--')}")
-        if os.path.exists(model_dir):
-            return True
-        
-        # Also check whisper cache
-        whisper_cache = os.path.expanduser("~/.cache/whisper")
-        if os.path.exists(os.path.join(whisper_cache, f"{model_id}.pt")):
-            return True
-        
-        # Also check app model directory (bundled/copied)
-        app_dir = self._user_model_dir(model_id)
-        if os.path.isdir(app_dir) and self._is_valid_whisper_dir(app_dir):
-            return True
-        
-        return model_id in self._cache
+        """Report installed only when a loadable faster-whisper snapshot exists.
+
+        A Hugging Face cache folder or lock file can exist while a download is
+        incomplete.  OpenAI Whisper ``.pt`` files are also not loadable by the
+        faster-whisper runtime used here.  ``get_model_path`` is therefore the
+        single source of truth for both the UI and model factory.
+        """
+        return self.get_model_path(model_id, "whisper") is not None
     
     def _is_mlx_model_downloaded(self, model_id: str) -> bool:
         cache_dir = os.path.expanduser("~/.cache/huggingface/hub")

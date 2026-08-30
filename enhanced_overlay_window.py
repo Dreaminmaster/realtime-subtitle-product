@@ -24,6 +24,7 @@ try:
     from AppKit import (
         NSWindowCollectionBehaviorCanJoinAllSpaces,
         NSWindowCollectionBehaviorFullScreenAuxiliary,
+        NSWindowStyleMaskNonactivatingPanel,
     )
     import objc
     from ctypes import c_void_p
@@ -287,6 +288,14 @@ class EnhancedOverlayWindow(QWidget):
                 | NSWindowCollectionBehaviorFullScreenAuxiliary
             )
             ns_window.setHidesOnDeactivate_(False)
+            # Qt.Tool normally maps to NSPanel.  Mark it explicitly as a
+            # non-activating panel so subtitle updates cannot steal focus or
+            # make the frontmost application's windows flash.
+            ns_window.setStyleMask_(
+                ns_window.styleMask() | NSWindowStyleMaskNonactivatingPanel
+            )
+            if ns_window.respondsToSelector_("setBecomesKeyOnlyIfNeeded:"):
+                ns_window.setBecomesKeyOnlyIfNeeded_(True)
         except Exception as e:
             print(f"[Overlay] Could not set all-spaces: {e}")
     
@@ -577,7 +586,7 @@ class EnhancedOverlayWindow(QWidget):
         self._refresh_all_bubbles()
         self.style_changed.emit(self.subtitle_style.copy())
     
-    def update_text(self, chunk_id, original_text, translated_text=""):
+    def update_text(self, chunk_id, original_text, translated_text=None):
         """Update or add a row while preserving user-controlled scrollback."""
         if not original_text and not translated_text:
             return
@@ -590,12 +599,12 @@ class EnhancedOverlayWindow(QWidget):
             self.transcript_data[chunk_id] = {
                 'timestamp': time.strftime("%H:%M:%S"),
                 'original': original_text,
-                'translated': translated_text
+                'translated': translated_text or ""
             }
         else:
             if original_text:
                 self.transcript_data[chunk_id]['original'] = original_text
-            if translated_text:
+            if translated_text is not None:
                 self.transcript_data[chunk_id]['translated'] = translated_text
         
         # Check if widget exists for this chunk
@@ -608,14 +617,14 @@ class EnhancedOverlayWindow(QWidget):
         if existing:
             if original_text:
                 existing.update_original(original_text)
-            if translated_text:
+            if translated_text is not None:
                 existing.update_translated(translated_text)
         else:
             # The stretch remains above the rows so short transcripts sit at
             # the bottom, while long transcripts naturally become scrollable.
             timestamp = self.transcript_data[chunk_id]['timestamp']
             bubble = SubtitleBubble(
-                chunk_id, timestamp, original_text, translated_text,
+                chunk_id, timestamp, original_text, translated_text or "",
                 parent_style=self.subtitle_style
             )
             self.items.append((chunk_id, bubble))

@@ -36,6 +36,14 @@ def test_switching_provider_invalidates_visible_connection_result(app):
     _dispose(dashboard, app)
 
 
+def test_target_language_is_a_clickable_finite_dropdown(app):
+    dashboard = Dashboard()
+    assert dashboard.target_lang.isEditable() is False
+    assert dashboard.target_lang.findData("English") >= 0
+    assert dashboard.target_lang.findData("Chinese") >= 0
+    _dispose(dashboard, app)
+
+
 def test_stale_async_connection_result_cannot_reappear(app):
     dashboard = Dashboard()
     dashboard.translation_mode.setCurrentIndex(dashboard.translation_mode.findData("local"))

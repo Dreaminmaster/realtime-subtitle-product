@@ -52,7 +52,7 @@ QPushButton#SubnavButton:checked { background: #3a3129; color: #ffad66; }
 QLabel { font-size: 13px; background: transparent; }
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
     background-color: #262522; border: 1px solid #44413b; border-radius: 7px;
-    padding: 7px 9px; min-height: 20px; color: #f0ede6;
+    padding: 7px 10px; min-height: 22px; color: #f0ede6;
     selection-background-color: #9b572d;
 }
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus { border: 1px solid #d8874d; }
@@ -61,7 +61,15 @@ QComboBox QAbstractItemView {
     border-radius: 8px; padding: 5px; outline: 0;
     selection-background-color: #b9612f; selection-color: #ffffff;
 }
-QComboBox::drop-down { border: none; width: 28px; background: #302e2a; }
+QComboBox { padding-right: 30px; }
+QComboBox::drop-down {
+    border: none; width: 0px; background: transparent;
+}
+QSpinBox, QDoubleSpinBox { padding-right: 10px; }
+QSpinBox::up-button, QSpinBox::down-button,
+QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
+    width: 0px; height: 0px; border: none; background: transparent;
+}
 QPushButton {
     background-color: #d98246; color: #1d1712; border: none;
     padding: 8px 15px; border-radius: 7px; font-weight: 650;
@@ -241,6 +249,7 @@ class Dashboard(QWidget):
         self._progress_model_id = None
         self._progress_backend = None
         self._accuracy_download_model_id = None
+        self._accuracy_download_error = None
         self._pending_start_after_accuracy_download = False
         
         from progress_panel import ProgressPanel
@@ -699,7 +708,9 @@ class Dashboard(QWidget):
 
     def init_audio_tab(self):
         tab = QWidget()
-        layout = QGridLayout()
+        form_host = QWidget()
+        form_host.setMaximumWidth(900)
+        layout = QGridLayout(form_host)
         layout.setContentsMargins(28, 26, 28, 26)
         layout.setSpacing(15)
 
@@ -725,6 +736,7 @@ class Dashboard(QWidget):
         self.device_label = QLabel("Input Device:")
         layout.addWidget(self.device_label, 2, 0)
         self.device_combo = QComboBox()
+        self.device_combo.setMaximumWidth(620)
         self.populate_devices()
         layout.addWidget(self.device_combo, 2, 1)
         
@@ -738,6 +750,7 @@ class Dashboard(QWidget):
         # Sample Rate
         layout.addWidget(QLabel("Sample Rate:"), 3, 0)
         self.sample_rate = QSpinBox()
+        self.sample_rate.setMaximumWidth(260)
         self.sample_rate.setRange(8000, 48000)
         self.sample_rate.setValue(config.sample_rate)
         layout.addWidget(self.sample_rate, 3, 1)
@@ -745,6 +758,7 @@ class Dashboard(QWidget):
         # Silence Threshold
         layout.addWidget(QLabel("Silence Threshold:"), 4, 0)
         self.silence_thresh = QDoubleSpinBox()
+        self.silence_thresh.setMaximumWidth(260)
         self.silence_thresh.setRange(0.001, 1.0)
         self.silence_thresh.setSingleStep(0.001)
         self.silence_thresh.setDecimals(3)
@@ -753,12 +767,20 @@ class Dashboard(QWidget):
         
         layout.addWidget(QLabel("Silence Duration (s):"), 5, 0)
         self.silence_dur = QDoubleSpinBox()
+        self.silence_dur.setRange(0.4, 2.0)
+        self.silence_dur.setSingleStep(0.1)
+        self.silence_dur.setDecimals(1)
+        self.silence_dur.setMaximumWidth(260)
         self.silence_dur.setValue(config.silence_duration)
         layout.addWidget(self.silence_dur, 5, 1)
         
         layout.setRowStretch(6, 1)
         
-        tab.setLayout(layout)
+        outer = QHBoxLayout(tab)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addStretch()
+        outer.addWidget(form_host, 1)
+        outer.addStretch()
         self.tabs.addTab(tab, "Audio")
         self._on_input_source_changed()
 
@@ -1150,7 +1172,13 @@ class Dashboard(QWidget):
 
     def init_transcription_tab(self):
         tab = QWidget()
-        layout = QFormLayout()
+        form_host = QWidget()
+        form_host.setMaximumWidth(940)
+        layout = QFormLayout(form_host)
+        layout.setContentsMargins(28, 24, 28, 28)
+        layout.setHorizontalSpacing(18)
+        layout.setVerticalSpacing(14)
+        layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         
         # ASR Backend Selection
         self.asr_backend = QComboBox()
@@ -1271,7 +1299,7 @@ class Dashboard(QWidget):
         
         # Source Language Configuration
         self.source_language = QComboBox()
-        self.source_language.setEditable(True)
+        self.source_language.setEditable(False)
         for language_name, language_code in (
             ("Automatic", "auto"),
             ("English", "en"),
@@ -1299,7 +1327,11 @@ class Dashboard(QWidget):
         # Update UI based on initial backend
         self._on_backend_changed(config.asr_backend)
         
-        tab.setLayout(layout)
+        outer = QHBoxLayout(tab)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addStretch()
+        outer.addWidget(form_host, 1)
+        outer.addStretch()
         self.tabs.addTab(tab, "Transcript")
         self.tabs.setTabToolTip(self.tabs.count() - 1, "Transcript — ASR backend & model")
     
@@ -1355,6 +1387,7 @@ class Dashboard(QWidget):
         self.accuracy_profile.setEnabled(enabled)
         hardware, plan = self._selected_accuracy_plan()
         installed = model_manager.is_downloaded(plan.model_id, "whisper")
+        downloading = plan.model_id in self._active_downloads
         if not enabled:
             text = (
                 "Enhanced mode shows a fast draft first, then corrects the same subtitle line "
@@ -1364,7 +1397,7 @@ class Dashboard(QWidget):
             self.accuracy_download_btn.hide()
             return
         if self.ui_language == "zh-Hans":
-            state = "已安装" if installed else "需要下载"
+            state = "已安装" if installed else ("正在下载" if downloading else "需要下载")
             hardware_label = (
                 f"Apple Silicon · {hardware.memory_gb:.0f} GB 内存"
                 if hardware.apple_silicon else
@@ -1375,19 +1408,29 @@ class Dashboard(QWidget):
                 "当前模型负责即时显示，推荐模型随后原位置修正。"
             )
         else:
-            state = "installed" if installed else "download required"
+            state = "installed" if installed else ("downloading" if downloading else "download required")
             text = (
                 f"Detected {hardware.label} · {plan.model_id} ({plan.size_label}) · {state}. "
                 "Your current model stays responsive; this model corrects the same line afterward."
+            )
+        if self._accuracy_download_error and not installed and not downloading:
+            text += (
+                f" 上次下载未完成：{self._accuracy_download_error[:100]}"
+                if self.ui_language == "zh-Hans" else
+                f" Last download did not finish: {self._accuracy_download_error[:100]}"
             )
         self.accuracy_plan_label.setText(text)
         self.accuracy_download_btn.setProperty("i18n_source_text", "Download accuracy model")
         self.accuracy_download_btn.setText(
             ui_translate("Accuracy model ready", self.ui_language)
             if installed else
-            f"{ui_translate('Download', self.ui_language)} {plan.model_id} · {plan.size_label}"
+            (
+                (f"正在下载 {plan.model_id}…" if self.ui_language == "zh-Hans" else f"Downloading {plan.model_id}…")
+                if downloading else
+                f"{ui_translate('Download', self.ui_language)} {plan.model_id} · {plan.size_label}"
+            )
         )
-        self.accuracy_download_btn.setEnabled(not installed)
+        self.accuracy_download_btn.setEnabled(not installed and not downloading)
         self.accuracy_download_btn.show()
 
     def _download_accuracy_model(self):
@@ -1401,7 +1444,9 @@ class Dashboard(QWidget):
             )
             return
         self._accuracy_download_model_id = plan.model_id
+        self._accuracy_download_error = None
         self._download_model(plan.model_id, "whisper")
+        self._update_accuracy_plan_ui()
     
     def _check_funasr_mps_compatibility(self):
         """Check if MPS device is used with FunASR and enforce float32"""
@@ -1491,6 +1536,7 @@ class Dashboard(QWidget):
         
         # Model selection with refresh button
         model_layout = QHBoxLayout()
+        model_layout.setSpacing(10)
         self.model = QComboBox()
         self.model.setEditable(True)
         self.model.addItem(config.model)
@@ -1515,12 +1561,15 @@ class Dashboard(QWidget):
         self.target_lang = QComboBox()
         for language in ("Chinese", "English", "Japanese", "French", "Spanish", "German", "Korean"):
             self.target_lang.addItem(language, language)
-        self.target_lang.setEditable(True)
+        # Destination languages are a finite product choice.  Keeping this
+        # non-editable makes the whole field open immediately on click.
+        self.target_lang.setEditable(False)
         target_index = self.target_lang.findData(config.target_lang)
         if target_index >= 0:
             self.target_lang.setCurrentIndex(target_index)
         else:
-            self.target_lang.setCurrentText(config.target_lang)
+            self.target_lang.addItem(str(config.target_lang), str(config.target_lang))
+            self.target_lang.setCurrentIndex(self.target_lang.count() - 1)
         self.target_lang.currentTextChanged.connect(self._on_translation_settings_changed)
         layout.addRow("Translate into:", self.target_lang)
         
@@ -1783,8 +1832,19 @@ class Dashboard(QWidget):
         
         def _do_test():
             from translation_engine import TranslationEngine
+            from mac_translation import normalize_language_code
             
             try:
+                # Never test Apple Translation with the same source and target
+                # language.  That checks an unsupported no-op pair rather than
+                # the installed translation assets.
+                target_code = normalize_language_code(target_lang, default="zh-Hans")
+                if mode == "fast" and target_code.lower().startswith("en"):
+                    sample_text = "连接测试正常。"
+                    sample_source = "Chinese"
+                else:
+                    sample_text = "The connection is working."
+                    sample_source = "English"
                 engine = TranslationEngine()
                 engine.target_lang = target_lang
                 engine.set_mode(
@@ -1792,9 +1852,9 @@ class Dashboard(QWidget):
                     base_url=base_url,
                     api_key=api_key,
                     model=model,
-                    source_language="auto",
+                    source_language=sample_source if mode == "fast" else "auto",
                 )
-                sample = engine.translate("The connection is working.")
+                sample = engine.translate(sample_text)
                 if sample and not sample.startswith("[Translation Failed:"):
                     prefix = "连接成功" if self.ui_language == "zh-Hans" else "Connected"
                     provider_label = "Apple Translation" if mode == "fast" else model
@@ -1822,6 +1882,22 @@ class Dashboard(QWidget):
             return
         if self._translation_test_fingerprint != self._translation_settings_snapshot():
             return
+        if not ok and (self.translation_mode.currentData() or "off") == "fast":
+            raw = str(message or "")
+            if "language assets are not installed" in raw:
+                pair = raw.rsplit(":", 1)[-1].strip()
+                message = (
+                    f"缺少 Apple 翻译语言包（{pair}）。请下载原语言和译入语言后重试。"
+                    if self.ui_language == "zh-Hans" else
+                    f"Apple translation languages are missing ({pair}). Download both languages, then test again."
+                )
+            elif "language pair is unsupported" in raw:
+                pair = raw.rsplit(":", 1)[-1].strip()
+                message = (
+                    f"Apple 翻译不支持这个语言组合（{pair}）。"
+                    if self.ui_language == "zh-Hans" else
+                    f"Apple Translation does not support this language pair ({pair})."
+                )
         self.trans_test_result.setText(("✅ " if ok else "❌ ") + message)
         color = "#a6e3a1" if ok else "#f38ba8"
         self.trans_test_result.setStyleSheet(f"color: {color}; font-size: 12px;")
@@ -2145,6 +2221,8 @@ class Dashboard(QWidget):
                 else f"{model_id} · cancelled"
             )
             self.model_mgmt_status.setStyleSheet("color: #6c7086; font-size: 12px;")
+        if model_id == self._accuracy_download_model_id:
+            self._update_accuracy_plan_ui()
     
     def _on_model_done(self, model_id, terminal_state, error, attempt):
         """Qt-safe done callback — queued to main thread."""
@@ -2159,6 +2237,8 @@ class Dashboard(QWidget):
             )
             self.model_mgmt_status.setStyleSheet("color: #a6e3a1; font-size: 12px;")
             is_accuracy_download = model_id == self._accuracy_download_model_id
+            if is_accuracy_download:
+                self._accuracy_download_error = None
             if self.model_backend_combo.currentText() == "whisper" and not is_accuracy_download:
                 if self.whisper_model.findText(model_id) < 0:
                     self.whisper_model.addItem(model_id)
@@ -2174,6 +2254,10 @@ class Dashboard(QWidget):
                 else f"{model_id} · cancelled"
             )
             self.model_mgmt_status.setStyleSheet("color: #6c7086; font-size: 12px;")
+            if model_id == self._accuracy_download_model_id:
+                self._accuracy_download_error = (
+                    "已取消" if self.ui_language == "zh-Hans" else "cancelled"
+                )
         else:
             log.error(f"Model {model_id} failed: {error}")
             self.model_mgmt_status.setText(
@@ -2181,6 +2265,8 @@ class Dashboard(QWidget):
                  else f"{model_id} · failed after {attempt} attempts")
             )
             self.model_mgmt_status.setStyleSheet("color: #f38ba8; font-size: 12px;")
+            if model_id == self._accuracy_download_model_id:
+                self._accuracy_download_error = str(error or "download failed")
         if hasattr(self, '_active_downloads'):
             self._active_downloads.pop(model_id, None)
         self._refresh_model_list()

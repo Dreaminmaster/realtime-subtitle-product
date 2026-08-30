@@ -216,6 +216,28 @@ class TestTranslatorFailure:
         assert j is not None
         assert j.status == TranslationStatus.FAILED
 
+    def test_legacy_failure_marker_is_not_delivered_as_subtitle_text(self):
+        import threading
+        errors = []
+        results = []
+        delivered = threading.Event()
+        def on_error(job, result):
+            errors.append(result)
+            delivered.set()
+        s = TranslationScheduler(
+            translator=lambda text, lang: "[Translation Failed: assets missing]",
+            max_workers=1,
+            on_result=lambda result: results.append(result),
+            on_error=on_error,
+        )
+        s.start_session(SID)
+        s.submit(_event())
+        assert delivered.wait(timeout=1.0)
+        s.shutdown(wait=True)
+        assert results == []
+        assert len(errors) == 1
+        assert errors[0].error == "assets missing"
+
     def test_translator_error_does_not_kill_scheduler(self):
         errors = []
         def bad(text, lang):

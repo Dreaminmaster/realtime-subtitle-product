@@ -71,6 +71,10 @@ def translate(
         raise RuntimeError(reason)
     source = normalize_language_code(source_language, default="auto")
     target = normalize_language_code(target_language, default="zh-Hans")
+    # A same-language request is a valid no-op, not an unsupported pair.
+    # The native helper repeats this guard after auto language detection.
+    if source != "auto" and source.lower() == target.lower():
+        return str(text).strip()
     completed = subprocess.run(
         [str(helper_path()), source, target, str(text)],
         capture_output=True,

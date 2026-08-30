@@ -8,14 +8,14 @@
 
 ## 下载 / Download
 
-当前稳定版：**v2.9.0** · macOS 13 Ventura 或更高版本
+当前稳定版：**v2.9.1** · macOS 13 Ventura 或更高版本
 
-Current stable release: **v2.9.0** · macOS 13 Ventura or later
+Current stable release: **v2.9.1** · macOS 13 Ventura or later
 
 | Mac | 安装包 / Installer | 适用设备 / Hardware |
 |---|---|---|
-| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.9.0-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
-| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.9.0-macos-x86_64.dmg) | Intel-based Macs |
+| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.9.1-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
+| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.9.1-macos-x86_64.dmg) | Intel-based Macs |
 
 [查看全部版本 / View all releases](https://github.com/Dreaminmaster/realtime-subtitle-product/releases)
 
@@ -31,9 +31,11 @@ Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本�
 
 - 本地实时语音识别，内置 `faster-whisper tiny` 模型，安装后即可开始。
 - 新增可选的**增强准确率**：当前小模型先即时显示，大模型在后台复听同一段音频，并在原字幕位置修正文字、翻译与保存记录，不会产生重复字幕。
+- v2.9.1 修复增强模型下载状态：只有完整、可加载的 faster-whisper 模型才会显示“已安装”，下载按钮会立即显示进行中，并在失败或取消后保留明确反馈。
 - 自动根据 Mac 架构与内存推荐增强方案：Intel 使用 `small`，主流 Apple Silicon 使用 `turbo`，24 GB 及以上 Apple Silicon 使用 `large-v3`。增强模型仅在开启功能后按需下载，不会增大基础安装包。
 - 悬浮字幕窗始终置顶，支持拖动、缩放、双语/仅原文/仅翻译显示。
 - 上下文断句会识别短暂停顿后的未完句，在同一条字幕中续接并重新翻译，避免把半句话永久切开。
+- 静音断句现在尊重用户设置的完整时长（最高 2 秒），短暂停顿后以小写连接词或进行时开头的英文片段会继续修正上一条字幕。
 - 翻译提示把所有输入严格视为“待翻译语音”，问句不会被本地模型误当成聊天请求；异常回答会自动重试并拦截。
 - 可自定义屏幕上同时显示的字幕条数；向上滚动可查看本次会话的过往字幕。
 - 开始前直接选择结果：**临时字幕 / 保存字幕 / 字幕＋录音**。只有“字幕＋录音”会生成可播放音频，避免结束后才发现没有录音。
@@ -47,6 +49,7 @@ Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本�
 - 运行时点击控制中心红色关闭按钮只隐藏窗口，不会中断字幕；点击字幕工具条停止按钮会结束会话，`⌘Q` 会完全退出 App。
 - 在线 API、本地 LLM、OpenAI-compatible 自定义 API，以及完全关闭翻译。
 - macOS 26 及以上可使用 Apple Translation 本地翻译；语言包缺失时 App 会显示安装说明，并可直接打开“语言与地区”设置或 Apple 帮助。
+- Apple 翻译连接测试会自动选择不同的测试源语言，避免英文目标被误测为 `en → en`；同语言输入安全直出，缺失语言包的底层错误不会再显示成字幕正文。
 - 翻译服务通过单一 Provider 选择器配置：Agnes AI、LM Studio 或任意 OpenAI-compatible 服务。
 - 麦克风输入与内置 macOS 系统声音采集，无需 BlackHole 或虚拟声卡。
 - “识别模型”页面只管理语音识别模型，分为内置推荐与 Hugging Face 搜索；翻译模型由 LM Studio 或当前 API 服务管理，并在“翻译”页点击“加载模型”后选择。Tiny / Base 会明确提示准确率限制，日常建议 Small，性能较好的 Mac 建议 Turbo。
@@ -131,6 +134,7 @@ Realtime Subtitle is a native-feeling macOS control center with an always-on-top
 
 - Local live transcription with a bundled `faster-whisper tiny` model.
 - Optional **Enhanced accuracy** keeps the selected small model responsive, then re-runs finalized audio through a larger local model and corrects the original subtitle position, translation, and saved revision.
+- v2.9.1 treats only complete, loadable faster-whisper snapshots as installed and shows immediate download, failure, and cancellation feedback on Recognition.
 - Hardware-aware recommendations choose `small` for Intel, `turbo` for mainstream Apple Silicon, and `large-v3` for Apple Silicon with at least 24 GB of memory. Larger models are downloaded only after the feature is enabled.
 - Draggable, resizable bilingual overlay with original-only and translation-only modes.
 - An appearance preview that renders the exact selected number of visible rows, with in-session scrollback for older captions.
@@ -143,10 +147,12 @@ Realtime Subtitle is a native-feeling macOS control center with an always-on-top
 - Instant app-wide English / Simplified Chinese switching under **System**.
 - Online, local-LLM, custom OpenAI-compatible, or disabled translation.
 - Apple on-device Translation on macOS 26+ with an in-app language-install guide, System Settings shortcut, and official Apple Help when assets are missing.
+- Apple Translation tests never probe a same-language pair; genuine same-language requests are safe no-ops, missing-asset diagnostics stay out of subtitle text, and the guide identifies the failing pair.
 - A single provider selector for Agnes AI, LM Studio, and custom OpenAI-compatible endpoints.
 - The control center hides completely after a session starts; **Controls / Hide** in the caption bar toggles it in either direction.
 - Closing the control-center window during a live session hides that window without stopping captions. Use the overlay Stop button to end the session, or `⌘Q` to quit the app completely.
 - Context-aware phrase revisions join likely unfinished speech after a short pause and retranslate the same caption instead of leaving fragmented lines.
+- Endpointing honors the configured pause up to two seconds and can revise a previous English caption when the next short-pause fragment begins with a lower-case connector or continuing verb.
 - Strict quoted-speech prompting, automatic retry, and response screening prevent local models from answering spoken questions as a chat assistant.
 - Microphone and built-in ScreenCaptureKit system-audio input; no virtual audio driver is required.
 - A dedicated Recognition Models page for offline ASR downloads and Hugging Face search. Translation-service models are loaded and selected separately on Translation. Tiny/Base models show an accuracy warning and recommend Small or Turbo.
@@ -232,17 +238,17 @@ Build a native DMG on a matching Mac:
 
 ```bash
 # Apple Silicon host
-bash build_dmg.sh 2.9.0 arm64
+bash build_dmg.sh 2.9.1 arm64
 
 # Intel host, or Apple Silicon with Rosetta installed
-bash build_dmg.sh 2.9.0 x86_64
+bash build_dmg.sh 2.9.1 x86_64
 ```
 
 Outputs:
 
 ```text
-dist/RealtimeSubtitle-2.9.0-macos-arm64.dmg
-dist/RealtimeSubtitle-2.9.0-macos-x86_64.dmg
+dist/RealtimeSubtitle-2.9.1-macos-arm64.dmg
+dist/RealtimeSubtitle-2.9.1-macos-x86_64.dmg
 ```
 
 The GitHub Actions release workflow builds `arm64` on an Apple Silicon runner and `x86_64` on an Intel runner, verifies the embedded architecture and app icon, creates SHA-256 checksums, and publishes both DMGs to one release.

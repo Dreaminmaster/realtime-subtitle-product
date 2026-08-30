@@ -61,7 +61,7 @@ class ContextualPhraseComposer:
 
         can_join = (
             self._chunk_id is not None
-            and not self._complete
+            and (not self._complete or self._looks_like_continuation_start(clean))
             and now - self._updated_at <= self.join_window
             and self._fits(self._text, clean)
         )
@@ -89,6 +89,18 @@ class ContextualPhraseComposer:
     def _fits(self, first: str, second: str) -> bool:
         combined = self._join(first, second)
         return len(combined) <= self.max_chars and len(_WORD_RE.findall(combined)) <= self.max_words
+
+    @staticmethod
+    def _looks_like_continuation_start(text: str) -> bool:
+        """Recognize a lower-case clause that ASR split at a short pause."""
+        clean = (text or "").lstrip()
+        if not clean or not clean[0].isascii() or not clean[0].islower():
+            return False
+        words = [word.lower() for word in _WORD_RE.findall(clean)]
+        if not words:
+            return False
+        first = words[0]
+        return first in _CONTINUATION_WORDS or first.endswith(("ing", "ed", "ly"))
 
     @classmethod
     def join_parts(cls, parts) -> str:

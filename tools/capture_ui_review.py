@@ -70,6 +70,18 @@ def main() -> int:
     app.processEvents()
     dashboard.grab().save(str(args.output / "04-enhanced-recognition.png"))
 
+    dashboard.tabs.showRoute("Settings", "Translation")
+    dashboard.translation_mode.setCurrentIndex(
+        dashboard.translation_mode.findData("fast")
+    )
+    dashboard.target_lang.setCurrentIndex(dashboard.target_lang.findData("English"))
+    app.processEvents()
+    dashboard.grab().save(str(args.output / "04a-apple-translation.png"))
+    dashboard.target_lang.showPopup()
+    app.processEvents()
+    dashboard.target_lang._popup.grab().save(str(args.output / "04b-target-language-popup.png"))
+    dashboard.target_lang.hidePopup()
+
     from src.segment_api import SegmentView, SessionView
     from session_recording import SessionAudioRecorder
     import numpy as np

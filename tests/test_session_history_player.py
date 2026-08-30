@@ -63,3 +63,4 @@ def test_transcript_lines_flow_without_bubble_selection(app):
     assert "border-radius" not in line.styleSheet()
     assert player.transcript.selectionMode() == player.transcript.SelectionMode.NoSelection
     assert "不能" in player.recording_hint.text() or "only" in player.recording_hint.text()
+    assert player.transport.isHidden()

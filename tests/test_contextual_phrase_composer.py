@@ -54,6 +54,24 @@ def test_complete_unpunctuated_sentence_does_not_swallow_next_caption():
     assert second.merged is False
 
 
+def test_lowercase_clause_after_short_pause_revises_previous_caption():
+    composer = ContextualPhraseComposer(join_window=4.0)
+    first = composer.compose(1, "We will keep this brief.", now=1.0)
+    second = composer.compose(2, "and focus on the details.", now=2.0)
+    assert first.complete is True
+    assert second.chunk_id == 1
+    assert second.merged is True
+    assert second.text == "We will keep this brief and focus on the details."
+
+
+def test_capitalized_sentence_after_period_stays_separate():
+    composer = ContextualPhraseComposer(join_window=4.0)
+    composer.compose(1, "We will keep this brief.", now=1.0)
+    second = composer.compose(2, "Next topic starts here.", now=2.0)
+    assert second.chunk_id == 2
+    assert second.merged is False
+
+
 def test_complete_cjk_phrase_does_not_swallow_next_caption():
     composer = ContextualPhraseComposer()
     first = composer.compose(1, "我很想你", now=1.0)

@@ -155,9 +155,9 @@ class SessionHistoryPlayer(QWidget):
         header_row.addWidget(self.view_mode)
         root.addLayout(header_row)
 
-        transport = QFrame()
-        transport.setObjectName("Transport")
-        transport_layout = QHBoxLayout(transport)
+        self.transport = QFrame()
+        self.transport.setObjectName("Transport")
+        transport_layout = QHBoxLayout(self.transport)
         transport_layout.setContentsMargins(12, 9, 12, 9)
         transport_layout.setSpacing(10)
         self.play_button = QPushButton("Play")
@@ -176,7 +176,7 @@ class SessionHistoryPlayer(QWidget):
         self.duration_label = QLabel("00:00")
         self.duration_label.setObjectName("Muted")
         transport_layout.addWidget(self.duration_label)
-        root.addWidget(transport)
+        root.addWidget(self.transport)
 
         self.recording_hint = QLabel("This session has no recording")
         self.recording_hint.setObjectName("Muted")
@@ -318,6 +318,7 @@ class SessionHistoryPlayer(QWidget):
 
     def _update_transport_enabled(self):
         enabled = self._audio_path is not None and self.player.is_loaded
+        self.transport.setVisible(enabled)
         self.play_button.setEnabled(enabled)
         self.timeline.setEnabled(enabled)
 

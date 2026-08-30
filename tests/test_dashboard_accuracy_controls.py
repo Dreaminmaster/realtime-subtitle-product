@@ -1,4 +1,5 @@
 import os
+from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -43,5 +44,24 @@ def test_accuracy_download_does_not_replace_the_live_model(monkeypatch):
         monkeypatch.setattr(dashboard, "_update_accuracy_plan_ui", lambda: None)
         dashboard._on_model_done("turbo", SUCCEEDED, None, 1)
         assert dashboard.whisper_model.currentText() == "tiny"
+    finally:
+        dashboard.close()
+
+
+def test_accuracy_button_shows_immediate_download_state(monkeypatch):
+    _app()
+    monkeypatch.setattr(config, "enhanced_accuracy", True)
+    monkeypatch.setattr(config, "accuracy_profile", "fast")
+    monkeypatch.setattr(model_manager, "is_downloaded", lambda *args: False)
+    dashboard = Dashboard()
+    try:
+        dashboard._active_downloads["small"] = SimpleNamespace(cancel=lambda: None)
+        dashboard._update_accuracy_plan_ui()
+        assert dashboard.accuracy_download_btn.isEnabled() is False
+        assert "small" in dashboard.accuracy_download_btn.text()
+        assert (
+            "Downloading" in dashboard.accuracy_download_btn.text()
+            or "正在下载" in dashboard.accuracy_download_btn.text()
+        )
     finally:
         dashboard.close()

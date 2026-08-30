@@ -1,11 +1,11 @@
 """Reusable product UI controls shared by dashboard pages."""
 
 from PyQt6.QtCore import QEvent, QPoint, QRect, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QIcon, QKeyEvent, QMouseEvent, QPixmap
+from PyQt6.QtGui import QColor, QFont, QIcon, QKeyEvent, QMouseEvent, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QApplication, QButtonGroup, QComboBox, QColorDialog, QFrame, QGridLayout,
     QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QSizePolicy,
-    QVBoxLayout, QWidget,
+    QStyle, QStyleOption, QVBoxLayout, QWidget,
 )
 
 
@@ -155,6 +155,20 @@ class ThemedComboBox(QComboBox):
             self.showPopup()
             return
         super().keyPressEvent(event)
+
+    def paintEvent(self, event):
+        """Draw a system chevron without a separate trailing button block."""
+        super().paintEvent(event)
+        option = QStyleOption()
+        option.initFrom(self)
+        option.rect = QRect(self.width() - 24, max(0, (self.height() - 14) // 2), 14, 14)
+        painter = QPainter(self)
+        self.style().drawPrimitive(
+            QStyle.PrimitiveElement.PE_IndicatorArrowDown,
+            option,
+            painter,
+            self,
+        )
 
 
 class SegmentedControl(QWidget):

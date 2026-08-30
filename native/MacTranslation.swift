@@ -37,6 +37,10 @@ enum MacTranslationCLI {
             }
 
             let sourceIdentifier = try languageIdentifier(for: text, requested: arguments[1])
+            if sourceIdentifier.lowercased() == arguments[2].lowercased() {
+                print(text)
+                return
+            }
             let source = Locale.Language(identifier: sourceIdentifier)
             let target = Locale.Language(identifier: arguments[2])
             let availability = LanguageAvailability()

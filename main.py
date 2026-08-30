@@ -555,7 +555,9 @@ def create_pipeline():
             
             # Balanced endpointing: short phrases are no longer discarded,
             # while a bounded pause closes the line quickly enough for live use.
-            SILENCE_DUR_SEC = max(0.55, min(float(config.silence_duration), 0.85))
+            # Respect the user's endpoint setting.  The old 0.85 s ceiling
+            # silently ignored values such as 1.0 s and split natural pauses.
+            SILENCE_DUR_SEC = max(0.45, min(float(config.silence_duration), 2.0))
             MIN_UTTERANCE_DUR = 0.45
             MAX_UTTERANCE_DUR = config.max_phrase_duration
             PARTIAL_INTERVAL = max(0.45, min(float(getattr(config, "update_interval", 0.6)), 0.9))

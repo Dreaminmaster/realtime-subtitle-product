@@ -204,3 +204,12 @@ class TranslationAdapter:
         log.warning(
             f"Translation[{result.segment_id}] failed: {result.error or 'unknown'}"
         )
+        # Remove the temporary ellipsis without exposing backend diagnostics as
+        # subtitle content.  The detailed reason remains in logs and settings.
+        if self._on_update_text is not None:
+            chunk_id = next(
+                (cid for cid, sid in self._chunk_to_segment.items() if sid == result.segment_id),
+                None,
+            )
+            if chunk_id is not None:
+                self._on_update_text(chunk_id, result.original_text, "")

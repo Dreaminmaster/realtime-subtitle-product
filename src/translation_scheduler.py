@@ -260,6 +260,9 @@ class TranslationScheduler:
         result_text = None
         try:
             result_text = self._translator(job.text, job.target_lang)
+            if isinstance(result_text, str) and result_text.startswith("[Translation Failed:"):
+                error = result_text[len("[Translation Failed:"):].rstrip("] ").strip()
+                result_text = None
         except Exception as e:
             error = str(e)
 
