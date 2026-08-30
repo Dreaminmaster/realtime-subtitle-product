@@ -6,6 +6,7 @@ Fake translator: returns "ZH:{text}" — no API calls.
 import pytest
 import time
 import os
+import threading
 from src.translation_adapter import TranslationAdapter
 from src.translation_scheduler import TranslationScheduler, TranslationStatus, TranslationResult
 from src.transcript_event import TranscriptPhase
@@ -118,11 +119,23 @@ class TestTranslationNonBlocking:
 # ── 5. Stale revision discarded ───────────────────────────────────
 class TestStaleRevisionDiscarded:
     def test_new_revision_wins(self):
-        s, a, results = _setup(translator=_slow_translator(0.1))
+        first_started = threading.Event()
+        release_translation = threading.Event()
+
+        def controlled_translator(text, lang=None):
+            if text == "old text":
+                first_started.set()
+            assert release_translation.wait(timeout=2.0)
+            return f"ZH:{text}"
+
+        s, a, results = _setup(translator=controlled_translator)
         a.on_final_text("old text", chunk_id=1)
-        time.sleep(0.02)  # rev1 starts translating
+        assert first_started.wait(timeout=2.0)
         a.on_final_text("new text", chunk_id=1)  # rev2 cancels rev1
-        time.sleep(0.3)
+        release_translation.set()
+        deadline = time.monotonic() + 2.0
+        while not results and time.monotonic() < deadline:
+            time.sleep(0.01)
         s.shutdown(wait=True)
         assert len(results) == 1
         # Only rev2 result delivered
