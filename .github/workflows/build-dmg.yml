@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version, for example 2.7.0"
+        description: "Release version, for example 2.8.0"
         required: true
-        default: "2.7.0"
+        default: "2.8.0"
       publish:
         description: "Publish or update the GitHub release"
         required: true
@@ -61,7 +61,8 @@ jobs:
           bash -n build_dmg.sh
           .ci-venv/bin/python -m py_compile \
             main.py dashboard.py product_navigation.py launcher.py \
-            session_history_player.py session_recording.py mac_translation.py \
+            audio_playback.py session_export.py session_history_player.py \
+            session_recording.py ui_components.py mac_translation.py \
             model_catalog.py model_manager.py translation_engine.py
       - name: Test
         env:
@@ -140,13 +141,15 @@ jobs:
           TAG="v${VERSION}"
           TITLE="Realtime Subtitle ${TAG}"
           cat > release-notes.md <<'EOF'
-          Realtime Subtitle 2.7.0 turns the control center into a focused caption workspace.
+          Realtime Subtitle 2.8.0 makes saved captions genuinely useful after the live session ends.
 
-          - Realtime Subtitles is now the primary workspace, with Sessions and one unified Settings area.
-          - Saved sessions can optionally record audio and provide synchronized, click-to-seek transcript playback.
-          - Appearance includes a faithful live preview and the native macOS color panel.
-          - Apple on-device Translation is available on macOS 26+ with installed language assets.
-          - Model discovery supports recommended choices plus compatible Hugging Face faster-whisper repositories.
+          - Saved recordings now use a native macOS playback path with seeking and clear validation when audio was not recorded.
+          - Session playback follows the audio like lyrics: the active subtitle is brighter, larger and automatically centered.
+          - Export is scoped to the selected session and supports transcript, recording, or a bundle of both.
+          - Transcript exports follow the current Original, Translation, or Both view.
+          - Appearance preview subtitles can be dragged between dark and light backgrounds to check contrast before applying.
+          - Replaced common popup selectors with compact segmented controls and app-owned menus without blank white panels.
+          - Faster partial recognition, tighter endpointing and improved rolling-context translation reduce latency and fragmented phrases.
           - Built-in ScreenCaptureKit system audio remains included; no BlackHole driver is required.
 
           Native macOS downloads are provided separately for Apple Silicon and Intel.

@@ -2,7 +2,11 @@ import wave
 
 import numpy as np
 
-from session_recording import SessionAudioRecorder, get_session_recording_path
+from session_recording import (
+    SessionAudioRecorder,
+    get_session_recording_path,
+    inspect_session_recording,
+)
 
 
 def test_session_audio_recorder_writes_pcm_and_tracks_offsets(tmp_path):
@@ -20,6 +24,10 @@ def test_session_audio_recorder_writes_pcm_and_tracks_offsets(tmp_path):
         assert audio.getnchannels() == 1
         assert audio.getframerate() == 16000
         assert audio.getnframes() == 2400
+    info = inspect_session_recording(path)
+    assert info.playable is True
+    assert info.frames == 2400
+    assert info.duration == 0.15
 
 
 def test_recording_path_rejects_empty_session_id(monkeypatch, tmp_path):

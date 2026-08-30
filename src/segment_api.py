@@ -210,17 +210,61 @@ class SegmentAPI:
             bilingual_text="\n".join(bilingual_lines),
         )
 
+    @staticmethod
+    def _timestamp(start_offset: float | None) -> str:
+        if start_offset is None:
+            return "--:--"
+        seconds = max(0, int(float(start_offset)))
+        return f"{seconds // 60:02d}:{seconds % 60:02d}"
+
+    @classmethod
+    def format_segments(cls, segments: list[SegmentView], display_mode: str = "bilingual") -> str:
+        """Format the exact text currently selected in the session viewer."""
+        mode = display_mode if display_mode in (
+            "bilingual", "original_only", "translation_only"
+        ) else "bilingual"
+        blocks = []
+        for segment in segments:
+            original = (segment.original_text or "").strip()
+            translated = (segment.translated_text or "").strip()
+            translated_ok = bool(translated and segment.translation_status == "DONE")
+            stamp = cls._timestamp(segment.start_offset)
+            if mode == "original_only":
+                if original:
+                    blocks.append(f"[{stamp}] {original}")
+            elif mode == "translation_only":
+                if translated_ok:
+                    blocks.append(f"[{stamp}] {translated}")
+                elif original:
+                    blocks.append(f"[{stamp}] [Translation unavailable]")
+            elif original:
+                lines = [f"[{stamp}] {original}"]
+                if translated_ok:
+                    lines.append(f"         {translated}")
+                elif segment.translation_status in ("FAILED", "TIMEOUT"):
+                    lines.append("         [Translation unavailable]")
+                blocks.append("\n".join(lines))
+        return "\n\n".join(blocks)
+
+    def transcript_for_mode(self, session_id: str, display_mode: str = "bilingual") -> str:
+        snap = self.get_session_snapshot(session_id)
+        if snap is None:
+            raise ValueError(f"Session not found: {session_id}")
+        return self.format_segments(snap.segments, display_mode)
+
     # ── export ───────────────────────────────────────────────
     def export_transcript(
         self,
         session_id: str,
         *,
         format: str = "txt",
+        display_mode: str = "bilingual",
     ) -> str:
         snap = self.get_session_snapshot(session_id)
         if snap is None:
             raise ValueError(f"Session not found: {session_id}")
 
+        selected_text = self.format_segments(snap.segments, display_mode)
         if format == "json":
             return json.dumps({
                 "session": {
@@ -248,6 +292,8 @@ class SegmentAPI:
                 "original_text": snap.original_text,
                 "translated_text": snap.translated_text,
                 "bilingual_text": snap.bilingual_text,
+                "display_mode": display_mode,
+                "display_text": selected_text,
             }, ensure_ascii=False, indent=2)
 
         # txt format
@@ -255,5 +301,7 @@ class SegmentAPI:
         lines.append(f"Status: {snap.session.status}")
         lines.append(f"Created: {snap.session.created_at}")
         lines.append("")
-        lines.append(snap.bilingual_text)
+        lines.append(f"View: {display_mode}")
+        lines.append("")
+        lines.append(selected_text)
         return "\n".join(lines)

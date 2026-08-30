@@ -227,7 +227,7 @@ def create_pipeline():
             self._session_generation = 0    # incremented each Launch, stops stale tasks
             self.last_final_text = ""        # context prompt across utterances
             from src.contextual_phrase_composer import ContextualPhraseComposer
-            self.phrase_composer = ContextualPhraseComposer(join_window=4.0)
+            self.phrase_composer = ContextualPhraseComposer(join_window=5.5)
             self._latest_translation_revision = {}
             self._cleanup_in_progress = False
             self._failed = False
@@ -398,9 +398,18 @@ def create_pipeline():
                 try:
                     if self._translation_session_id is not None:
                         if self.session_recorder is not None:
+                            from session_recording import inspect_session_recording
+
+                            recording_info = inspect_session_recording(
+                                self.session_recorder.path
+                            )
                             self._repository.update_session_metadata(
                                 self._translation_session_id,
-                                {"audio_duration": self._recording_duration},
+                                {
+                                    "audio_duration": recording_info.duration,
+                                    "audio_bytes": recording_info.bytes,
+                                    "audio_ready": recording_info.playable,
+                                },
                             )
                         self._repository.close_session(self._translation_session_id)
                 except Exception as exc:
@@ -514,12 +523,13 @@ def create_pipeline():
             audio_cursor = 0.0
             utterance_start_offset = 0.0
             
-            SILENCE_DUR_SEC = config.silence_duration
-            MIN_UTTERANCE_DUR = 1.0
+            # Balanced endpointing: short phrases are no longer discarded,
+            # while a bounded pause closes the line quickly enough for live use.
+            SILENCE_DUR_SEC = max(0.55, min(float(config.silence_duration), 0.85))
+            MIN_UTTERANCE_DUR = 0.45
             MAX_UTTERANCE_DUR = config.max_phrase_duration
-            PARTIAL_INTERVAL = 1.2
+            PARTIAL_INTERVAL = max(0.45, min(float(getattr(config, "update_interval", 0.6)), 0.9))
             PRE_ROLL_MS = 0.4
-            POST_ROLL_MS = 0.6  # keep 600ms after silence detection to avoid tail chop
             
             def _reset_recording_state():
                 nonlocal buffer, pre_roll, silence_counter, state, last_partial_time
@@ -779,7 +789,12 @@ def create_pipeline():
                 return
             
             try:
-                text = self.transcriber.transcribe(audio_data, prompt=prompt)
+                partial_transcribe = getattr(self.transcriber, "transcribe_partial", None)
+                text = (
+                    partial_transcribe(audio_data, prompt=prompt)
+                    if callable(partial_transcribe)
+                    else self.transcriber.transcribe(audio_data, prompt=prompt)
+                )
                 
                 with lifecycle_lock or self._lifecycle_lock:
                     latest_seq = self._latest_partial_seq.get(chunk_id)
@@ -868,8 +883,11 @@ def create_pipeline():
                         # chunk.  Remove it because this final revises the
                         # previous sentence instead of starting a new one.
                         self.signals.remove_text.emit(decision.source_chunk_id)
-                    if len(display_text.split()) > 2:
-                        self.last_final_text = display_text
+                    # Keep a short rolling language context for names and
+                    # continuity.  Character length also covers CJK scripts,
+                    # where whitespace word counts are not meaningful.
+                    if len(display_text) >= 4:
+                        self.last_final_text = display_text[-240:]
                     trans_active = self.translation_engine.current_mode != "off"
                     if trans_active:
                         self.signals.update_text.emit(display_chunk_id, display_text, "…")

@@ -19,7 +19,9 @@ from typing import Optional
 
 
 def get_default_database_path() -> Path:
-    return Path.home() / "Library" / "Application Support" / "RealtimeSubtitle" / "realtime_subtitle.sqlite3"
+    from app_paths import get_app_support_dir
+
+    return get_app_support_dir() / "realtime_subtitle.sqlite3"
 
 
 class RepositoryError(RuntimeError):

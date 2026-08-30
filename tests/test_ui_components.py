@@ -5,7 +5,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PyQt6.QtWidgets import QApplication
 
-from ui_components import ColorButton, ProviderSelector, ThemedComboBox
+from ui_components import (
+    ColorButton,
+    ProviderSelector,
+    SegmentedControl,
+    SubtitlePreview,
+    ThemedComboBox,
+)
 from progress_panel import ProgressPanel
 from progress_events import ProgressEvent
 from model_progress_channel import ModelProgressChannel
@@ -39,6 +45,29 @@ def test_provider_selector_has_popup_free_value_api(app):
     selector.setCurrentIndex(selector.findData("local"))
     assert selector.currentData() == "local"
     assert selector.currentText() == "LM Studio"
+
+
+def test_segmented_control_switches_without_popup(app):
+    selector = SegmentedControl()
+    selector.addItem("Both", "bilingual")
+    selector.addItem("Original", "original_only")
+    selector.setCurrentIndex(selector.findData("original_only"))
+    assert selector.currentData() == "original_only"
+    assert selector.currentText() == "Original"
+
+
+def test_subtitle_preview_overlay_can_move_across_contrast_stage(app):
+    preview = SubtitlePreview()
+    preview.resize(520, 260)
+    preview.show()
+    app.processEvents()
+    initial = preview.overlay.pos()
+    preview.overlay.move(12, 14)
+    preview._mark_user_positioned()
+    preview.resize(540, 280)
+    app.processEvents()
+    assert preview.overlay.pos() != initial
+    assert preview.dark_surface.width() + preview.light_surface.width() == preview.width()
 
 
 def test_download_progress_uses_current_product_palette(app):

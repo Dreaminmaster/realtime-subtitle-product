@@ -8,14 +8,14 @@
 
 ## 下载 / Download
 
-当前稳定版：**v2.7.0** · macOS 13 Ventura 或更高版本
+当前稳定版：**v2.8.0** · macOS 13 Ventura 或更高版本
 
-Current stable release: **v2.7.0** · macOS 13 Ventura or later
+Current stable release: **v2.8.0** · macOS 13 Ventura or later
 
 | Mac | 安装包 / Installer | 适用设备 / Hardware |
 |---|---|---|
-| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.7.0-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
-| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.7.0-macos-x86_64.dmg) | Intel-based Macs |
+| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.8.0-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
+| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.8.0-macos-x86_64.dmg) | Intel-based Macs |
 
 [查看全部版本 / View all releases](https://github.com/Dreaminmaster/realtime-subtitle-product/releases)
 
@@ -35,8 +35,10 @@ Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本�
 - 翻译提示把所有输入严格视为“待翻译语音”，问句不会被本地模型误当成聊天请求；异常回答会自动重试并拦截。
 - 可自定义屏幕上同时显示的字幕条数；向上滚动可查看本次会话的过往字幕。
 - 默认把每次字幕保存为本机会话，像聊天记录一样回看、导出或删除；也可在开始前切换为不留记录的临时会话。
-- 保存会话可选“录制完整音频”；结束后可在会话时间轴中回放，点击任意字幕即可跳转到对应声音。临时会话不会录音。
-- 外观页提供与悬浮字幕一致的实时预览；文字颜色使用 macOS 原生颜色面板，文字颜色与背景透明度互不影响。
+- 保存会话可选“录制完整音频”；结束后使用 macOS 原生音频播放路径回放。字幕会像歌词一样跟随进度，高亮并放大当前句；点击任意字幕即可跳转到对应声音。临时会话不会录音。
+- 会话页可随时切换双语、仅原文或仅译文；导出严格针对当前选中的会话，可选择字幕、录音或两者，并按当前查看模式生成字幕文本。
+- 外观页提供与悬浮字幕一致的实时预览；可把预览字幕拖到深色或浅色背景上检查对比度。文字颜色使用 macOS 原生颜色面板，并与背景透明度互不影响。
+- 常用的二到四项选择改为直接可见的分段控件；其余下拉菜单使用应用内紧凑浮层，不再出现白色空框或多余留白。
 - 应用界面支持全局中文/English 即时切换，入口位于 **设置 → 系统**。
 - 开始字幕后控制中心会完全隐藏，只保留悬浮字幕；字幕工具条中的 **主界面 / 隐藏** 可双向切换控制中心。
 - 运行时点击控制中心红色关闭按钮只隐藏窗口，不会中断字幕；点击字幕工具条停止按钮会结束会话，`⌘Q` 会完全退出 App。
@@ -46,6 +48,8 @@ Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本�
 - 麦克风输入与内置 macOS 系统声音采集，无需 BlackHole 或虚拟声卡。
 - 模型中心分为内置推荐与 Hugging Face 搜索；可粘贴 `organization/model` 或模型链接，兼容性检查通过后直接下载并选用 faster-whisper 社区模型。
 - Apple Silicon 与 Intel 分架构原生安装包。
+
+![会话录音与歌词式字幕回放](docs/images/session-playback.png)
 
 ![Realtime Subtitle floating overlay](docs/images/subtitle-overlay.png)
 
@@ -116,8 +120,10 @@ Realtime Subtitle is a native-feeling macOS control center with an always-on-top
 - Draggable, resizable bilingual overlay with original-only and translation-only modes.
 - Adjustable visible-row count with in-session scrollback for older captions.
 - Chat-style local session history with view, export and delete actions, plus a no-history Temporary mode.
-- Optional full-session audio for Saved sessions, with synchronized playback and click-to-seek transcript lines.
-- A live appearance preview and native macOS color panel; text colors remain independent from background opacity.
+- Optional full-session audio for Saved sessions, with native macOS playback, click-to-seek transcript lines, and a brighter, larger active line that follows playback like lyrics.
+- Per-session Original, Translation, and Both views. Export the selected session as transcript, recording, or a bundle; transcript output follows the active view.
+- A draggable live appearance preview with dark and light surfaces plus the native macOS color panel; text colors remain independent from background opacity.
+- Compact segmented choices and app-owned popup menus remove blank native popup panels and make common options visible at a glance.
 - Instant app-wide English / Simplified Chinese switching under **System**.
 - Online, local-LLM, custom OpenAI-compatible, or disabled translation.
 - Apple on-device Translation on macOS 26+ when the required language assets are installed.
@@ -129,6 +135,8 @@ Realtime Subtitle is a native-feeling macOS control center with an always-on-top
 - Microphone and built-in ScreenCaptureKit system-audio input; no virtual audio driver is required.
 - Recommended offline recognition models plus Hugging Face search/custom repository installation with faster-whisper compatibility validation.
 - Separate native downloads for Apple Silicon and Intel Macs.
+
+![Synchronized session playback](docs/images/session-playback.png)
 
 ### Install and start
 
@@ -198,17 +206,17 @@ Build a native DMG on a matching Mac:
 
 ```bash
 # Apple Silicon host
-bash build_dmg.sh 2.7.0 arm64
+bash build_dmg.sh 2.8.0 arm64
 
 # Intel host, or Apple Silicon with Rosetta installed
-bash build_dmg.sh 2.7.0 x86_64
+bash build_dmg.sh 2.8.0 x86_64
 ```
 
 Outputs:
 
 ```text
-dist/RealtimeSubtitle-2.7.0-macos-arm64.dmg
-dist/RealtimeSubtitle-2.7.0-macos-x86_64.dmg
+dist/RealtimeSubtitle-2.8.0-macos-arm64.dmg
+dist/RealtimeSubtitle-2.8.0-macos-x86_64.dmg
 ```
 
 The GitHub Actions release workflow builds `arm64` on an Apple Silicon runner and `x86_64` on an Intel runner, verifies the embedded architecture and app icon, creates SHA-256 checksums, and publishes both DMGs to one release.

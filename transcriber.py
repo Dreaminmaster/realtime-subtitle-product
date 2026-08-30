@@ -368,6 +368,13 @@ class Transcriber:
             
         return text
 
+    def transcribe_partial(self, audio_data, prompt=None):
+        """Low-latency preview pass; final recognition still uses full search."""
+        if self.backend == "whisper":
+            text = self._transcribe_faster_whisper(audio_data, prompt, beam_size=1)
+            return "" if self._is_hallucination(text) else text
+        return self.transcribe(audio_data, prompt=prompt)
+
     def warmup(self):
         """Warmup the model to prevent lag on first inference"""
         print("[Transcriber] Warming up model...")
@@ -563,14 +570,14 @@ class Transcriber:
                 print(f"[Transcriber] MLX Error: {e}")
                 return ""
 
-    def _transcribe_faster_whisper(self, audio_data, prompt=None):
+    def _transcribe_faster_whisper(self, audio_data, prompt=None, beam_size=5):
         """Transcribe audio via faster-whisper.
         prompt is intentionally IGNORED — initial_prompt causes cross-utterance
         contamination on repeated phrases (whisper echoes prompt as 'already transcribed')."""
         segments, _ = self.model.transcribe(
             audio_data, 
             language=self.language, 
-            beam_size=5,
+            beam_size=max(1, int(beam_size)),
             condition_on_previous_text=False,
             no_speech_threshold=0.6
         )

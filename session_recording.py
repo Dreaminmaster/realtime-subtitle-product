@@ -8,19 +8,50 @@ from __future__ import annotations
 
 import threading
 import wave
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
 
+@dataclass(frozen=True)
+class RecordingInfo:
+    path: Path
+    playable: bool
+    duration: float
+    sample_rate: int
+    frames: int
+    bytes: int
+
+
+def inspect_session_recording(path: str | Path) -> RecordingInfo:
+    """Validate the finalized WAV header before history advertises playback."""
+    candidate = Path(path).expanduser()
+    size = candidate.stat().st_size if candidate.is_file() else 0
+    if size <= 44:
+        return RecordingInfo(candidate, False, 0.0, 0, 0, size)
+    try:
+        with wave.open(str(candidate), "rb") as handle:
+            frames = int(handle.getnframes())
+            sample_rate = int(handle.getframerate())
+            duration = frames / float(sample_rate) if sample_rate > 0 else 0.0
+            playable = (
+                handle.getnchannels() in (1, 2)
+                and handle.getsampwidth() in (1, 2, 3, 4)
+                and frames > 0
+                and sample_rate > 0
+            )
+            return RecordingInfo(
+                candidate, playable, duration, sample_rate, frames, size
+            )
+    except (OSError, EOFError, wave.Error):
+        return RecordingInfo(candidate, False, 0.0, 0, 0, size)
+
+
 def get_recordings_dir() -> Path:
-    path = (
-        Path.home()
-        / "Library"
-        / "Application Support"
-        / "RealtimeSubtitle"
-        / "recordings"
-    )
+    from app_paths import get_app_support_dir
+
+    path = get_app_support_dir() / "recordings"
     path.mkdir(parents=True, exist_ok=True)
     return path
 

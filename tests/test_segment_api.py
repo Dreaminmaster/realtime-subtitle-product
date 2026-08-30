@@ -182,6 +182,14 @@ class TestExport:
         assert len(d["segments"]) == 1
         assert "你好" in d["bilingual_text"]
 
+    def test_txt_follows_selected_display_mode(self, repo, api):
+        repo.create_session("s1")
+        _add_segment(repo, "s1", "a", 1, "hello", "你好", "DONE")
+        original = api.export_transcript("s1", format="txt", display_mode="original_only")
+        translated = api.export_transcript("s1", format="txt", display_mode="translation_only")
+        assert "hello" in original and "你好" not in original
+        assert "你好" in translated and "hello" not in translated
+
     def test_missing_session_raises(self, api):
         with pytest.raises(ValueError):
             api.export_transcript("missing")

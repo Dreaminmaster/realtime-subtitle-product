@@ -13,7 +13,13 @@ import sounddevice as sd
 from config import config
 from localization import apply_language, normalize_language, translate as ui_translate
 from product_navigation import ProductNavigation
-from ui_components import ColorButton, ProviderSelector, SubtitlePreview, ThemedComboBox
+from ui_components import (
+    ColorButton,
+    ProviderSelector,
+    SegmentedControl,
+    SubtitlePreview,
+    ThemedComboBox,
+)
 from session_history_player import SessionHistoryPlayer
 
 # Use one popup implementation everywhere so menus cannot revert to the
@@ -72,6 +78,13 @@ QPushButton#ProviderOption {
 }
 QPushButton#ProviderOption:hover { border-color: #7a6453; color: #f3eee5; }
 QPushButton#ProviderOption:checked { background: #3b2f27; color: #ffb36a; border: 1px solid #c5733b; }
+QPushButton#SegmentOption {
+    background: transparent; color: #aaa59b; border: none; border-radius: 7px;
+    padding: 7px 10px; font-weight: 650;
+}
+QPushButton#SegmentOption:hover { background: #35322d; color: #f2ede5; }
+QPushButton#SegmentOption:checked { background: #b9612f; color: #fff8f1; }
+QPushButton#SegmentOption:disabled { background: transparent; color: #65615a; }
 QFrame#ModelCard { background: #22211f; border: 1px solid #3e3b35; border-radius: 12px; }
 QLabel#ModelName { color: #f2eee6; font-size: 14px; font-weight: 700; }
 QLabel#ModelMeta { color: #b2aca2; font-size: 11px; }
@@ -87,6 +100,8 @@ QFrame#ControlColumn { background: transparent; border: none; }
 QFrame#SettingStrip { background: #1e1d1a; border: 1px solid #34322e; border-radius: 12px; }
 QFrame#SubtitlePreviewStage { background: #151514; border: 1px solid #34322e; border-radius: 14px; }
 QFrame#Transport { background: #22211f; border: 1px solid #3d3933; border-radius: 11px; }
+QFrame#TranscriptLine { background: #1f1e1b; border: 1px solid #34312d; border-radius: 11px; }
+QFrame#TranscriptLine[active="true"] { background: #332820; border: 1px solid #b96b35; }
 QLabel#HistoryTitle { color: #f3efe7; font-size: 18px; font-weight: 700; }
 QLabel#HeroTitle { color: #f6f2e9; font-size: 24px; font-weight: 700; }
 QLabel#HeroCopy, QLabel#Muted { color: #b6b0a6; font-size: 12px; }
@@ -210,8 +225,8 @@ class Dashboard(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Realtime Subtitle")
-        self.setMinimumSize(760, 520)
-        self.resize(980, 680)
+        self.setMinimumSize(900, 600)
+        self.resize(1040, 720)
         self.setStyleSheet(STYLESHEET)
         self.ui_language = normalize_language(getattr(config, "ui_language", "en"))
         self._did_fit_to_screen = False
@@ -344,7 +359,7 @@ class Dashboard(QWidget):
         mode_label = QLabel("Session type")
         mode_label.setObjectName("SummaryLabel")
         hero_layout.addWidget(mode_label)
-        self.session_mode_combo = QComboBox()
+        self.session_mode_combo = SegmentedControl()
         self.session_mode_combo.addItem("Saved session", "saved")
         self.session_mode_combo.addItem("Temporary session", "temporary")
         self.session_mode_combo.setCurrentIndex(
@@ -358,6 +373,7 @@ class Dashboard(QWidget):
         self.record_audio_check = QCheckBox("Record full audio for playback")
         self.record_audio_check.setChecked(bool(getattr(config, "record_session_audio", False)))
         self.record_audio_check.setToolTip("Uses the same audio stream as captions; no second microphone is opened.")
+        self.record_audio_check.toggled.connect(self._on_record_audio_changed)
         hero_layout.addWidget(self.record_audio_check)
         self.record_audio_hint = QLabel("")
         self.record_audio_hint.setObjectName("Muted")
@@ -436,7 +452,16 @@ class Dashboard(QWidget):
             self.record_audio_check.setChecked(False)
             self.record_audio_hint.setText("Temporary sessions leave no transcript or recording.")
         else:
-            self.record_audio_hint.setText("Optional · recording stays only on this Mac.")
+            self._on_record_audio_changed(self.record_audio_check.isChecked())
+
+    def _on_record_audio_changed(self, enabled):
+        if (self.session_mode_combo.currentData() or "saved") != "saved":
+            return
+        self.record_audio_hint.setText(
+            "This session will save subtitles and a playable local recording."
+            if enabled else
+            "This session will save subtitles only. Choose recording if you want playback later."
+        )
 
     def init_history_tab(self):
         """Chat-style local transcript library with saved/temporary sessions."""
@@ -500,20 +525,52 @@ class Dashboard(QWidget):
             repo = self._open_history_repository()
             sessions = repo.list_sessions(limit=100)
             repo.close()
+            language_names = {
+                "auto": "Automatic",
+                "en": "English",
+                "english": "English",
+                "zh": "Chinese",
+                "zh-cn": "Chinese",
+                "chinese": "Chinese",
+                "ja": "Japanese",
+                "japanese": "Japanese",
+                "fr": "French",
+                "french": "French",
+                "es": "Spanish",
+                "spanish": "Spanish",
+                "de": "German",
+                "german": "German",
+                "ko": "Korean",
+                "korean": "Korean",
+            }
             for session in sessions:
                 stamp = datetime.fromtimestamp(session["created_at"]).strftime("%Y-%m-%d  %H:%M")
-                languages = " → ".join(filter(None, (session.get("source_language"), session.get("target_language"))))
-                item = QListWidgetItem(f"{stamp}\n{languages or 'Live subtitles'}")
+                values = []
+                for raw in (session.get("source_language"), session.get("target_language")):
+                    if raw:
+                        source = language_names.get(str(raw).lower(), str(raw))
+                        values.append(ui_translate(source, self.ui_language))
+                languages = " → ".join(values)
+                item = QListWidgetItem(
+                    f"{stamp}\n{languages or ui_translate('Live subtitles', self.ui_language)}"
+                )
                 item.setData(Qt.ItemDataRole.UserRole, session["session_id"])
                 self.history_list.addItem(item)
                 if session["session_id"] == selected:
                     self.history_list.setCurrentItem(item)
             if self.history_list.count() and self.history_list.currentRow() < 0:
                 self.history_list.setCurrentRow(0)
-            self.history_status.setText(f"{len(sessions)} saved session(s)")
+            self.history_status.setText(
+                f"已保存 {len(sessions)} 个会话"
+                if self.ui_language == "zh-Hans"
+                else f"{len(sessions)} saved session(s)"
+            )
             if not sessions:
                 self.history_player.clear_session(
-                    "No saved sessions yet. Start Live with ‘Saved session’ selected."
+                    ui_translate(
+                        "No saved sessions yet. Start Live with ‘Saved session’ selected.",
+                        self.ui_language,
+                    )
                 )
         except Exception as exc:
             self.history_status.setText(f"History unavailable: {exc}")
@@ -561,17 +618,91 @@ class Dashboard(QWidget):
     def _export_history_session(self):
         item = self.history_list.currentItem()
         if item is None:
+            self.history_status.setText("Select one session before exporting.")
             return
-        path, _ = QFileDialog.getSaveFileName(self, "Export Transcript", "transcript.txt", "Text files (*.txt)")
-        if not path:
-            return
-        from src.segment_api import SegmentAPI
-        repo = self._open_history_repository()
-        text = SegmentAPI(repo).export_transcript(item.data(Qt.ItemDataRole.UserRole), format="txt")
-        repo.close()
+        from datetime import datetime
         from pathlib import Path
-        Path(path).write_text(text, encoding="utf-8")
-        self.history_status.setText(f"Exported to {path}")
+        from session_export import (
+            SessionExportDialog,
+            copy_audio_export,
+            write_bundle,
+            write_text_export,
+        )
+        from src.segment_api import SegmentAPI
+
+        session_id = item.data(Qt.ItemDataRole.UserRole)
+        repo = self._open_history_repository()
+        api = SegmentAPI(repo)
+        try:
+            snapshot = api.get_session_snapshot(session_id)
+            display_mode = self.history_player.current_display_mode()
+            text = (
+                api.export_transcript(
+                    session_id,
+                    format="txt",
+                    display_mode=display_mode,
+                )
+                if snapshot is not None else ""
+            )
+        finally:
+            repo.close()
+        if snapshot is None:
+            self.history_status.setText("The selected session is no longer available.")
+            return
+
+        from session_recording import inspect_session_recording
+
+        metadata = snapshot.session.metadata or {}
+        recording = inspect_session_recording(metadata.get("audio_path") or "")
+        audio_path = recording.path if metadata.get("record_audio") and recording.playable else None
+        dialog = SessionExportDialog(
+            display_mode=display_mode,
+            has_audio=bool(audio_path and audio_path.is_file()),
+            parent=self,
+        )
+        apply_language(dialog, self.ui_language)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        stamp = datetime.fromtimestamp(snapshot.session.created_at).strftime("%Y-%m-%d %H-%M")
+        stem = f"Realtime Subtitle {stamp}"
+        choice = dialog.export_choice()
+        try:
+            if choice == "text":
+                path, _ = QFileDialog.getSaveFileName(
+                    self,
+                    "Export transcript",
+                    f"{stem}.txt",
+                    "Text files (*.txt)",
+                )
+                if not path:
+                    return
+                if not path.lower().endswith(".txt"):
+                    path += ".txt"
+                result = write_text_export(path, text)
+                exported_to = result.text_path
+            elif choice == "audio":
+                path, _ = QFileDialog.getSaveFileName(
+                    self,
+                    "Export recording",
+                    f"{stem}.wav",
+                    "Wave audio (*.wav)",
+                )
+                if not path:
+                    return
+                if not path.lower().endswith(".wav"):
+                    path += ".wav"
+                result = copy_audio_export(audio_path, path)
+                exported_to = result.audio_path
+            else:
+                directory = QFileDialog.getExistingDirectory(self, "Export transcript and recording")
+                if not directory:
+                    return
+                result = write_bundle(directory, stem, text, audio_path)
+                exported_to = result.text_path.parent
+            self.history_status.setText(f"Exported selected session to {exported_to}")
+        except Exception as exc:
+            self.history_status.setText(f"Export failed: {exc}")
 
     def init_audio_tab(self):
         tab = QWidget()
@@ -1094,9 +1225,28 @@ class Dashboard(QWidget):
         # Source Language Configuration
         self.source_language = QComboBox()
         self.source_language.setEditable(True)
-        self.source_language.addItems(["auto", "en", "zh", "vi", "ja", "ko", "es", "fr", "de", "ru", "ar", "pt", "it"])
+        for language_name, language_code in (
+            ("Automatic", "auto"),
+            ("English", "en"),
+            ("简体中文", "zh"),
+            ("Tiếng Việt", "vi"),
+            ("日本語", "ja"),
+            ("한국어", "ko"),
+            ("Español", "es"),
+            ("Français", "fr"),
+            ("Deutsch", "de"),
+            ("Русский", "ru"),
+            ("العربية", "ar"),
+            ("Português", "pt"),
+            ("Italiano", "it"),
+        ):
+            self.source_language.addItem(language_name, language_code)
         source_lang = config.source_language if config.source_language else "auto"
-        self.source_language.setCurrentText(source_lang)
+        source_index = self.source_language.findData(source_lang)
+        if source_index >= 0:
+            self.source_language.setCurrentIndex(source_index)
+        else:
+            self.source_language.setCurrentText(source_lang)
         layout.addRow("Source Language:", self.source_language)
         
         # Update UI based on initial backend
@@ -1987,8 +2137,8 @@ class Dashboard(QWidget):
         controls_scroll = QScrollArea()
         controls_scroll.setWidgetResizable(True)
         controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        controls_scroll.setMinimumWidth(280)
-        controls_scroll.setMaximumWidth(390)
+        controls_scroll.setMinimumWidth(320)
+        controls_scroll.setMaximumWidth(370)
         controls = QFrame()
         controls.setObjectName("SettingsCard")
         layout = QFormLayout(controls)
@@ -2044,13 +2194,19 @@ class Dashboard(QWidget):
         layout.addRow("Visible Subtitle Rows:", self.visible_subtitles)
         
         # Display mode
-        self.display_mode = QComboBox()
-        self.display_mode.addItem("Bilingual", "bilingual")
-        self.display_mode.addItem("Original only", "original_only")
-        self.display_mode.addItem("Translation only", "translation_only")
+        self.display_mode = SegmentedControl()
+        self.display_mode.addItem("Both", "bilingual")
+        self.display_mode.addItem("Original", "original_only")
+        self.display_mode.addItem("Translation", "translation_only")
         mode_index = self.display_mode.findData(getattr(config, "display_mode", "bilingual"))
         self.display_mode.setCurrentIndex(max(0, mode_index))
-        layout.addRow("Display Mode:", self.display_mode)
+        display_mode_group = QWidget()
+        display_mode_layout = QVBoxLayout(display_mode_group)
+        display_mode_layout.setContentsMargins(0, 2, 0, 0)
+        display_mode_layout.setSpacing(7)
+        display_mode_layout.addWidget(QLabel("Display Mode"))
+        display_mode_layout.addWidget(self.display_mode)
+        layout.addRow(display_mode_group)
 
         controls_scroll.setWidget(controls)
         editor.addWidget(controls_scroll, 4)
@@ -2061,7 +2217,7 @@ class Dashboard(QWidget):
         preview_column.addWidget(preview_label)
         self.appearance_preview = SubtitlePreview()
         preview_column.addWidget(self.appearance_preview, 1)
-        preview_hint = QLabel("The checker-free preview shows the real text colors and background opacity independently.")
+        preview_hint = QLabel("Drag the subtitle between the dark and light sides to check contrast anywhere.")
         preview_hint.setObjectName("Muted")
         preview_hint.setWordWrap(True)
         preview_column.addWidget(preview_hint)
@@ -2162,6 +2318,7 @@ class Dashboard(QWidget):
 
         language_card = QFrame()
         language_card.setObjectName("SettingsCard")
+        self.language_card = language_card
         language_layout = QVBoxLayout(language_card)
         language_layout.setContentsMargins(18, 16, 18, 16)
         language_layout.setSpacing(10)
@@ -2170,9 +2327,10 @@ class Dashboard(QWidget):
         language_layout.addWidget(language_title)
         language_row = QHBoxLayout()
         language_row.addWidget(QLabel("Interface Language:"))
-        self.ui_language_combo = QComboBox()
+        self.ui_language_combo = SegmentedControl()
         self.ui_language_combo.addItem("English", "en")
         self.ui_language_combo.addItem("简体中文", "zh-Hans")
+        self.ui_language_combo.setMaximumWidth(300)
         language_index = self.ui_language_combo.findData(self.ui_language)
         self.ui_language_combo.setCurrentIndex(max(0, language_index))
         language_row.addWidget(self.ui_language_combo)
@@ -2280,6 +2438,9 @@ class Dashboard(QWidget):
         config.ui_language = self.ui_language
         self._save_ui_language()
         apply_language(self, self.ui_language)
+        if hasattr(self, "history_player"):
+            self.history_player.set_language(self.ui_language)
+            self._refresh_history()
         if hasattr(self, "model_list_layout"):
             self._refresh_model_list()
         if hasattr(self, "trans_mode_label"):
@@ -2467,7 +2628,10 @@ class Dashboard(QWidget):
         cp.set("transcription", "funasr_model", self.funasr_model.currentText())
         cp.set("transcription", "device", self.device_type.currentText())
         cp.set("transcription", "compute_type", self.compute_type.currentText())
-        cp.set("transcription", "source_language", self.source_language.currentText())
+        source_language = str(
+            self.source_language.currentData() or self.source_language.currentText()
+        )
+        cp.set("transcription", "source_language", source_language)
         
         # Translation — normalize exactly once so Test and Live share it.
         from translation_engine import normalize_base_url
@@ -2513,7 +2677,7 @@ class Dashboard(QWidget):
         config.funasr_model = self.funasr_model.currentText()
         config.whisper_device = self.device_type.currentText()
         config.whisper_compute_type = self.compute_type.currentText()
-        source = self.source_language.currentText()
+        source = source_language
         config.source_language = None if source == "auto" else source
         config.api_key = self.api_key.text().strip()
         config.api_base_url = normalized_url
