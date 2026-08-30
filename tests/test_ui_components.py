@@ -70,6 +70,15 @@ def test_subtitle_preview_overlay_can_move_across_contrast_stage(app):
     assert preview.dark_surface.width() + preview.light_surface.width() == preview.width()
 
 
+def test_subtitle_preview_row_count_shows_matching_samples(app):
+    preview = SubtitlePreview()
+    preview.resize(620, 520)
+    preview.show()
+    preview.set_preview_style({"visible_subtitles": 5, "display_mode": "bilingual"})
+    app.processEvents()
+    assert sum(row.isVisible() for row, _, _ in preview._preview_rows) == 5
+
+
 def test_download_progress_uses_current_product_palette(app):
     panel = ProgressPanel()
     panel.set_progress(ProgressEvent("tiny", "downloading", "Downloading", percent=42))

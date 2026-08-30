@@ -22,7 +22,7 @@ def test_eight_feature_pages_are_grouped_into_live_and_settings(app):
         "🔧 Devices",
         "📝 Transcript",
         "🎯 Translate",
-        "📦 Models",
+        "📦 Recognition Models",
         "🎨 Style",
         "🔍 Diag",
     ]
@@ -41,7 +41,7 @@ def test_eight_feature_pages_are_grouped_into_live_and_settings(app):
     assert [
         navigation._section_widgets["Settings"].tabText(index)
         for index in range(7)
-    ] == ["Audio", "System Audio", "Recognition", "Translation", "Models", "Appearance", "System"]
+    ] == ["Audio", "System Audio", "Recognition", "Translation", "Recognition Models", "Appearance", "System"]
 
 
 def test_first_section_is_selected_and_tooltip_reaches_page(app):
@@ -53,3 +53,16 @@ def test_first_section_is_selected_and_tooltip_reaches_page(app):
     assert navigation.stack.currentIndex() == 0
     assert navigation._section_buttons["Live"].isChecked()
     assert page.toolTip() == "Live subtitle controls"
+
+
+def test_show_route_opens_settings_subpage(app):
+    navigation = ProductNavigation()
+    navigation.addTab(QWidget(), "Home")
+    for label in ("Audio", "Transcript", "Recognition Models", "Style"):
+        navigation.addTab(QWidget(), label)
+
+    assert navigation.showRoute("Settings", "Recognition Models") is True
+    assert navigation._section_buttons["Settings"].isChecked()
+    assert navigation._section_widgets["Settings"].tabText(
+        navigation._section_widgets["Settings"].currentIndex()
+    ) == "Recognition Models"

@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version, for example 2.8.0"
+        description: "Release version, for example 2.8.1"
         required: true
-        default: "2.8.0"
+        default: "2.8.1"
       publish:
         description: "Publish or update the GitHub release"
         required: true
@@ -141,15 +141,15 @@ jobs:
           TAG="v${VERSION}"
           TITLE="Realtime Subtitle ${TAG}"
           cat > release-notes.md <<'EOF'
-          Realtime Subtitle 2.8.0 makes saved captions genuinely useful after the live session ends.
+          Realtime Subtitle 2.8.1 makes session recording, model purpose, and local translation setup explicit.
 
-          - Saved recordings now use a native macOS playback path with seeking and clear validation when audio was not recorded.
-          - Session playback follows the audio like lyrics: the active subtitle is brighter, larger and automatically centered.
-          - Export is scoped to the selected session and supports transcript, recording, or a bundle of both.
-          - Transcript exports follow the current Original, Translation, or Both view.
-          - Appearance preview subtitles can be dragged between dark and light backgrounds to check contrast before applying.
-          - Replaced common popup selectors with compact segmented controls and app-owned menus without blank white panels.
-          - Faster partial recognition, tighter endpointing and improved rolling-context translation reduce latency and fragmented phrases.
+          - Live now offers three unambiguous choices: Temporary, Save subtitles, and Subtitles + recording. Playback is available only for the third choice.
+          - Session transcripts use an adaptive lyrics layout without per-line bubbles; the active line uses a restrained accent and follows recording playback.
+          - The appearance preview displays the exact selected number of subtitle rows from 1 to 8.
+          - Apple Translation failures now provide in-app language-installation guidance, a System Settings shortcut, and official Apple Help.
+          - “Translate into” replaces ambiguous target-language wording.
+          - Speech-recognition downloads and translation-service models are clearly separated. LM Studio/API models can be loaded and selected on the Translation page.
+          - Tiny/Base recognition now carries an accuracy warning with guidance toward Small or Turbo.
           - Built-in ScreenCaptureKit system audio remains included; no BlackHole driver is required.
 
           Native macOS downloads are provided separately for Apple Silicon and Intel.

@@ -42,3 +42,24 @@ def test_history_view_mode_and_lyrics_highlight(app, tmp_path):
     player.set_language("zh-Hans")
     assert player.header.text() == "会话时间轴"
     assert "录音已就绪" in player.recording_hint.text()
+
+
+def test_transcript_lines_flow_without_bubble_selection(app):
+    session = SessionView("s2", "CLOSED", 0.0, 0.0, metadata={"record_audio": False})
+    segments = [
+        SegmentView(
+            "s2", "long", 1, "FINAL",
+            "A long subtitle should wrap naturally across the available width instead of being clipped.",
+            "较长的字幕应该根据可用宽度自然换行，而不是被固定气泡挤压。", "DONE",
+            start_offset=0.0, end_offset=3.0,
+        )
+    ]
+    player = SessionHistoryPlayer()
+    player.resize(700, 360)
+    player.show()
+    player.set_session(session, segments)
+    app.processEvents()
+    line = player._line_widgets[0]
+    assert "border-radius" not in line.styleSheet()
+    assert player.transcript.selectionMode() == player.transcript.SelectionMode.NoSelection
+    assert "不能" in player.recording_hint.text() or "only" in player.recording_hint.text()

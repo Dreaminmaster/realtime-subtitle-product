@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QMouseEvent
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -32,6 +32,7 @@ class TranscriptLine(QFrame):
     """One time-coded line that brightens and grows while it is playing."""
 
     seek_requested = pyqtSignal(float)
+    geometry_changed = pyqtSignal()
 
     def __init__(self, segment, display_mode="bilingual", parent=None):
         super().__init__(parent)
@@ -42,7 +43,7 @@ class TranscriptLine(QFrame):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         root = QHBoxLayout(self)
-        root.setContentsMargins(12, 10, 13, 10)
+        root.setContentsMargins(10, 8, 10, 9)
         root.setSpacing(12)
         start = getattr(segment, "start_offset", None)
         self.time_label = QLabel(format_clock((start or 0.0) * 1000) if start is not None else "--:--")
@@ -75,6 +76,7 @@ class TranscriptLine(QFrame):
         self.original.setVisible(self.display_mode != "translation_only")
         self.translation.setVisible(self.display_mode != "original_only")
         self.updateGeometry()
+        QTimer.singleShot(0, self.geometry_changed.emit)
 
     def set_active(self, active):
         active = bool(active)
@@ -100,6 +102,7 @@ class TranscriptLine(QFrame):
             "font-size: 10px; color: #777168;"
         )
         self.updateGeometry()
+        QTimer.singleShot(0, self.geometry_changed.emit)
 
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -182,7 +185,12 @@ class SessionHistoryPlayer(QWidget):
 
         self.transcript = QListWidget()
         self.transcript.setObjectName("TranscriptTimeline")
-        self.transcript.setSpacing(6)
+        self.transcript.setSpacing(0)
+        self.transcript.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.transcript.setStyleSheet(
+            "QListWidget#TranscriptTimeline { padding: 4px 10px; }"
+            "QListWidget#TranscriptTimeline::item { padding: 0; margin: 0; border: none; }"
+        )
         root.addWidget(self.transcript, 1)
         self._update_transport_enabled()
 
@@ -276,11 +284,16 @@ class SessionHistoryPlayer(QWidget):
             item = QListWidgetItem()
             line = TranscriptLine(segment, mode)
             line.seek_requested.connect(self._seek_to_seconds)
+            line.geometry_changed.connect(
+                lambda current_item=item, current_line=line: self._sync_line_size(current_item, current_line)
+            )
             item.setSizeHint(line.sizeHint())
             self.transcript.addItem(item)
             self.transcript.setItemWidget(item, line)
             self._line_items.append(item)
             self._line_widgets.append(line)
+
+        QTimer.singleShot(0, self._sync_all_line_sizes)
 
         if not self._segments:
             empty = QListWidgetItem(self._t("No subtitle lines were saved in this session."))
@@ -293,6 +306,15 @@ class SessionHistoryPlayer(QWidget):
             line.set_display_mode(mode)
             item.setSizeHint(line.sizeHint())
         self.display_mode_changed.emit(mode)
+
+    def _sync_line_size(self, item, line):
+        line.layout().activate()
+        line.adjustSize()
+        item.setSizeHint(line.sizeHint())
+
+    def _sync_all_line_sizes(self):
+        for item, line in zip(self._line_items, self._line_widgets):
+            self._sync_line_size(item, line)
 
     def _update_transport_enabled(self):
         enabled = self._audio_path is not None and self.player.is_loaded
@@ -345,7 +367,6 @@ class SessionHistoryPlayer(QWidget):
             item.setSizeHint(line.sizeHint())
         if 0 <= active < len(self._line_items):
             item = self._line_items[active]
-            self.transcript.setCurrentItem(item)
             self.transcript.scrollToItem(item, QAbstractItemView.ScrollHint.PositionAtCenter)
 
     def _on_duration_changed(self, duration):

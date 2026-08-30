@@ -85,7 +85,7 @@ class ProductNavigation(QFrame):
         "Devices": ("Settings", "Settings", "System Audio"),
         "Transcript": ("Settings", "Settings", "Recognition"),
         "Translate": ("Settings", "Settings", "Translation"),
-        "Models": ("Settings", "Settings", "Models"),
+        "Recognition Models": ("Settings", "Settings", "Recognition Models"),
         "Style": ("Settings", "Settings", "Appearance"),
         "Diag": ("Settings", "Settings", "System"),
     }
@@ -189,3 +189,15 @@ class ProductNavigation(QFrame):
 
     def setElideMode(self, mode):
         del mode
+
+    def showRoute(self, section_key, sub_label=None):
+        """Navigate to a product section and optional settings subpage."""
+        section_widget = self._section_widgets.get(section_key)
+        button = self._section_buttons.get(section_key)
+        if section_widget is None or button is None:
+            return False
+        self.stack.setCurrentWidget(section_widget)
+        button.setChecked(True)
+        if isinstance(section_widget, SectionTabs) and sub_label in section_widget._labels:
+            section_widget.setCurrentIndex(section_widget._labels.index(sub_label))
+        return True

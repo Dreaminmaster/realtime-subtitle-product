@@ -125,8 +125,8 @@ def main() -> int:
         from PyQt6.QtGui import QColor, QImage, QPainter
 
         reference = QImage(str(args.reference))
-        implementation = QImage(str(args.output / "03a-language-card.png"))
-        slot_width, slot_height = 894, 285
+        implementation = QImage(str(args.output / "04-session-playback.png"))
+        slot_width, slot_height = 900, 720
         comparison = QImage(slot_width * 2, slot_height, QImage.Format.Format_ARGB32)
         comparison.fill(QColor("#171716"))
         painter = QPainter(comparison)
@@ -141,7 +141,7 @@ def main() -> int:
             y = (slot_height - scaled.height()) // 2
             painter.drawImage(QRect(x, y, scaled.width(), scaled.height()), scaled)
         painter.end()
-        comparison.save(str(args.output / "07-language-comparison.png"))
+        comparison.save(str(args.output / "07-history-comparison.png"))
 
     dashboard.close()
     app.processEvents()

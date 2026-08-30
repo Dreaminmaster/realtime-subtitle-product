@@ -8,14 +8,14 @@
 
 ## 下载 / Download
 
-当前稳定版：**v2.8.0** · macOS 13 Ventura 或更高版本
+当前稳定版：**v2.8.1** · macOS 13 Ventura 或更高版本
 
-Current stable release: **v2.8.0** · macOS 13 Ventura or later
+Current stable release: **v2.8.1** · macOS 13 Ventura or later
 
 | Mac | 安装包 / Installer | 适用设备 / Hardware |
 |---|---|---|
-| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.8.0-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
-| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.8.0-macos-x86_64.dmg) | Intel-based Macs |
+| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.8.1-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
+| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.8.1-macos-x86_64.dmg) | Intel-based Macs |
 
 [查看全部版本 / View all releases](https://github.com/Dreaminmaster/realtime-subtitle-product/releases)
 
@@ -34,22 +34,25 @@ Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本�
 - 上下文断句会识别短暂停顿后的未完句，在同一条字幕中续接并重新翻译，避免把半句话永久切开。
 - 翻译提示把所有输入严格视为“待翻译语音”，问句不会被本地模型误当成聊天请求；异常回答会自动重试并拦截。
 - 可自定义屏幕上同时显示的字幕条数；向上滚动可查看本次会话的过往字幕。
-- 默认把每次字幕保存为本机会话，像聊天记录一样回看、导出或删除；也可在开始前切换为不留记录的临时会话。
-- 保存会话可选“录制完整音频”；结束后使用 macOS 原生音频播放路径回放。字幕会像歌词一样跟随进度，高亮并放大当前句；点击任意字幕即可跳转到对应声音。临时会话不会录音。
+- 开始前直接选择结果：**临时字幕 / 保存字幕 / 字幕＋录音**。只有“字幕＋录音”会生成可播放音频，避免结束后才发现没有录音。
+- 录音使用 macOS 原生音频播放路径回放。字幕会像歌词一样跟随进度，高亮并放大当前句；点击任意字幕即可跳转到对应声音。未录音的旧会话无法事后补录，App 会明确说明原因。
+- 会话字幕改为自适应的连续歌词布局，不再为每句话套气泡，长句和双语文本拥有完整宽度。
 - 会话页可随时切换双语、仅原文或仅译文；导出严格针对当前选中的会话，可选择字幕、录音或两者，并按当前查看模式生成字幕文本。
-- 外观页提供与悬浮字幕一致的实时预览；可把预览字幕拖到深色或浅色背景上检查对比度。文字颜色使用 macOS 原生颜色面板，并与背景透明度互不影响。
+- 外观页提供与悬浮字幕一致的实时预览；选择 1–8 条可见字幕时会显示同等数量的示例句。可把预览字幕拖到深色或浅色背景上检查对比度。文字颜色使用 macOS 原生颜色面板，并与背景透明度互不影响。
 - 常用的二到四项选择改为直接可见的分段控件；其余下拉菜单使用应用内紧凑浮层，不再出现白色空框或多余留白。
 - 应用界面支持全局中文/English 即时切换，入口位于 **设置 → 系统**。
 - 开始字幕后控制中心会完全隐藏，只保留悬浮字幕；字幕工具条中的 **主界面 / 隐藏** 可双向切换控制中心。
 - 运行时点击控制中心红色关闭按钮只隐藏窗口，不会中断字幕；点击字幕工具条停止按钮会结束会话，`⌘Q` 会完全退出 App。
 - 在线 API、本地 LLM、OpenAI-compatible 自定义 API，以及完全关闭翻译。
-- macOS 26 及以上可使用 Apple Translation 本地翻译；语言包由系统管理，识别文字无需发送给第三方。
+- macOS 26 及以上可使用 Apple Translation 本地翻译；语言包缺失时 App 会显示安装说明，并可直接打开“语言与地区”设置或 Apple 帮助。
 - 翻译服务通过单一 Provider 选择器配置：Agnes AI、LM Studio 或任意 OpenAI-compatible 服务。
 - 麦克风输入与内置 macOS 系统声音采集，无需 BlackHole 或虚拟声卡。
-- 模型中心分为内置推荐与 Hugging Face 搜索；可粘贴 `organization/model` 或模型链接，兼容性检查通过后直接下载并选用 faster-whisper 社区模型。
+- “识别模型”页面只管理语音识别模型，分为内置推荐与 Hugging Face 搜索；翻译模型由 LM Studio 或当前 API 服务管理，并在“翻译”页点击“加载模型”后选择。Tiny / Base 会明确提示准确率限制，日常建议 Small，性能较好的 Mac 建议 Turbo。
 - Apple Silicon 与 Intel 分架构原生安装包。
 
 ![会话录音与歌词式字幕回放](docs/images/session-playback.png)
+
+![可拖动的多行字幕外观预览](docs/images/appearance-preview.png)
 
 ![Realtime Subtitle floating overlay](docs/images/subtitle-overlay.png)
 
@@ -84,7 +87,7 @@ Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本�
 `agnes-2.0-flash`；选择 **LM Studio / 本地服务** 会使用
 `http://127.0.0.1:1234/v1`。缺失的协议和本地 `/v1` 路径会自动补全。API Key 不会写入仓库，只在你保存设置后进入本机用户配置。
 
-连接测试结果只对当前服务、API Key、地址、模型和目标语言有效。切换服务或修改任一字段后，旧的成功状态会立即变为“尚未测试当前设置”；旧请求稍后返回也不会覆盖新状态。
+连接测试结果只对当前服务、API Key、地址、模型和“翻译成”语言有效。切换服务或修改任一字段后，旧的成功状态会立即变为“尚未测试当前设置”；旧请求稍后返回也不会覆盖新状态。
 
 语音只在本机识别。只有启用在线翻译时，识别出的文本才会发送到你配置的服务；音频不会由本项目上传。
 
@@ -118,22 +121,23 @@ Realtime Subtitle is a native-feeling macOS control center with an always-on-top
 
 - Local live transcription with a bundled `faster-whisper tiny` model.
 - Draggable, resizable bilingual overlay with original-only and translation-only modes.
-- Adjustable visible-row count with in-session scrollback for older captions.
-- Chat-style local session history with view, export and delete actions, plus a no-history Temporary mode.
-- Optional full-session audio for Saved sessions, with native macOS playback, click-to-seek transcript lines, and a brighter, larger active line that follows playback like lyrics.
+- An appearance preview that renders the exact selected number of visible rows, with in-session scrollback for older captions.
+- Three explicit session outcomes before starting: **Temporary**, **Save subtitles**, or **Subtitles + recording**.
+- Native macOS recording playback for sessions created with **Subtitles + recording**, click-to-seek transcript lines, and a brighter, larger active line that follows playback like lyrics. Transcript-only sessions explain why audio is unavailable.
+- Adaptive, bubble-free transcript lines give long bilingual text its full available width.
 - Per-session Original, Translation, and Both views. Export the selected session as transcript, recording, or a bundle; transcript output follows the active view.
 - A draggable live appearance preview with dark and light surfaces plus the native macOS color panel; text colors remain independent from background opacity.
 - Compact segmented choices and app-owned popup menus remove blank native popup panels and make common options visible at a glance.
 - Instant app-wide English / Simplified Chinese switching under **System**.
 - Online, local-LLM, custom OpenAI-compatible, or disabled translation.
-- Apple on-device Translation on macOS 26+ when the required language assets are installed.
+- Apple on-device Translation on macOS 26+ with an in-app language-install guide, System Settings shortcut, and official Apple Help when assets are missing.
 - A single provider selector for Agnes AI, LM Studio, and custom OpenAI-compatible endpoints.
 - The control center hides completely after a session starts; **Controls / Hide** in the caption bar toggles it in either direction.
 - Closing the control-center window during a live session hides that window without stopping captions. Use the overlay Stop button to end the session, or `⌘Q` to quit the app completely.
 - Context-aware phrase revisions join likely unfinished speech after a short pause and retranslate the same caption instead of leaving fragmented lines.
 - Strict quoted-speech prompting, automatic retry, and response screening prevent local models from answering spoken questions as a chat assistant.
 - Microphone and built-in ScreenCaptureKit system-audio input; no virtual audio driver is required.
-- Recommended offline recognition models plus Hugging Face search/custom repository installation with faster-whisper compatibility validation.
+- A dedicated Recognition Models page for offline ASR downloads and Hugging Face search. Translation-service models are loaded and selected separately on Translation. Tiny/Base models show an accuracy warning and recommend Small or Turbo.
 - Separate native downloads for Apple Silicon and Intel Macs.
 
 ![Synchronized session playback](docs/images/session-playback.png)
@@ -206,17 +210,17 @@ Build a native DMG on a matching Mac:
 
 ```bash
 # Apple Silicon host
-bash build_dmg.sh 2.8.0 arm64
+bash build_dmg.sh 2.8.1 arm64
 
 # Intel host, or Apple Silicon with Rosetta installed
-bash build_dmg.sh 2.8.0 x86_64
+bash build_dmg.sh 2.8.1 x86_64
 ```
 
 Outputs:
 
 ```text
-dist/RealtimeSubtitle-2.8.0-macos-arm64.dmg
-dist/RealtimeSubtitle-2.8.0-macos-x86_64.dmg
+dist/RealtimeSubtitle-2.8.1-macos-arm64.dmg
+dist/RealtimeSubtitle-2.8.1-macos-x86_64.dmg
 ```
 
 The GitHub Actions release workflow builds `arm64` on an Apple Silicon runner and `x86_64` on an Intel runner, verifies the embedded architecture and app icon, creates SHA-256 checksums, and publishes both DMGs to one release.
@@ -231,7 +235,7 @@ Control Center
 ├── Live
 ├── Sessions: transcript / synchronized recording playback
 └── Settings
-    ├── Audio / Recognition / Translation / Models
+    ├── Audio / Recognition / Translation / Recognition Models
     ├── Appearance
     └── System
 ```

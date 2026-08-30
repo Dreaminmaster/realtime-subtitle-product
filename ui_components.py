@@ -390,12 +390,33 @@ class SubtitlePreview(QFrame):
         overlay_layout = QVBoxLayout(self.overlay)
         overlay_layout.setContentsMargins(18, 14, 18, 14)
         overlay_layout.setSpacing(5)
-        self.original = QLabel("The subtitle window updates as you adjust it.")
-        self.original.setWordWrap(True)
-        self.translation = QLabel("调整时，字幕效果会在这里实时显示。")
-        self.translation.setWordWrap(True)
-        overlay_layout.addWidget(self.original)
-        overlay_layout.addWidget(self.translation)
+        samples = (
+            ("The subtitle window updates as you adjust it.", "调整时，字幕效果会在这里实时显示。"),
+            ("Each recent sentence stays visible.", "最近的每句话都会保持可见。"),
+            ("Drag this preview across both backgrounds.", "拖动预览即可检查不同背景。"),
+            ("Longer phrases wrap naturally without being squeezed.", "较长的句子会自然换行，不再被挤压。"),
+            ("Context helps the next sentence read more smoothly.", "上下文会让下一句读起来更自然。"),
+            ("Playback can follow the transcript like lyrics.", "回放时字幕会像歌词一样跟随。"),
+            ("Your colors remain independent from the background.", "文字颜色与背景透明度相互独立。"),
+            ("Everything remains stored locally on this Mac.", "所有内容仍只保存在这台 Mac 上。"),
+        )
+        self._preview_rows = []
+        for original_text, translation_text in samples:
+            row = QWidget(self.overlay)
+            row.setStyleSheet("background: transparent;")
+            row_layout = QVBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(2)
+            original = QLabel(original_text)
+            original.setWordWrap(True)
+            translation = QLabel(translation_text)
+            translation.setWordWrap(True)
+            row_layout.addWidget(original)
+            row_layout.addWidget(translation)
+            overlay_layout.addWidget(row)
+            self._preview_rows.append((row, original, translation))
+        self.original = self._preview_rows[0][1]
+        self.translation = self._preview_rows[0][2]
         self.overlay.moved.connect(self._mark_user_positioned)
         self.overlay.raise_()
 
@@ -443,23 +464,27 @@ class SubtitlePreview(QFrame):
         alpha = round(opacity * 255)
         width = max(300, min(720, int(style.get("window_width", 620))))
         rows = max(1, min(8, int(style.get("visible_subtitles", 3))))
+        estimated_row_height = max(34, original_size + translation_size + 8)
+        self.setMinimumHeight(max(230, min(540, 52 + rows * estimated_row_height)))
         self._target_width = min(width, 620)
         self.overlay.setMinimumWidth(190)
         self.overlay.setMaximumWidth(620)
         self.overlay.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self.overlay.setMinimumHeight(min(230, 58 + rows * 28))
+        self.overlay.setMinimumHeight(min(500, 30 + rows * estimated_row_height))
         self.overlay.setStyleSheet(
             "QFrame#SubtitlePreviewOverlay {"
             f"background: rgba(18, 18, 17, {alpha});"
             "border: 1px solid rgba(255, 255, 255, 38); border-radius: 16px;"
             "}"
         )
-        self.original.setStyleSheet(
-            f"color: {original_color}; font-size: {original_size}px; font-weight: 650; background: transparent;"
-        )
-        self.translation.setStyleSheet(
-            f"color: {translation_color}; font-size: {translation_size}px; background: transparent;"
-        )
-        self.original.setVisible(mode != "translation_only")
-        self.translation.setVisible(mode != "original_only")
+        for index, (row_widget, original, translation) in enumerate(self._preview_rows):
+            row_widget.setVisible(index < rows)
+            original.setStyleSheet(
+                f"color: {original_color}; font-size: {original_size}px; font-weight: 650; background: transparent;"
+            )
+            translation.setStyleSheet(
+                f"color: {translation_color}; font-size: {translation_size}px; background: transparent;"
+            )
+            original.setVisible(mode != "translation_only")
+            translation.setVisible(mode != "original_only")
         self._fit_overlay(preserve_position=self._user_positioned)
