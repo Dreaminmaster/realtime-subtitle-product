@@ -25,6 +25,22 @@ from session_history_player import SessionHistoryPlayer
 # unreadable native light palette or clip long provider/model names.
 QComboBox = ThemedComboBox
 
+SOURCE_LANGUAGE_OPTIONS = (
+    ("Automatic", "auto"),
+    ("English", "en"),
+    ("简体中文", "zh"),
+    ("Tiếng Việt", "vi"),
+    ("日本語", "ja"),
+    ("한국어", "ko"),
+    ("Español", "es"),
+    ("Français", "fr"),
+    ("Deutsch", "de"),
+    ("Русский", "ru"),
+    ("العربية", "ar"),
+    ("Português", "pt"),
+    ("Italiano", "it"),
+)
+
 # Modern QSS Styles
 STYLESHEET = """
 QWidget {
@@ -390,6 +406,32 @@ class Dashboard(QWidget):
         self.record_audio_hint.setObjectName("Muted")
         self.record_audio_hint.setWordWrap(True)
         hero_layout.addWidget(self.record_audio_hint)
+
+        language_row = QHBoxLayout()
+        language_row.setSpacing(10)
+        spoken_label = QLabel("Spoken language")
+        spoken_label.setObjectName("SummaryLabel")
+        language_row.addWidget(spoken_label)
+        self.live_source_language = QComboBox()
+        for language_name, language_code in SOURCE_LANGUAGE_OPTIONS:
+            self.live_source_language.addItem(language_name, language_code)
+        source_lang = config.source_language or "auto"
+        self.live_source_language.setCurrentIndex(
+            max(0, self.live_source_language.findData(source_lang))
+        )
+        self.live_source_language.setMaximumWidth(250)
+        self.live_source_language.setToolTip(
+            "Choose one language when you know what will be spoken. This avoids repeated language detection and usually improves accuracy."
+        )
+        language_row.addWidget(self.live_source_language)
+        language_row.addStretch()
+        hero_layout.addLayout(language_row)
+        self.live_language_hint = QLabel(
+            "Choose a fixed language for better accuracy and lower processing load; keep Automatic for mixed-language conversations."
+        )
+        self.live_language_hint.setObjectName("Muted")
+        self.live_language_hint.setWordWrap(True)
+        hero_layout.addWidget(self.live_language_hint)
         hero_layout.addStretch()
         workbench_layout.addWidget(controls, 5)
 
@@ -773,8 +815,22 @@ class Dashboard(QWidget):
         self.silence_dur.setMaximumWidth(260)
         self.silence_dur.setValue(config.silence_duration)
         layout.addWidget(self.silence_dur, 5, 1)
+
+        layout.addWidget(QLabel("Noise filtering:"), 6, 0)
+        self.noise_gate_mode = SegmentedControl()
+        self.noise_gate_mode.addItem("Off", "off")
+        self.noise_gate_mode.addItem("Balanced", "balanced")
+        self.noise_gate_mode.addItem("Strong", "strong")
+        noise_index = self.noise_gate_mode.findData(
+            getattr(config, "noise_gate_mode", "balanced")
+        )
+        self.noise_gate_mode.setCurrentIndex(max(0, noise_index))
+        self.noise_gate_mode.setToolTip(
+            "Adaptive filtering ignores steady room noise without changing the recorded audio. Balanced is recommended."
+        )
+        layout.addWidget(self.noise_gate_mode, 6, 1, 1, 2)
         
-        layout.setRowStretch(6, 1)
+        layout.setRowStretch(7, 1)
         
         outer = QHBoxLayout(tab)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -1300,21 +1356,7 @@ class Dashboard(QWidget):
         # Source Language Configuration
         self.source_language = QComboBox()
         self.source_language.setEditable(False)
-        for language_name, language_code in (
-            ("Automatic", "auto"),
-            ("English", "en"),
-            ("简体中文", "zh"),
-            ("Tiếng Việt", "vi"),
-            ("日本語", "ja"),
-            ("한국어", "ko"),
-            ("Español", "es"),
-            ("Français", "fr"),
-            ("Deutsch", "de"),
-            ("Русский", "ru"),
-            ("العربية", "ar"),
-            ("Português", "pt"),
-            ("Italiano", "it"),
-        ):
+        for language_name, language_code in SOURCE_LANGUAGE_OPTIONS:
             self.source_language.addItem(language_name, language_code)
         source_lang = config.source_language if config.source_language else "auto"
         source_index = self.source_language.findData(source_lang)
@@ -1322,7 +1364,13 @@ class Dashboard(QWidget):
             self.source_language.setCurrentIndex(source_index)
         else:
             self.source_language.setCurrentText(source_lang)
-        layout.addRow("Source Language:", self.source_language)
+        layout.addRow("Spoken Language:", self.source_language)
+        self.live_source_language.currentIndexChanged.connect(
+            self._sync_source_language_from_live
+        )
+        self.source_language.currentIndexChanged.connect(
+            self._sync_source_language_from_settings
+        )
         
         # Update UI based on initial backend
         self._on_backend_changed(config.asr_backend)
@@ -1355,6 +1403,24 @@ class Dashboard(QWidget):
         # Check MPS + FunASR quantization compatibility
         if is_funasr:
             self._check_funasr_mps_compatibility()
+
+    def _sync_source_language_from_live(self, *_):
+        if not hasattr(self, "source_language"):
+            return
+        index = self.source_language.findData(self.live_source_language.currentData())
+        if index >= 0 and index != self.source_language.currentIndex():
+            self.source_language.blockSignals(True)
+            self.source_language.setCurrentIndex(index)
+            self.source_language.blockSignals(False)
+
+    def _sync_source_language_from_settings(self, *_):
+        if not hasattr(self, "live_source_language"):
+            return
+        index = self.live_source_language.findData(self.source_language.currentData())
+        if index >= 0 and index != self.live_source_language.currentIndex():
+            self.live_source_language.blockSignals(True)
+            self.live_source_language.setCurrentIndex(index)
+            self.live_source_language.blockSignals(False)
 
     def _update_recognition_quality_hint(self, model_name):
         if not hasattr(self, "recognition_quality_hint"):
@@ -1405,14 +1471,18 @@ class Dashboard(QWidget):
             )
             text = (
                 f"检测到 {hardware_label} · 推荐 {plan.model_id}（{plan.size_label}）· {state}。"
-                "当前模型负责即时显示，推荐模型随后原位置修正。"
+                "字幕会立即开始；增强模型在后台加载，并且只修正最新一句。"
             )
+            if plan.resolved_profile == "accurate":
+                text += " 高准确率方案会持续占用更多 CPU 并使电脑升温，日常使用建议自动匹配。"
         else:
             state = "installed" if installed else ("downloading" if downloading else "download required")
             text = (
                 f"Detected {hardware.label} · {plan.model_id} ({plan.size_label}) · {state}. "
-                "Your current model stays responsive; this model corrects the same line afterward."
+                "Captions start immediately; the larger model loads in the background and only refines the latest line."
             )
+            if plan.resolved_profile == "accurate":
+                text += " Accurate uses substantially more CPU and heat; Auto is recommended for everyday use."
         if self._accuracy_download_error and not installed and not downloading:
             text += (
                 f" 上次下载未完成：{self._accuracy_download_error[:100]}"
@@ -2494,7 +2564,7 @@ class Dashboard(QWidget):
         preview_column.addWidget(preview_label)
         self.appearance_preview = SubtitlePreview()
         preview_column.addWidget(self.appearance_preview, 1)
-        preview_hint = QLabel("Drag the subtitle between the dark and light sides to check contrast anywhere.")
+        preview_hint = QLabel("Drag the subtitle between the dark and light areas to check contrast without squeezing long lines.")
         preview_hint.setObjectName("Muted")
         preview_hint.setWordWrap(True)
         preview_column.addWidget(preview_hint)
@@ -2900,6 +2970,8 @@ class Dashboard(QWidget):
         cp.set("audio", "sample_rate", str(self.sample_rate.value()))
         cp.set("audio", "silence_threshold", str(self.silence_thresh.value()))
         cp.set("audio", "silence_duration", str(self.silence_dur.value()))
+        noise_gate_mode = str(self.noise_gate_mode.currentData() or "balanced")
+        cp.set("audio", "noise_gate_mode", noise_gate_mode)
         
         # Transcription
         cp.set("transcription", "backend", self.asr_backend.currentText())
@@ -2912,7 +2984,9 @@ class Dashboard(QWidget):
         cp.set("transcription", "enhanced_accuracy", str(enhanced_accuracy).lower())
         cp.set("transcription", "accuracy_profile", accuracy_profile)
         source_language = str(
-            self.source_language.currentData() or self.source_language.currentText()
+            self.live_source_language.currentData()
+            or self.source_language.currentData()
+            or self.source_language.currentText()
         )
         cp.set("transcription", "source_language", source_language)
         
@@ -2954,6 +3028,7 @@ class Dashboard(QWidget):
         config.sample_rate = self.sample_rate.value()
         config.silence_threshold = self.silence_thresh.value()
         config.silence_duration = self.silence_dur.value()
+        config.noise_gate_mode = noise_gate_mode
         config.asr_backend = self.asr_backend.currentText()
         config.whisper_model = self.whisper_model.currentText()
         config.funasr_model = self.funasr_model.currentText()
@@ -3071,6 +3146,11 @@ class Dashboard(QWidget):
                 self.overlay_window.style_changed.connect(self._on_style_changed)
             if hasattr(self.overlay_window, 'control_center_requested'):
                 self.overlay_window.control_center_requested.connect(self._toggle_control_center)
+
+            # Enter caption-only mode before audio begins.  Waiting for the
+            # first audio chunk left the control center visible underneath the
+            # overlay and allowed macOS to reactivate it during startup.
+            self._hide_control_center_for_session()
             
             # Connect lifecycle signals BEFORE pipeline.start()
             if hasattr(signals, 'pipeline_failed'):
@@ -3169,6 +3249,7 @@ class Dashboard(QWidget):
         self._control_center_hidden_for_session = True
         self.setWindowState(self.windowState() & ~Qt.WindowState.WindowMinimized)
         self.hide()
+        self._set_caption_only_activation(True)
         if getattr(self, "overlay_window", None):
             self.overlay_window.set_control_center_visible(False)
 
@@ -3182,11 +3263,35 @@ class Dashboard(QWidget):
     def _show_control_center(self):
         """Explicit user path back from the overlay to the main controls."""
         self._control_center_hidden_for_session = False
+        self._set_caption_only_activation(False)
         self.showNormal()
         self.raise_()
         self.activateWindow()
         if getattr(self, "overlay_window", None):
             self.overlay_window.set_control_center_visible(True)
+
+    def _set_caption_only_activation(self, enabled):
+        """Switch macOS between a caption utility and a regular app window."""
+        if sys.platform != "darwin" or QApplication.platformName() == "offscreen":
+            return
+        try:
+            from AppKit import (
+                NSApplication,
+                NSApplicationActivationPolicyAccessory,
+                NSApplicationActivationPolicyRegular,
+            )
+
+            app = NSApplication.sharedApplication()
+            policy = (
+                NSApplicationActivationPolicyAccessory
+                if enabled else NSApplicationActivationPolicyRegular
+            )
+            app.setActivationPolicy_(policy)
+        except Exception:
+            import logging
+            logging.getLogger("RealtimeSubtitle").debug(
+                "Could not change macOS activation policy", exc_info=True
+            )
     
     def _on_audio_failed(self, message):
         """Audio device failure. Show error, disable Retry until cleanup."""

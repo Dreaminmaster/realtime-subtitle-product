@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version, for example 2.9.1"
+        description: "Release version, for example 2.9.2"
         required: true
-        default: "2.9.1"
+        default: "2.9.2"
       publish:
         description: "Publish or update the GitHub release"
         required: true
@@ -65,6 +65,7 @@ jobs:
             session_recording.py ui_components.py mac_translation.py \
             model_catalog.py model_manager.py translation_engine.py \
             recognition_quality.py accuracy_transcriber.py \
+            adaptive_vad.py \
             transcriber_pool.py src/accuracy_refinement.py \
             src/contextual_phrase_composer.py
       - name: Test
@@ -144,15 +145,15 @@ jobs:
           TAG="v${VERSION}"
           TITLE="Realtime Subtitle ${TAG}"
           cat > release-notes.md <<'EOF'
-          Realtime Subtitle 2.9.1 is a product-quality regression release for translation, model setup, caption continuity, playback affordances, and macOS window behavior.
+          Realtime Subtitle 2.9.2 makes caption-only operation independent, starts substantially faster, and reduces sustained CPU work.
 
-          - Apple Translation tests avoid invalid same-language probes; same-language requests are safe no-ops and missing assets are explained without exposing backend errors as subtitles.
-          - Target language is a direct app-owned dropdown, with compact chevrons and no opaque trailing control blocks.
-          - Enhanced recognition reports only complete, loadable faster-whisper snapshots as installed and shows immediate download, failure, and cancellation feedback.
-          - Transcript-only sessions hide the playback transport instead of presenting a disabled Play button.
-          - The floating subtitle window is explicitly non-activating on macOS so caption updates cannot steal focus from the frontmost app.
-          - Endpoint timing respects the selected pause duration up to two seconds and short-pause continuations revise the same line more reliably.
-          - Audio and Recognition settings use constrained, balanced form widths rather than stretching controls across the window.
+          - The control center hides before audio begins and macOS switches to accessory mode, leaving an all-Spaces, non-activating floating caption panel.
+          - Optional enhanced recognition loads in the background and keeps only the latest pending correction instead of accumulating stale CPU-heavy work.
+          - Auto uses Turbo on Apple Silicon; Large-v3 is reserved for an explicit Accurate choice with a thermal warning.
+          - Live exposes a synchronized Spoken language selector to improve single-language accuracy and reduce repeated detection.
+          - Adaptive Off, Balanced, and Strong noise gates improve speech boundaries without altering original audio.
+          - Partial refresh cadence avoids redundant whole-buffer inference while preserving final-caption latency.
+          - Dark and light appearance-preview surfaces are stacked vertically, preserving width for long draggable subtitle lines.
 
           Native macOS downloads are provided separately for Apple Silicon and Intel.
 

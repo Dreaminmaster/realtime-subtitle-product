@@ -43,3 +43,15 @@ def test_factory_uses_the_resolved_local_model(monkeypatch):
     assert created["compute_type"] == "int8"
     assert created["language"] == "en"
     assert runtime.warmed is True
+
+
+def test_runtime_resolution_does_not_construct_the_model(monkeypatch):
+    monkeypatch.setattr(config, "enhanced_accuracy", True)
+    monkeypatch.setattr(config, "accuracy_profile", "fast")
+    monkeypatch.setattr(config, "asr_backend", "funasr")
+    monkeypatch.setattr(model_manager, "get_model_path", lambda *args: "/local/small")
+
+    plan, path = accuracy_transcriber.resolve_accuracy_runtime()
+
+    assert plan.model_id == "small"
+    assert path == "/local/small"

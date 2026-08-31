@@ -8,14 +8,14 @@
 
 ## 下载 / Download
 
-当前稳定版：**v2.9.1** · macOS 13 Ventura 或更高版本
+当前稳定版：**v2.9.2** · macOS 13 Ventura 或更高版本
 
-Current stable release: **v2.9.1** · macOS 13 Ventura or later
+Current stable release: **v2.9.2** · macOS 13 Ventura or later
 
 | Mac | 安装包 / Installer | 适用设备 / Hardware |
 |---|---|---|
-| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.9.1-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
-| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.9.1-macos-x86_64.dmg) | Intel-based Macs |
+| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.9.2-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
+| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.9.2-macos-x86_64.dmg) | Intel-based Macs |
 
 [查看全部版本 / View all releases](https://github.com/Dreaminmaster/realtime-subtitle-product/releases)
 
@@ -30,9 +30,12 @@ Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本�
 ### 主要功能
 
 - 本地实时语音识别，内置 `faster-whisper tiny` 模型，安装后即可开始。
+- v2.9.2 将增强模型改为字幕启动后在后台加载；慢模型繁忙时只保留最新一句待修正，避免旧任务积压造成长时间发热。实测本机管线准备时间由约 25 秒降至约 1.3 秒。
+- Live 页可直接选定**说话语言**。明确的单一语言会跳过反复语言检测，通常比“自动检测”更准确且负担更低；混合语言对话仍可选择自动。
+- 音频页新增关闭 / 均衡 / 强力三档自适应环境降噪。它只改进说话起止判断，不改变录音和送入识别模型的原始音频。
 - 新增可选的**增强准确率**：当前小模型先即时显示，大模型在后台复听同一段音频，并在原字幕位置修正文字、翻译与保存记录，不会产生重复字幕。
 - v2.9.1 修复增强模型下载状态：只有完整、可加载的 faster-whisper 模型才会显示“已安装”，下载按钮会立即显示进行中，并在失败或取消后保留明确反馈。
-- 自动根据 Mac 架构与内存推荐增强方案：Intel 使用 `small`，主流 Apple Silicon 使用 `turbo`，24 GB 及以上 Apple Silicon 使用 `large-v3`。增强模型仅在开启功能后按需下载，不会增大基础安装包。
+- 自动根据 Mac 架构与内存推荐增强方案：Intel 使用 `small`，Apple Silicon 使用兼顾准确率与温度的 `turbo`；只有手动选择“高准确率”时才使用 `large-v3`。增强模型仅在开启功能后按需下载，不会增大基础安装包。
 - 悬浮字幕窗始终置顶，支持拖动、缩放、双语/仅原文/仅翻译显示。
 - 上下文断句会识别短暂停顿后的未完句，在同一条字幕中续接并重新翻译，避免把半句话永久切开。
 - 静音断句现在尊重用户设置的完整时长（最高 2 秒），短暂停顿后以小写连接词或进行时开头的英文片段会继续修正上一条字幕。
@@ -42,10 +45,10 @@ Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本�
 - 录音使用 macOS 原生音频播放路径回放。字幕会像歌词一样跟随进度，高亮并放大当前句；点击任意字幕即可跳转到对应声音。未录音的旧会话无法事后补录，App 会明确说明原因。
 - 会话字幕改为自适应的连续歌词布局，不再为每句话套气泡，长句和双语文本拥有完整宽度。
 - 会话页可随时切换双语、仅原文或仅译文；导出严格针对当前选中的会话，可选择字幕、录音或两者，并按当前查看模式生成字幕文本。
-- 外观页提供与悬浮字幕一致的实时预览；选择 1–8 条可见字幕时会显示同等数量的示例句。可把预览字幕拖到深色或浅色背景上检查对比度。文字颜色使用 macOS 原生颜色面板，并与背景透明度互不影响。
+- 外观页提供与悬浮字幕一致的实时预览；选择 1–8 条可见字幕时会显示同等数量的示例句。深色和浅色背景改为上下排列，预览字幕可自由拖动，长句不会再被左右窄栏挤压。文字颜色使用 macOS 原生颜色面板，并与背景透明度互不影响。
 - 常用的二到四项选择改为直接可见的分段控件；其余下拉菜单使用应用内紧凑浮层，不再出现白色空框或多余留白。
 - 应用界面支持全局中文/English 即时切换，入口位于 **设置 → 系统**。
-- 开始字幕后控制中心会完全隐藏，只保留悬浮字幕；字幕工具条中的 **主界面 / 隐藏** 可双向切换控制中心。
+- 开始字幕后控制中心会完全隐藏，App 切换为 macOS 辅助应用模式，只保留不会抢焦点的悬浮字幕；字幕工具条中的 **主界面 / 隐藏** 可双向切换控制中心。
 - 运行时点击控制中心红色关闭按钮只隐藏窗口，不会中断字幕；点击字幕工具条停止按钮会结束会话，`⌘Q` 会完全退出 App。
 - 在线 API、本地 LLM、OpenAI-compatible 自定义 API，以及完全关闭翻译。
 - macOS 26 及以上可使用 Apple Translation 本地翻译；语言包缺失时 App 会显示安装说明，并可直接打开“语言与地区”设置或 Apple 帮助。
@@ -100,7 +103,7 @@ Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本�
 
 在 **设置 → 识别** 中把“准确率增强”切换为“增强”。“自动匹配（推荐）”会读取本机架构与物理内存，显示准备使用的修正模型及下载大小。首次开启时可直接下载；点击开始字幕但模型尚未安装时，App 也会询问是否下载，并在完成后自动继续启动。
 
-增强模式不会拖慢第一屏字幕：当前识别模型继续负责局部预览和快速结果，推荐的大模型由独立的单线程队列完成最终复听。修正会更新同一个字幕编号，因此悬浮字幕、上下文合句、翻译调度和保存的会话记录保持一致。模型加载或修正失败时会安全退回标准结果，不会中断会话。
+增强模式不会拖慢第一屏字幕：当前识别模型继续负责局部预览和快速结果，推荐的大模型在字幕启动后后台加载，并通过“仅保留最新一句”的单线程任务完成最终复听。修正会更新同一个字幕编号，因此悬浮字幕、上下文合句、翻译调度和保存的会话记录保持一致。模型加载或修正失败时会安全退回标准结果，不会中断会话。
 
 也可手动选择：**快速**（`small`）、**均衡**（`turbo`）或**高准确率**（`large-v3`）。大模型会增加内存、CPU 占用与最终修正等待时间；低配置设备建议使用快速方案或保持标准模式。
 
@@ -133,23 +136,26 @@ Realtime Subtitle is a native-feeling macOS control center with an always-on-top
 ### Highlights
 
 - Local live transcription with a bundled `faster-whisper tiny` model.
+- v2.9.2 starts captions before loading the optional refiner and keeps only the latest pending correction, preventing stale work from building up and reducing sustained heat. The measured pipeline preparation time on the development Mac fell from about 25 seconds to about 1.3 seconds.
+- A prominent **Spoken language** selector on Live skips repeated language detection when the conversation uses one known language, improving stability and lowering processing work; Automatic remains available for mixed-language speech.
+- Lightweight adaptive room-noise filtering offers Off, Balanced, and Strong modes without altering the original audio sent to recognition or saved in recordings.
 - Optional **Enhanced accuracy** keeps the selected small model responsive, then re-runs finalized audio through a larger local model and corrects the original subtitle position, translation, and saved revision.
 - v2.9.1 treats only complete, loadable faster-whisper snapshots as installed and shows immediate download, failure, and cancellation feedback on Recognition.
-- Hardware-aware recommendations choose `small` for Intel, `turbo` for mainstream Apple Silicon, and `large-v3` for Apple Silicon with at least 24 GB of memory. Larger models are downloaded only after the feature is enabled.
+- Hardware-aware Auto chooses `small` for Intel and the thermally balanced `turbo` for Apple Silicon. `large-v3` is reserved for an explicit Accurate choice. Larger models are downloaded only after the feature is enabled.
 - Draggable, resizable bilingual overlay with original-only and translation-only modes.
 - An appearance preview that renders the exact selected number of visible rows, with in-session scrollback for older captions.
 - Three explicit session outcomes before starting: **Temporary**, **Save subtitles**, or **Subtitles + recording**.
 - Native macOS recording playback for sessions created with **Subtitles + recording**, click-to-seek transcript lines, and a brighter, larger active line that follows playback like lyrics. Transcript-only sessions explain why audio is unavailable.
 - Adaptive, bubble-free transcript lines give long bilingual text its full available width.
 - Per-session Original, Translation, and Both views. Export the selected session as transcript, recording, or a bundle; transcript output follows the active view.
-- A draggable live appearance preview with dark and light surfaces plus the native macOS color panel; text colors remain independent from background opacity.
+- A draggable live appearance preview with vertically stacked dark and light surfaces, so long lines keep their width, plus the native macOS color panel; text colors remain independent from background opacity.
 - Compact segmented choices and app-owned popup menus remove blank native popup panels and make common options visible at a glance.
 - Instant app-wide English / Simplified Chinese switching under **System**.
 - Online, local-LLM, custom OpenAI-compatible, or disabled translation.
 - Apple on-device Translation on macOS 26+ with an in-app language-install guide, System Settings shortcut, and official Apple Help when assets are missing.
 - Apple Translation tests never probe a same-language pair; genuine same-language requests are safe no-ops, missing-asset diagnostics stay out of subtitle text, and the guide identifies the failing pair.
 - A single provider selector for Agnes AI, LM Studio, and custom OpenAI-compatible endpoints.
-- The control center hides completely after a session starts; **Controls / Hide** in the caption bar toggles it in either direction.
+- The control center hides completely after a session starts and macOS switches the process to caption-only accessory mode; **Controls / Hide** in the caption bar toggles it in either direction.
 - Closing the control-center window during a live session hides that window without stopping captions. Use the overlay Stop button to end the session, or `⌘Q` to quit the app completely.
 - Context-aware phrase revisions join likely unfinished speech after a short pause and retranslate the same caption instead of leaving fragmented lines.
 - Endpointing honors the configured pause up to two seconds and can revise a previous English caption when the next short-pause fragment begins with a lower-case connector or continuing verb.
@@ -238,17 +244,17 @@ Build a native DMG on a matching Mac:
 
 ```bash
 # Apple Silicon host
-bash build_dmg.sh 2.9.1 arm64
+bash build_dmg.sh 2.9.2 arm64
 
 # Intel host, or Apple Silicon with Rosetta installed
-bash build_dmg.sh 2.9.1 x86_64
+bash build_dmg.sh 2.9.2 x86_64
 ```
 
 Outputs:
 
 ```text
-dist/RealtimeSubtitle-2.9.1-macos-arm64.dmg
-dist/RealtimeSubtitle-2.9.1-macos-x86_64.dmg
+dist/RealtimeSubtitle-2.9.2-macos-arm64.dmg
+dist/RealtimeSubtitle-2.9.2-macos-x86_64.dmg
 ```
 
 The GitHub Actions release workflow builds `arm64` on an Apple Silicon runner and `x86_64` on an Intel runner, verifies the embedded architecture and app icon, creates SHA-256 checksums, and publishes both DMGs to one release.

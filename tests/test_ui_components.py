@@ -67,7 +67,9 @@ def test_subtitle_preview_overlay_can_move_across_contrast_stage(app):
     preview.resize(540, 280)
     app.processEvents()
     assert preview.overlay.pos() != initial
-    assert preview.dark_surface.width() + preview.light_surface.width() == preview.width()
+    assert preview.dark_surface.height() + preview.light_surface.height() == preview.height()
+    assert preview.dark_surface.width() == preview.width()
+    assert preview.light_surface.width() == preview.width()
 
 
 def test_subtitle_preview_row_count_shows_matching_samples(app):

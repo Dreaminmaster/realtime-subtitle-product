@@ -101,9 +101,13 @@ def resolve_accuracy_plan(
         resolved, model_id = "balanced", "turbo"
     elif requested == "accurate":
         resolved, model_id = "accurate", "large-v3"
-    elif hardware.apple_silicon and hardware.memory_gb >= 24:
-        resolved, model_id = "accurate", "large-v3"
     elif hardware.apple_silicon and hardware.memory_gb >= 8:
+        # ``large-v3`` is intentionally never selected by Auto.  On the
+        # packaged macOS runtime CTranslate2 executes this second pass on the
+        # CPU; a 24 GB Mac can hold it, but sustained 15–25 second refinements
+        # make the machine hot and delay later corrections.  Turbo is the
+        # best default balance.  Users who explicitly choose Accurate still
+        # get large-v3 on demand.
         resolved, model_id = "balanced", "turbo"
     else:
         resolved, model_id = "fast", "small"
@@ -114,4 +118,3 @@ def resolve_accuracy_plan(
         model_id=model_id,
         size_mb=_MODEL_SIZES_MB[model_id],
     )
-

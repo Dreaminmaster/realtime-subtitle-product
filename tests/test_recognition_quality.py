@@ -5,10 +5,10 @@ def hardware(machine="arm64", memory=16, apple=True):
     return HardwareProfile(machine=machine, memory_gb=memory, apple_silicon=apple)
 
 
-def test_auto_uses_large_v3_on_high_memory_apple_silicon():
+def test_auto_uses_turbo_on_high_memory_apple_silicon_to_avoid_thermal_load():
     plan = resolve_accuracy_plan("auto", hardware(memory=32))
-    assert plan.model_id == "large-v3"
-    assert plan.resolved_profile == "accurate"
+    assert plan.model_id == "turbo"
+    assert plan.resolved_profile == "balanced"
 
 
 def test_auto_uses_turbo_on_mainstream_apple_silicon():
@@ -32,4 +32,3 @@ def test_unknown_profile_falls_back_to_auto():
     plan = resolve_accuracy_plan("mystery", hardware(memory=16))
     assert plan.requested_profile == "auto"
     assert plan.model_id == "turbo"
-

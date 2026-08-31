@@ -113,6 +113,9 @@ class Config:
         self.sample_rate = self._getint("audio", "sample_rate", 16000)
         self.silence_threshold = self._getfloat("audio", "silence_threshold", 0.01)
         self.silence_duration = self._getfloat("audio", "silence_duration", 1.0)
+        self.noise_gate_mode = self._get("audio", "noise_gate_mode", "balanced").lower()
+        if self.noise_gate_mode not in ("off", "balanced", "strong"):
+            self.noise_gate_mode = "balanced"
         self.chunk_duration = self._getfloat("audio", "chunk_duration", 0.5)
         
         # Device index applies only to microphone capture. System audio uses
@@ -132,7 +135,7 @@ class Config:
         self.streaming_mode = self._get("audio", "streaming_mode", "false").lower() == "true"
         self.streaming_interval = self._getfloat("audio", "streaming_interval", 1.5)
         self.streaming_step_size = self._getfloat("audio", "streaming_step_size", 0.2)
-        self.update_interval = self._getfloat("audio", "update_interval", 0.5)
+        self.update_interval = self._getfloat("audio", "update_interval", 0.8)
         self.streaming_overlap = self._getfloat("audio", "streaming_overlap", 0.3)
         
         # Display settings
@@ -233,6 +236,7 @@ class Config:
         print(f"  FunASR Model: {self.funasr_model}")
         print(f"  Enhanced Accuracy: {self.enhanced_accuracy} ({self.accuracy_profile})")
         print(f"  Input Source: {self.input_source}")
+        print(f"  Noise Gate: {self.noise_gate_mode}")
         print(f"  Sample Rate: {self.sample_rate}")
 
 # Global config instance

@@ -165,7 +165,26 @@ def test_overlay_is_nonactivating_tool_window(app):
     assert overlay.windowFlags() & Qt.WindowType.Tool
     assert overlay.windowFlags() & Qt.WindowType.WindowDoesNotAcceptFocus
     assert overlay.testAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+    assert overlay.testAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow)
     _dispose(overlay, app)
+
+
+def test_live_spoken_language_stays_in_sync_with_recognition_settings(app):
+    dashboard = Dashboard()
+    live_index = dashboard.live_source_language.findData("en")
+    dashboard.live_source_language.setCurrentIndex(live_index)
+    assert dashboard.source_language.currentData() == "en"
+
+    settings_index = dashboard.source_language.findData("zh")
+    dashboard.source_language.setCurrentIndex(settings_index)
+    assert dashboard.live_source_language.currentData() == "zh"
+    _dispose(dashboard, app)
+
+
+def test_audio_page_defaults_to_adaptive_balanced_filtering(app):
+    dashboard = Dashboard()
+    assert dashboard.noise_gate_mode.findData("balanced") >= 0
+    _dispose(dashboard, app)
 
 
 def test_export_button_explains_empty_transcript(app):

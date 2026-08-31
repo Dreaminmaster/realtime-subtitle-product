@@ -381,7 +381,7 @@ class _DraggableSubtitleFrame(QFrame):
 
 
 class SubtitlePreview(QFrame):
-    """Movable subtitle preview over adjacent light and dark surfaces."""
+    """Movable subtitle preview over stacked light and dark surfaces."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -439,9 +439,9 @@ class SubtitlePreview(QFrame):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        half = self.width() // 2
-        self.dark_surface.setGeometry(0, 0, half, self.height())
-        self.light_surface.setGeometry(half, 0, self.width() - half, self.height())
+        half = self.height() // 2
+        self.dark_surface.setGeometry(0, 0, self.width(), half)
+        self.light_surface.setGeometry(0, half, self.width(), self.height() - half)
         self.dark_label.move(14, 12)
         self.light_label.move(14, 12)
         self._fit_overlay(preserve_position=self._user_positioned)
@@ -459,8 +459,8 @@ class SubtitlePreview(QFrame):
             x = old_center.x() - width // 2
             y = old_center.y() - self.overlay.height() // 2
         else:
-            # Start across the contrast boundary so both text colors are easy
-            # to judge immediately; users can then drag anywhere in the stage.
+            # Start across the horizontal contrast boundary so long subtitle
+            # lines are not split into narrow columns.
             x = self.width() // 2 - width // 2
             y = self.height() // 2 - self.overlay.height() // 2
         x = max(10, min(x, self.width() - width - 10))

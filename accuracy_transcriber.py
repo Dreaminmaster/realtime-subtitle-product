@@ -10,8 +10,12 @@ from recognition_quality import AccuracyPlan, resolve_accuracy_plan
 log = logging.getLogger("RealtimeSubtitle")
 
 
-def create_accuracy_transcriber() -> tuple[AccuracyPlan, object] | None:
-    """Create a local refiner, or safely disable enhancement when unavailable."""
+def resolve_accuracy_runtime() -> tuple[AccuracyPlan, str] | None:
+    """Resolve the installed refiner without loading a model.
+
+    This deliberately stays cheap so live captions can start before a larger
+    optional model is initialized in the background.
+    """
     from config import config
 
     if not bool(getattr(config, "enhanced_accuracy", False)):
@@ -38,6 +42,12 @@ def create_accuracy_transcriber() -> tuple[AccuracyPlan, object] | None:
         )
         return None
 
+    return plan, model_path
+
+
+def load_accuracy_transcriber(plan: AccuracyPlan, model_path: str):
+    """Load and warm an already-resolved local refinement model."""
+    from config import config
     from transcriber import Transcriber
 
     log.info(
@@ -55,5 +65,13 @@ def create_accuracy_transcriber() -> tuple[AccuracyPlan, object] | None:
         language=getattr(config, "source_language", None),
     )
     transcriber.warmup()
-    return plan, transcriber
+    return transcriber
 
+
+def create_accuracy_transcriber() -> tuple[AccuracyPlan, object] | None:
+    """Backward-compatible eager factory used by diagnostics and tests."""
+    runtime = resolve_accuracy_runtime()
+    if runtime is None:
+        return None
+    plan, model_path = runtime
+    return plan, load_accuracy_transcriber(plan, model_path)

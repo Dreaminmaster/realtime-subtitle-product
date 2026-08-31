@@ -24,6 +24,9 @@ try:
     from AppKit import (
         NSWindowCollectionBehaviorCanJoinAllSpaces,
         NSWindowCollectionBehaviorFullScreenAuxiliary,
+        NSWindowCollectionBehaviorIgnoresCycle,
+        NSWindowCollectionBehaviorStationary,
+        NSFloatingWindowLevel,
         NSWindowStyleMaskNonactivatingPanel,
     )
     import objc
@@ -286,8 +289,11 @@ class EnhancedOverlayWindow(QWidget):
             ns_window.setCollectionBehavior_(
                 NSWindowCollectionBehaviorCanJoinAllSpaces
                 | NSWindowCollectionBehaviorFullScreenAuxiliary
+                | NSWindowCollectionBehaviorStationary
+                | NSWindowCollectionBehaviorIgnoresCycle
             )
             ns_window.setHidesOnDeactivate_(False)
+            ns_window.setLevel_(NSFloatingWindowLevel)
             # Qt.Tool normally maps to NSPanel.  Mark it explicitly as a
             # non-activating panel so subtitle updates cannot steal focus or
             # make the frontmost application's windows flash.
@@ -309,6 +315,7 @@ class EnhancedOverlayWindow(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self.setWindowTitle("")  # prevent macOS title bar text
         self.setObjectName("OverlaySurface")

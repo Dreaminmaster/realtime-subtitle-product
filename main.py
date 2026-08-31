@@ -236,7 +236,11 @@ def create_pipeline():
             )
             self.accuracy_transcriber = None
             self.accuracy_plan = None
+            self._accuracy_model_path = None
             self._accuracy_accepting = False
+            self._accuracy_condition = _threading_mod.Condition()
+            self._accuracy_pending = None
+            self._accuracy_thread = None
             self._latest_translation_revision = {}
             self._cleanup_in_progress = False
             self._failed = False
@@ -275,12 +279,12 @@ def create_pipeline():
             log.info("Pipeline: transcriber ready (pooled)")
 
             try:
-                from accuracy_transcriber import create_accuracy_transcriber
-                accuracy_runtime = create_accuracy_transcriber()
+                from accuracy_transcriber import resolve_accuracy_runtime
+                accuracy_runtime = resolve_accuracy_runtime()
                 if accuracy_runtime is not None:
-                    self.accuracy_plan, self.accuracy_transcriber = accuracy_runtime
+                    self.accuracy_plan, self._accuracy_model_path = accuracy_runtime
                     log.info(
-                        "Pipeline: enhanced ASR ready (%s)",
+                        "Pipeline: enhanced ASR queued for background loading (%s)",
                         self.accuracy_plan.model_id,
                     )
             except Exception:
@@ -401,6 +405,7 @@ def create_pipeline():
             self._stopping = True
             log.info("Stop requested")
             self.running = False
+            self._stop_accuracy_worker()
             self.audio.stop()
             log.info("Audio capture stopped")
             if hasattr(self, 'thread') and self.thread.is_alive():
@@ -472,14 +477,11 @@ def create_pipeline():
             log.info("Pipeline: processing loop started (state-machine mode)")
             
             translate_executor = ThreadPoolExecutor(max_workers=config.translation_threads)
-            accuracy_executor = (
-                ThreadPoolExecutor(max_workers=1, thread_name_prefix="accuracy")
-                if self.accuracy_transcriber is not None else None
-            )
+            accuracy_executor = None
             lifecycle_lock = self._lifecycle_lock
             session_gen = self._session_generation  # snapshot for this session
             self.accuracy_coordinator.reset(session_gen)
-            self._accuracy_accepting = accuracy_executor is not None
+            self._start_accuracy_worker(session_gen, translate_executor)
             
             # ---- Priority ASR queue: FINAL(0) > PARTIAL(1) ----
             import queue as pyqueue
@@ -560,8 +562,15 @@ def create_pipeline():
             SILENCE_DUR_SEC = max(0.45, min(float(config.silence_duration), 2.0))
             MIN_UTTERANCE_DUR = 0.45
             MAX_UTTERANCE_DUR = config.max_phrase_duration
-            PARTIAL_INTERVAL = max(0.45, min(float(getattr(config, "update_interval", 0.6)), 0.9))
+            # A draft every ~0.8 s still feels live while avoiding the repeated
+            # whole-buffer inference seen at 0.5–0.6 s on CPU-only Macs.
+            PARTIAL_INTERVAL = max(0.75, min(float(getattr(config, "update_interval", 0.8)), 1.2))
             PRE_ROLL_MS = 0.4
+            from adaptive_vad import AdaptiveNoiseGate
+            noise_gate = AdaptiveNoiseGate(
+                self.audio.silence_threshold,
+                getattr(config, "noise_gate_mode", "balanced"),
+            )
             
             def _reset_recording_state():
                 nonlocal buffer, pre_roll, silence_counter, state, last_partial_time
@@ -597,8 +606,14 @@ def create_pipeline():
                         chunk_start, chunk_end = self.session_recorder.write(audio_chunk)
                     audio_cursor = chunk_end
 
-                    chunk_rms = float(np.sqrt(np.mean(audio_chunk**2)))
-                    is_speech = chunk_rms > self.audio.silence_threshold
+                    # Remove DC bias for level analysis only.  The original
+                    # samples still go to recording and ASR unchanged.
+                    analysis_chunk = audio_chunk - float(np.mean(audio_chunk))
+                    chunk_rms = float(np.sqrt(np.mean(analysis_chunk**2)))
+                    is_speech = noise_gate.classify(
+                        chunk_rms,
+                        recording=state == STATE_RECORDING,
+                    )
                     now = time.time()
                     chunk_dur = len(audio_chunk) / self.audio.sample_rate
                     
@@ -763,9 +778,7 @@ def create_pipeline():
                     log.info("ASR worker stopped")
                 
                 self._accuracy_accepting = False
-                if accuracy_executor is not None:
-                    accuracy_executor.shutdown(wait=False, cancel_futures=True)
-                    log.info("Accuracy executor shut down (cancelled pending tasks)")
+                self._stop_accuracy_worker()
                 translate_executor.shutdown(wait=False, cancel_futures=True)
                 log.info("Translation executor shut down (cancelled pending tasks)")
                 if self.session_recorder is not None:
@@ -962,9 +975,8 @@ def create_pipeline():
                                 start_offset=start_offset,
                                 end_offset=end_offset,
                             )
-                    if accuracy_executor is not None and self._accuracy_accepting:
-                        accuracy_executor.submit(
-                            self._refine_final_text,
+                    if self._accuracy_accepting:
+                        self._queue_accuracy_refinement(
                             audio_data.copy(),
                             decision.source_chunk_id,
                             prompt,
@@ -984,6 +996,87 @@ def create_pipeline():
             finally:
                 with lifecycle_lock or self._lifecycle_lock:
                     self._finalizing_uids.discard(chunk_id)
+
+        def _start_accuracy_worker(self, session_gen, translate_executor):
+            """Arm optional refinement without loading anything yet.
+
+            A single latest-only slot prevents slow second-pass recognition
+            from building an unbounded queue and heating the Mac long after the
+            spoken phrase has become irrelevant.
+            """
+            if self.accuracy_plan is None or not self._accuracy_model_path:
+                self._accuracy_accepting = False
+                return
+            self._accuracy_accepting = True
+            self._accuracy_pending = None
+            self._accuracy_thread = None
+            log.info("Pipeline: enhanced ASR armed; model loads after the first final phrase")
+
+        def _stop_accuracy_worker(self):
+            self._accuracy_accepting = False
+            with self._accuracy_condition:
+                self._accuracy_pending = None
+                self._accuracy_condition.notify_all()
+
+        def _queue_accuracy_refinement(
+            self, audio_data, source_chunk_id, prompt, session_gen, translate_executor
+        ):
+            if not self._accuracy_accepting or self._session_generation != session_gen:
+                return
+            thread_to_start = None
+            with self._accuracy_condition:
+                replaced = self._accuracy_pending is not None
+                self._accuracy_pending = (
+                    audio_data,
+                    source_chunk_id,
+                    prompt,
+                    session_gen,
+                    translate_executor,
+                )
+                if self._accuracy_thread is None:
+                    self._accuracy_thread = threading.Thread(
+                        target=self._accuracy_worker_loop,
+                        args=(session_gen, translate_executor),
+                        daemon=True,
+                        name="AccuracyLatestWorker",
+                    )
+                    thread_to_start = self._accuracy_thread
+                self._accuracy_condition.notify()
+            if thread_to_start is not None:
+                thread_to_start.start()
+            if replaced:
+                log.info("Accuracy latest-only queue replaced an older pending phrase")
+
+        def _accuracy_worker_loop(self, session_gen, translate_executor):
+            try:
+                from accuracy_transcriber import load_accuracy_transcriber
+
+                self.accuracy_transcriber = load_accuracy_transcriber(
+                    self.accuracy_plan,
+                    self._accuracy_model_path,
+                )
+                if not self._accuracy_accepting or self._session_generation != session_gen:
+                    return
+                log.info(
+                    "Pipeline: enhanced ASR ready in background (%s)",
+                    self.accuracy_plan.model_id,
+                )
+                while self._accuracy_accepting and self._session_generation == session_gen:
+                    with self._accuracy_condition:
+                        while self._accuracy_pending is None and self._accuracy_accepting:
+                            self._accuracy_condition.wait(timeout=0.75)
+                        if not self._accuracy_accepting:
+                            return
+                        task = self._accuracy_pending
+                        self._accuracy_pending = None
+                    if task is not None:
+                        self._refine_final_text(*task)
+            except Exception:
+                self._accuracy_accepting = False
+                log.exception("Pipeline: background enhanced ASR unavailable")
+            finally:
+                with self._accuracy_condition:
+                    self._accuracy_pending = None
 
         def _refine_final_text(
             self,
