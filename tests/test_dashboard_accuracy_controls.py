@@ -18,6 +18,12 @@ def _app():
     return _APP
 
 
+def _dispose(widget):
+    widget.hide()
+    widget.deleteLater()
+    _app().processEvents()
+
+
 def test_enhanced_controls_follow_config_and_show_download(monkeypatch):
     _app()
     monkeypatch.setattr(config, "enhanced_accuracy", True)
@@ -31,7 +37,19 @@ def test_enhanced_controls_follow_config_and_show_download(monkeypatch):
         assert dashboard.accuracy_download_btn.isEnabled() is True
         assert "small" in dashboard.accuracy_download_btn.text()
     finally:
-        dashboard.close()
+        _dispose(dashboard)
+
+
+def test_runtime_performance_control_preserves_all_hardware_choices(monkeypatch):
+    _app()
+    monkeypatch.setattr(config, "performance_profile", "efficient", raising=False)
+    dashboard = Dashboard()
+    try:
+        assert dashboard.performance_profile.currentData() == "efficient"
+        assert dashboard.performance_profile.findData("balanced") >= 0
+        assert dashboard.performance_profile.findData("maximum") >= 0
+    finally:
+        _dispose(dashboard)
 
 
 def test_accuracy_download_does_not_replace_the_live_model(monkeypatch):
@@ -45,7 +63,7 @@ def test_accuracy_download_does_not_replace_the_live_model(monkeypatch):
         dashboard._on_model_done("turbo", SUCCEEDED, None, 1)
         assert dashboard.whisper_model.currentText() == "tiny"
     finally:
-        dashboard.close()
+        _dispose(dashboard)
 
 
 def test_accuracy_button_shows_immediate_download_state(monkeypatch):
@@ -64,4 +82,4 @@ def test_accuracy_button_shows_immediate_download_state(monkeypatch):
             or "正在下载" in dashboard.accuracy_download_btn.text()
         )
     finally:
-        dashboard.close()
+        _dispose(dashboard)

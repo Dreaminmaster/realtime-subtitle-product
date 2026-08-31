@@ -63,6 +63,11 @@ class Config:
         self.model = self._get("translation", "model", "gpt-4o-mini")
         self.target_lang = self._get("translation", "target_lang", "Chinese")
         self.translation_threads = self._getint("translation", "threads", 4)
+        self.live_translation_mode = self._get(
+            "translation", "live_translation", "balanced"
+        ).lower()
+        if self.live_translation_mode not in ("final_only", "balanced", "realtime"):
+            self.live_translation_mode = "balanced"
         configured_mode = self._get("translation", "mode", "").lower()
         if not configured_mode:
             # Backward compatibility: older config files had no explicit mode
@@ -100,6 +105,11 @@ class Config:
         self.accuracy_profile = self._get("transcription", "accuracy_profile", "auto").lower()
         if self.accuracy_profile not in ("auto", "fast", "balanced", "accurate"):
             self.accuracy_profile = "auto"
+        self.performance_profile = self._get(
+            "transcription", "performance_profile", "balanced"
+        ).lower()
+        if self.performance_profile not in ("efficient", "balanced", "maximum"):
+            self.performance_profile = "balanced"
         self.source_language = self._get("transcription", "source_language", "auto")
         if self.source_language == "auto":
             self.source_language = None  # Whisper uses None for auto-detect
@@ -231,10 +241,12 @@ class Config:
         print(f"  Model: {self.model or '(not set)'}")
         print(f"  Target Language: {self.target_lang}")
         print(f"  Translation Mode: {self.translation_mode}")
+        print(f"  Live Translation: {self.live_translation_mode}")
         print(f"  ASR Backend: {self.asr_backend}")
         print(f"  Whisper Model: {self.whisper_model}")
         print(f"  FunASR Model: {self.funasr_model}")
         print(f"  Enhanced Accuracy: {self.enhanced_accuracy} ({self.accuracy_profile})")
+        print(f"  Runtime Performance: {self.performance_profile}")
         print(f"  Input Source: {self.input_source}")
         print(f"  Noise Gate: {self.noise_gate_mode}")
         print(f"  Sample Rate: {self.sample_rate}")

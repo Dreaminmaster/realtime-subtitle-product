@@ -44,6 +44,14 @@ def test_target_language_is_a_clickable_finite_dropdown(app):
     _dispose(dashboard, app)
 
 
+def test_live_translation_exposes_final_balanced_and_realtime_modes(app):
+    dashboard = Dashboard()
+    assert dashboard.live_translation_mode.findData("final_only") >= 0
+    assert dashboard.live_translation_mode.findData("balanced") >= 0
+    assert dashboard.live_translation_mode.findData("realtime") >= 0
+    _dispose(dashboard, app)
+
+
 def test_stale_async_connection_result_cannot_reappear(app):
     dashboard = Dashboard()
     dashboard.translation_mode.setCurrentIndex(dashboard.translation_mode.findData("local"))

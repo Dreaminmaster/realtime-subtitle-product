@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version, for example 2.9.2"
+        description: "Release version, for example 2.9.3"
         required: true
-        default: "2.9.2"
+        default: "2.9.3"
       publish:
         description: "Publish or update the GitHub release"
         required: true
@@ -65,7 +65,8 @@ jobs:
             session_recording.py ui_components.py mac_translation.py \
             model_catalog.py model_manager.py translation_engine.py \
             recognition_quality.py accuracy_transcriber.py \
-            adaptive_vad.py \
+            adaptive_vad.py runtime_performance.py \
+            src/live_translation_drafts.py \
             transcriber_pool.py src/accuracy_refinement.py \
             src/contextual_phrase_composer.py
       - name: Test
@@ -145,15 +146,15 @@ jobs:
           TAG="v${VERSION}"
           TITLE="Realtime Subtitle ${TAG}"
           cat > release-notes.md <<'EOF'
-          Realtime Subtitle 2.9.2 makes caption-only operation independent, starts substantially faster, and reduces sustained CPU work.
+          Realtime Subtitle 2.9.3 makes translation visibly incremental while keeping CPU-heavy correction work bounded and configurable.
 
-          - The control center hides before audio begins and macOS switches to accessory mode, leaving an all-Spaces, non-activating floating caption panel.
-          - Optional enhanced recognition loads in the background and keeps only the latest pending correction instead of accumulating stale CPU-heavy work.
-          - Auto uses Turbo on Apple Silicon; Large-v3 is reserved for an explicit Accurate choice with a thermal warning.
-          - Live exposes a synchronized Spoken language selector to improve single-language accuracy and reduce repeated detection.
-          - Adaptive Off, Balanced, and Strong noise gates improve speech boundaries without altering original audio.
-          - Partial refresh cadence avoids redundant whole-buffer inference while preserving final-caption latency.
-          - Dark and light appearance-preview surfaces are stacked vertically, preserving width for long draggable subtitle lines.
+          - Partial recognition can now produce a throttled draft translation before the speaker finishes; the reliable final translation replaces the same subtitle row.
+          - Draft work is latest-only, session guarded, never persisted, and never shows backend error markers as subtitle content.
+          - Apple Translation reuses one native TranslationSession for a fixed language pair; local validation measured about 2.5 seconds for first initialization and 0.056 seconds for the next request.
+          - Final Apple translation remains reliable while best-effort drafts skip rather than queue behind a busy final request.
+          - Efficient, Balanced, and Maximum runtime profiles tune draft ASR, draft translation, and optional refinement duty cycle without removing larger-model choices.
+          - Balanced and Efficient insert adaptive cooling after slow second-pass recognition while the existing latest-only slot keeps the newest phrase.
+          - Translation settings expose Final only, Balanced, and Realtime behavior, with provider-aware request spacing.
 
           Native macOS downloads are provided separately for Apple Silicon and Intel.
 

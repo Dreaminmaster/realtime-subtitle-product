@@ -8,14 +8,14 @@
 
 ## 下载 / Download
 
-当前稳定版：**v2.9.2** · macOS 13 Ventura 或更高版本
+当前稳定版：**v2.9.3** · macOS 13 Ventura 或更高版本
 
-Current stable release: **v2.9.2** · macOS 13 Ventura or later
+Current stable release: **v2.9.3** · macOS 13 Ventura or later
 
 | Mac | 安装包 / Installer | 适用设备 / Hardware |
 |---|---|---|
-| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.9.2-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
-| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.9.2-macos-x86_64.dmg) | Intel-based Macs |
+| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.9.3-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
+| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.9.3-macos-x86_64.dmg) | Intel-based Macs |
 
 [查看全部版本 / View all releases](https://github.com/Dreaminmaster/realtime-subtitle-product/releases)
 
@@ -30,6 +30,9 @@ Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本�
 ### 主要功能
 
 - 本地实时语音识别，内置 `faster-whisper tiny` 模型，安装后即可开始。
+- v2.9.3 新增增量实时翻译：讲话中的识别草稿会按“均衡 / 更实时”节奏提前翻译，随后在同一行原位更新；最终定稿仍通过可靠队列覆盖草稿，不会把临时译文写入会话记录。
+- Apple Translation 现在为固定语言组合复用一个原生系统翻译会话，不再为每次更新重新启动框架。本机测试中首次初始化约 2.5 秒，后续调用约 0.056 秒。
+- 新增节能 / 均衡 / 最高性能三档运行策略。均衡与节能会在耗时的大模型修正后自动冷却并仅保留最新任务；最高性能保留给更快或具有额外散热条件的 Mac。
 - v2.9.2 将增强模型改为字幕启动后在后台加载；慢模型繁忙时只保留最新一句待修正，避免旧任务积压造成长时间发热。实测本机管线准备时间由约 25 秒降至约 1.3 秒。
 - Live 页可直接选定**说话语言**。明确的单一语言会跳过反复语言检测，通常比“自动检测”更准确且负担更低；混合语言对话仍可选择自动。
 - 音频页新增关闭 / 均衡 / 强力三档自适应环境降噪。它只改进说话起止判断，不改变录音和送入识别模型的原始音频。
@@ -136,6 +139,9 @@ Realtime Subtitle is a native-feeling macOS control center with an always-on-top
 ### Highlights
 
 - Local live transcription with a bundled `faster-whisper tiny` model.
+- v2.9.3 adds incremental live translation: throttled partial-ASR drafts can show a changing translation before the utterance ends, while the reliable final scheduler replaces the same row and only final text is persisted.
+- Apple Translation now reuses one native system session for a fixed language pair instead of launching the framework for every update. On the development Mac, the first request took about 2.5 seconds and the next request about 0.056 seconds.
+- Efficient, Balanced, and Maximum runtime profiles separate the workload budget from model quality. Balanced and Efficient cool down slow refinement passes while keeping only the latest task; Maximum preserves continuous correction for faster or externally cooled Macs.
 - v2.9.2 starts captions before loading the optional refiner and keeps only the latest pending correction, preventing stale work from building up and reducing sustained heat. The measured pipeline preparation time on the development Mac fell from about 25 seconds to about 1.3 seconds.
 - A prominent **Spoken language** selector on Live skips repeated language detection when the conversation uses one known language, improving stability and lowering processing work; Automatic remains available for mixed-language speech.
 - Lightweight adaptive room-noise filtering offers Off, Balanced, and Strong modes without altering the original audio sent to recognition or saved in recordings.
@@ -244,17 +250,17 @@ Build a native DMG on a matching Mac:
 
 ```bash
 # Apple Silicon host
-bash build_dmg.sh 2.9.2 arm64
+bash build_dmg.sh 2.9.3 arm64
 
 # Intel host, or Apple Silicon with Rosetta installed
-bash build_dmg.sh 2.9.2 x86_64
+bash build_dmg.sh 2.9.3 x86_64
 ```
 
 Outputs:
 
 ```text
-dist/RealtimeSubtitle-2.9.2-macos-arm64.dmg
-dist/RealtimeSubtitle-2.9.2-macos-x86_64.dmg
+dist/RealtimeSubtitle-2.9.3-macos-arm64.dmg
+dist/RealtimeSubtitle-2.9.3-macos-x86_64.dmg
 ```
 
 The GitHub Actions release workflow builds `arm64` on an Apple Silicon runner and `x86_64` on an Intel runner, verifies the embedded architecture and app icon, creates SHA-256 checksums, and publishes both DMGs to one release.

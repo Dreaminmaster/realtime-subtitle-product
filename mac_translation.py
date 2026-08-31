@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import atexit
+import json
 import platform
+import selectors
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 
@@ -59,12 +63,104 @@ def availability() -> tuple[bool, str]:
     return True, "Apple Translation is ready"
 
 
+class _PersistentTranslationService:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._process: subprocess.Popen | None = None
+        self._key: tuple[str, str, str] | None = None
+        self._request_id = 0
+
+    def close(self) -> None:
+        process = self._process
+        self._process = None
+        self._key = None
+        if process is not None and process.poll() is None:
+            try:
+                process.terminate()
+                process.wait(timeout=1.0)
+            except Exception:
+                try:
+                    process.kill()
+                except Exception:
+                    pass
+
+    def _ensure_process(self, path: Path, source: str, target: str) -> subprocess.Popen:
+        key = (str(path), source, target)
+        if self._process is not None and self._process.poll() is None and self._key == key:
+            return self._process
+        self.close()
+        self._process = subprocess.Popen(
+            [str(path), "--server", source, target],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+        self._key = key
+        return self._process
+
+    def translate(
+        self,
+        path: Path,
+        source: str,
+        target: str,
+        text: str,
+        timeout: float,
+        *,
+        wait_if_busy: bool,
+    ) -> str:
+        if not self._lock.acquire(blocking=wait_if_busy):
+            return ""
+        try:
+            process = self._ensure_process(path, source, target)
+            if process.stdin is None or process.stdout is None:
+                raise RuntimeError("Apple Translation service pipes are unavailable")
+            self._request_id += 1
+            request_id = self._request_id
+            process.stdin.write(
+                json.dumps({"id": request_id, "text": str(text)}, ensure_ascii=False) + "\n"
+            )
+            process.stdin.flush()
+
+            selector = selectors.DefaultSelector()
+            try:
+                selector.register(process.stdout, selectors.EVENT_READ)
+                events = selector.select(timeout=max(1.0, float(timeout)))
+            finally:
+                selector.close()
+            if not events:
+                self.close()
+                raise TimeoutError("Apple Translation timed out")
+
+            line = process.stdout.readline()
+            if not line:
+                error = ""
+                if process.stderr is not None:
+                    error = process.stderr.read().strip()
+                self.close()
+                raise RuntimeError(error or "Apple Translation service stopped")
+            payload = json.loads(line)
+            if int(payload.get("id", -1)) != request_id:
+                raise RuntimeError("Apple Translation returned an out-of-order response")
+            if payload.get("error"):
+                raise RuntimeError(str(payload["error"]))
+            return str(payload.get("translated") or "").strip()
+        finally:
+            self._lock.release()
+
+
+_SERVICE = _PersistentTranslationService()
+atexit.register(_SERVICE.close)
+
+
 def translate(
     text: str,
     *,
     source_language: str | None = None,
     target_language: str | None = None,
     timeout: float = 20.0,
+    wait_if_busy: bool = True,
 ) -> str:
     ready, reason = availability()
     if not ready:
@@ -75,6 +171,15 @@ def translate(
     # The native helper repeats this guard after auto language detection.
     if source != "auto" and source.lower() == target.lower():
         return str(text).strip()
+    if source != "auto":
+        return _SERVICE.translate(
+            helper_path(),
+            source,
+            target,
+            str(text),
+            timeout,
+            wait_if_busy=wait_if_busy,
+        )
     completed = subprocess.run(
         [str(helper_path()), source, target, str(text)],
         capture_output=True,

@@ -1300,6 +1300,25 @@ class Dashboard(QWidget):
         self.accuracy_profile.setCurrentIndex(max(0, accuracy_index))
         layout.addRow("Hardware profile:", self.accuracy_profile)
 
+        self.performance_profile = SegmentedControl()
+        self.performance_profile.addItem("Efficient", "efficient")
+        self.performance_profile.addItem("Balanced", "balanced")
+        self.performance_profile.addItem("Maximum", "maximum")
+        performance_index = self.performance_profile.findData(
+            getattr(config, "performance_profile", "balanced")
+        )
+        self.performance_profile.setCurrentIndex(max(0, performance_index))
+        self.performance_profile.setToolTip(
+            "Balanced adapts update cadence and pauses a slow enhancement model between corrections. Maximum keeps every correction running continuously."
+        )
+        layout.addRow("Runtime performance:", self.performance_profile)
+        performance_hint = QLabel(
+            "Balanced is recommended. Efficient lowers heat; Maximum is intended for faster or externally cooled Macs."
+        )
+        performance_hint.setObjectName("Muted")
+        performance_hint.setWordWrap(True)
+        layout.addRow(performance_hint)
+
         accuracy_status_row = QWidget()
         accuracy_status_layout = QHBoxLayout(accuracy_status_row)
         accuracy_status_layout.setContentsMargins(0, 0, 0, 0)
@@ -1642,6 +1661,22 @@ class Dashboard(QWidget):
             self.target_lang.setCurrentIndex(self.target_lang.count() - 1)
         self.target_lang.currentTextChanged.connect(self._on_translation_settings_changed)
         layout.addRow("Translate into:", self.target_lang)
+
+        self.live_translation_mode = SegmentedControl()
+        self.live_translation_mode.addItem("Final only", "final_only")
+        self.live_translation_mode.addItem("Balanced", "balanced")
+        self.live_translation_mode.addItem("Realtime", "realtime")
+        live_translation_index = self.live_translation_mode.findData(
+            getattr(config, "live_translation_mode", "balanced")
+        )
+        self.live_translation_mode.setCurrentIndex(max(0, live_translation_index))
+        layout.addRow("Live translation:", self.live_translation_mode)
+        live_translation_hint = QLabel(
+            "Balanced shows a throttled draft while you speak, then replaces it with the final translation. Realtime updates more often and uses more power or API calls."
+        )
+        live_translation_hint.setObjectName("Muted")
+        live_translation_hint.setWordWrap(True)
+        layout.addRow(live_translation_hint)
         
         # Test Translation button
         test_layout = QHBoxLayout()
@@ -2981,8 +3016,12 @@ class Dashboard(QWidget):
         cp.set("transcription", "compute_type", self.compute_type.currentText())
         enhanced_accuracy = bool(self.enhanced_accuracy_mode.currentData())
         accuracy_profile = str(self.accuracy_profile.currentData() or "auto")
+        performance_profile = str(
+            self.performance_profile.currentData() or "balanced"
+        )
         cp.set("transcription", "enhanced_accuracy", str(enhanced_accuracy).lower())
         cp.set("transcription", "accuracy_profile", accuracy_profile)
+        cp.set("transcription", "performance_profile", performance_profile)
         source_language = str(
             self.live_source_language.currentData()
             or self.source_language.currentData()
@@ -3000,6 +3039,10 @@ class Dashboard(QWidget):
         cp.set("translation", "model", self.model.currentText())
         cp.set("translation", "target_lang", str(self.target_lang.currentData() or self.target_lang.currentText()))
         cp.set("translation", "mode", translation_mode)
+        live_translation_mode = str(
+            self.live_translation_mode.currentData() or "balanced"
+        )
+        cp.set("translation", "live_translation", live_translation_mode)
 
         # App and overlay appearance
         cp.set("app", "language", self.ui_language)
@@ -3036,6 +3079,7 @@ class Dashboard(QWidget):
         config.whisper_compute_type = self.compute_type.currentText()
         config.enhanced_accuracy = enhanced_accuracy
         config.accuracy_profile = accuracy_profile
+        config.performance_profile = performance_profile
         source = source_language
         config.source_language = None if source == "auto" else source
         config.api_key = self.api_key.text().strip()
@@ -3043,6 +3087,7 @@ class Dashboard(QWidget):
         config.model = self.model.currentText().strip()
         config.target_lang = str(self.target_lang.currentData() or self.target_lang.currentText())
         config.translation_mode = translation_mode
+        config.live_translation_mode = live_translation_mode
         config.session_mode = session_mode
         config.record_session_audio = record_session_audio
         config.use_translation_scheduler = session_mode == "saved"

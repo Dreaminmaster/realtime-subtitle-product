@@ -14,6 +14,7 @@ model = gpt-4o-mini
 target_lang = Chinese
 timeout = 12
 threads = 4
+live_translation = balanced
 
 [display]
 display_duration = 10
@@ -36,6 +37,7 @@ device = cpu
 compute_type = int8
 enhanced_accuracy = false
 accuracy_profile = auto
+performance_profile = balanced
 source_language = auto
 transcription_workers = 4
 

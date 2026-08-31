@@ -41,6 +41,9 @@ class BaseTranslator:
     def check_health(self) -> bool:
         """Check if backend is available"""
         return True
+
+    def translate_draft(self, text: str) -> str:
+        return self.translate(text)
     
     @property
     def name(self) -> str:
@@ -75,6 +78,23 @@ class OfflineTranslator(BaseTranslator):
             )
         except Exception as exc:
             return f"[Translation Failed: {exc}]"
+
+    def translate_draft(self, text: str) -> str:
+        if not text or not text.strip():
+            return ""
+        try:
+            from mac_translation import translate
+            return translate(
+                text,
+                source_language=self.source_lang,
+                target_language=self.target_lang,
+                timeout=self.timeout,
+                wait_if_busy=False,
+            )
+        except Exception:
+            # Drafts are best effort.  The reliable FINAL path will surface
+            # configuration errors in settings and logs.
+            return ""
 
 
 class OnlineAPITranslator(BaseTranslator):
@@ -362,6 +382,11 @@ class TranslationEngine:
         if self._current_mode == "off":
             return ""  # original_only mode — skip translation entirely
         return self._translator.translate(text)
+
+    def translate_draft(self, text: str) -> str:
+        if self._translator is None:
+            return ""
+        return self._translator.translate_draft(text)
     
     def check_health(self) -> dict:
         """Check health of current backend"""

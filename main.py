@@ -242,6 +242,11 @@ def create_pipeline():
             self._accuracy_pending = None
             self._accuracy_thread = None
             self._latest_translation_revision = {}
+            from runtime_performance import RuntimePerformancePolicy
+            self.performance_policy = RuntimePerformancePolicy(
+                getattr(config, "performance_profile", "balanced")
+            )
+            self.live_translation_drafts = None
             self._cleanup_in_progress = False
             self._failed = False
             self._stopping = False             # dedup stop guard
@@ -305,6 +310,27 @@ def create_pipeline():
                 source_language=config.source_language or "auto",
             )
             log.info(f"Pipeline: translation engine ({trans_mode}) initialized")
+
+            draft_interval = self.performance_policy.draft_translation_interval(
+                trans_mode,
+                getattr(config, "live_translation_mode", "balanced"),
+            )
+            if draft_interval is not None:
+                from src.live_translation_drafts import LiveTranslationDrafts
+
+                self.live_translation_drafts = LiveTranslationDrafts(
+                    translator=self.translation_engine.translate_draft,
+                    on_result=self.signals.update_text.emit,
+                    interval=draft_interval,
+                    min_growth=self.performance_policy.draft_min_growth(
+                        getattr(config, "live_translation_mode", "balanced")
+                    ),
+                )
+                log.info(
+                    "Pipeline: live draft translation enabled interval=%.2fs profile=%s",
+                    draft_interval,
+                    self.performance_policy.profile,
+                )
 
             # v2.4: Runtime settings guard evaluates feature flags
             # Feature flags: REALTIME_SUBTITLE_USE_TRANSLATION_SCHEDULER
@@ -406,6 +432,8 @@ def create_pipeline():
             log.info("Stop requested")
             self.running = False
             self._stop_accuracy_worker()
+            if self.live_translation_drafts is not None:
+                self.live_translation_drafts.stop()
             self.audio.stop()
             log.info("Audio capture stopped")
             if hasattr(self, 'thread') and self.thread.is_alive():
@@ -482,6 +510,8 @@ def create_pipeline():
             session_gen = self._session_generation  # snapshot for this session
             self.accuracy_coordinator.reset(session_gen)
             self._start_accuracy_worker(session_gen, translate_executor)
+            if self.live_translation_drafts is not None:
+                self.live_translation_drafts.start_session(session_gen)
             
             # ---- Priority ASR queue: FINAL(0) > PARTIAL(1) ----
             import queue as pyqueue
@@ -564,7 +594,9 @@ def create_pipeline():
             MAX_UTTERANCE_DUR = config.max_phrase_duration
             # A draft every ~0.8 s still feels live while avoiding the repeated
             # whole-buffer inference seen at 0.5–0.6 s on CPU-only Macs.
-            PARTIAL_INTERVAL = max(0.75, min(float(getattr(config, "update_interval", 0.8)), 1.2))
+            PARTIAL_INTERVAL = self.performance_policy.partial_interval(
+                getattr(config, "update_interval", 0.8)
+            )
             PRE_ROLL_MS = 0.4
             from adaptive_vad import AdaptiveNoiseGate
             noise_gate = AdaptiveNoiseGate(
@@ -779,6 +811,8 @@ def create_pipeline():
                 
                 self._accuracy_accepting = False
                 self._stop_accuracy_worker()
+                if self.live_translation_drafts is not None:
+                    self.live_translation_drafts.shutdown(wait=False)
                 translate_executor.shutdown(wait=False, cancel_futures=True)
                 log.info("Translation executor shut down (cancelled pending tasks)")
                 if self.session_recorder is not None:
@@ -873,6 +907,12 @@ def create_pipeline():
                         f"Utterance[{chunk_id}] PARTIAL chars={len(text)} seq={seq}"
                     )
                     self.signals.update_text.emit(chunk_id, text, "")
+                    if self.live_translation_drafts is not None:
+                        self.live_translation_drafts.submit(
+                            session_gen,
+                            chunk_id,
+                            text,
+                        )
             except Exception:
                 log.exception(f"Utterance[{chunk_id}] PARTIAL error")
         
@@ -934,6 +974,8 @@ def create_pipeline():
                             start_offset=start_offset,
                             end_offset=end_offset,
                         )
+                    if self.live_translation_drafts is not None:
+                        self.live_translation_drafts.finalize(decision.source_chunk_id)
                     self._latest_translation_revision[display_chunk_id] = decision.revision
                     if decision.merged and decision.source_chunk_id != display_chunk_id:
                         # A PARTIAL bubble may already exist for the new audio
@@ -1070,7 +1112,26 @@ def create_pipeline():
                         task = self._accuracy_pending
                         self._accuracy_pending = None
                     if task is not None:
-                        self._refine_final_text(*task)
+                        elapsed = self._refine_final_text(*task) or 0.0
+                        cooldown = self.performance_policy.accuracy_cooldown(
+                            elapsed,
+                            getattr(self.accuracy_plan, "model_id", ""),
+                        )
+                        if cooldown > 0:
+                            log.info(
+                                "Accuracy cooling for %.1fs profile=%s",
+                                cooldown,
+                                self.performance_policy.profile,
+                            )
+                            deadline = time.monotonic() + cooldown
+                            with self._accuracy_condition:
+                                while self._accuracy_accepting:
+                                    remaining = deadline - time.monotonic()
+                                    if remaining <= 0:
+                                        break
+                                    self._accuracy_condition.wait(
+                                        timeout=min(remaining, 0.75)
+                                    )
             except Exception:
                 self._accuracy_accepting = False
                 log.exception("Pipeline: background enhanced ASR unavailable")
@@ -1101,12 +1162,13 @@ def create_pipeline():
                         session_generation=session_gen,
                     )
                 if update is None:
-                    return
+                    return time.time() - started
+                elapsed = time.time() - started
                 log.info(
                     "Accuracy[%s→%s] corrected in %.0fms revision=%s",
                     source_chunk_id,
                     update.display_chunk_id,
-                    (time.time() - started) * 1000,
+                    elapsed * 1000,
                     update.revision,
                 )
                 self._latest_translation_revision[update.display_chunk_id] = update.revision
@@ -1140,10 +1202,12 @@ def create_pipeline():
                             start_offset=update.start_offset,
                             end_offset=update.end_offset,
                         )
+                return elapsed
             except Exception:
                 # The standard result is already visible.  Refinement failure
                 # is intentionally non-fatal and only disables this correction.
                 log.exception("Accuracy[%s] refinement failed", source_chunk_id)
+                return 0.0
         
         def _run_translation_safe(self, text, chunk_id, session_gen, revision=None):
             """Session-safe translation. Discards result if session changed."""
