@@ -11,6 +11,7 @@ api_key =
 [translation]
 mode = off
 model = gpt-4o-mini
+offline_model = opus-en-zh
 target_lang = Chinese
 timeout = 12
 threads = 4
@@ -49,7 +50,7 @@ silence_threshold = 0.005
 silence_duration = 1.0
 noise_gate_mode = balanced
 chunk_duration = 0.1
-max_phrase_duration = 30
+max_phrase_duration = 9
 streaming_mode = true
 streaming_interval = 3
 streaming_step_size = 0.2

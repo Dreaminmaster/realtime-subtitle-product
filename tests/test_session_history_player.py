@@ -64,3 +64,30 @@ def test_transcript_lines_flow_without_bubble_selection(app):
     assert player.transcript.selectionMode() == player.transcript.SelectionMode.NoSelection
     assert "不能" in player.recording_hint.text() or "only" in player.recording_hint.text()
     assert player.transport.isHidden()
+
+
+def test_history_reflows_when_window_narrows_without_horizontal_scroll(app):
+    session = SessionView("s3", "CLOSED", 0.0, 0.0, metadata={"record_audio": False})
+    segments = [
+        SegmentView(
+            "s3", "long", 1, "FINAL",
+            "A long saved sentence must remain readable after the app window becomes much narrower, without asking the user to pan left and right.",
+            "保存下来的长句在应用窗口明显变窄后也应该保持可读，并在当前区域内自然换行。",
+            "DONE", start_offset=0.0, end_offset=4.0,
+        )
+    ]
+    player = SessionHistoryPlayer()
+    player.resize(760, 400)
+    player.show()
+    player.set_session(session, segments)
+    app.processEvents()
+    wide_height = player._line_items[0].sizeHint().height()
+
+    player.resize(440, 400)
+    app.processEvents()
+    player._sync_all_line_sizes()
+    narrow_height = player._line_items[0].sizeHint().height()
+
+    assert player.transcript.horizontalScrollBar().maximum() == 0
+    assert narrow_height > wide_height
+    assert player._line_widgets[0].width() <= player.transcript.viewport().width()

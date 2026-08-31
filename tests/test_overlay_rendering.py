@@ -128,3 +128,22 @@ def test_outer_surface_stays_transparent_while_bubbles_own_opacity(app):
     assert "background-color: transparent" in window.styleSheet()
     assert "rgba(24, 23, 21, 204)" in window.items[0][1].styleSheet()
     window.close()
+
+
+def test_long_live_caption_reflows_inside_viewport_after_updates(app):
+    window = EnhancedOverlayWindow({"window_width": 720, "visible_subtitles": 2})
+    window.show()
+    long_original = (
+        "This is a long sentence that keeps changing while the speaker continues, "
+        "and it must wrap inside one subtitle row instead of disappearing past the edge."
+    )
+    long_translation = "这是一句会随着说话继续变化的长译文，它应该在同一条字幕中按照窗口宽度换行，而不是跑到窗口外面。"
+    window.update_text(1, "This is a long sentence", "这是一句长译文")
+    window.update_text(1, long_original, long_translation)
+    app.processEvents()
+
+    bubble = window.items[0][1]
+    assert bubble.width() <= window.scroll_area.viewport().width()
+    assert bubble.original_label.height() > bubble.original_label.fontMetrics().height()
+    assert window.scroll_area.horizontalScrollBar().maximum() == 0
+    window.close()

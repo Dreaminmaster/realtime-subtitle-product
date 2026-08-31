@@ -99,3 +99,19 @@ def test_revise_current_changes_the_base_for_a_later_join():
     assert composer.revise_current(first.chunk_id, "I believe that") is True
     second = composer.compose(2, "we should go.", now=2)
     assert second.text == "I believe that we should go."
+
+
+def test_long_continuation_starts_a_new_scannable_caption():
+    composer = ContextualPhraseComposer()
+    composer.compose(
+        1,
+        "This opening already contains enough spoken words to fill a readable live caption without becoming a paragraph on screen",
+        now=1,
+    )
+    decision = composer.compose(
+        2,
+        "and this continuation should stay in a new caption rather than making the previous row excessively long.",
+        now=2,
+    )
+    assert decision.chunk_id == 2
+    assert decision.merged is False

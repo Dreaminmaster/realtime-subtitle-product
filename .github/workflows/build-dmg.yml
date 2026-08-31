@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version, for example 2.9.3"
+        description: "Release version, for example 2.9.4"
         required: true
-        default: "2.9.3"
+        default: "2.9.4"
       publish:
         description: "Publish or update the GitHub release"
         required: true
@@ -64,6 +64,7 @@ jobs:
             audio_playback.py session_export.py session_history_player.py \
             session_recording.py ui_components.py mac_translation.py \
             model_catalog.py model_manager.py translation_engine.py \
+            translation_model_manager.py \
             recognition_quality.py accuracy_transcriber.py \
             adaptive_vad.py runtime_performance.py \
             src/live_translation_drafts.py \
@@ -146,15 +147,15 @@ jobs:
           TAG="v${VERSION}"
           TITLE="Realtime Subtitle ${TAG}"
           cat > release-notes.md <<'EOF'
-          Realtime Subtitle 2.9.3 makes translation visibly incremental while keeping CPU-heavy correction work bounded and configurable.
+          Realtime Subtitle 2.9.4 fixes long-caption layout and makes offline translation a first-class optional workflow.
 
-          - Partial recognition can now produce a throttled draft translation before the speaker finishes; the reliable final translation replaces the same subtitle row.
-          - Draft work is latest-only, session guarded, never persisted, and never shows backend error markers as subtitle content.
-          - Apple Translation reuses one native TranslationSession for a fixed language pair; local validation measured about 2.5 seconds for first initialization and 0.056 seconds for the next request.
-          - Final Apple translation remains reliable while best-effort drafts skip rather than queue behind a busy final request.
-          - Efficient, Balanced, and Maximum runtime profiles tune draft ASR, draft translation, and optional refinement duty cycle without removing larger-model choices.
-          - Balanced and Efficient insert adaptive cooling after slow second-pass recognition while the existing latest-only slot keeps the newest phrase.
-          - Translation settings expose Final only, Balanced, and Realtime behavior, with provider-aware request spacing.
+          - Long original and translated text now wraps inside the active floating subtitle without clipping or creating a new caption.
+          - Session transcripts reflow when the control center narrows; the unwanted horizontal scrollbar is removed.
+          - Agnes AI and custom OpenAI-compatible endpoints now share one Online API provider with clear presets.
+          - Small English↔Chinese offline translation models can be downloaded, verified, selected and removed directly in the Translation page.
+          - Speech-recognition and translation downloads are clearly separated; offline translation models remain optional and outside the app bundle.
+          - Balanced caption segments are bounded to nine seconds, with shorter phrase-composer limits for more readable live rows.
+          - Draft translation updates arrive sooner while Efficient mode still offers a lower-heat workload budget.
 
           Native macOS downloads are provided separately for Apple Silicon and Intel.
 

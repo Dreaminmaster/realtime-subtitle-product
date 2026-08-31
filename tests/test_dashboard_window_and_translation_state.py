@@ -26,13 +26,46 @@ def test_switching_provider_invalidates_visible_connection_result(app):
     dashboard.trans_test_result.setText("✅ stale provider result")
     dashboard._translation_test_fingerprint = dashboard._translation_settings_snapshot()
     previous_generation = dashboard._translation_test_generation
-    target = "custom" if dashboard.translation_mode.currentData() != "custom" else "local"
+    target = "api" if dashboard.translation_mode.currentData() != "api" else "local"
 
     dashboard.translation_mode.setCurrentIndex(dashboard.translation_mode.findData(target))
 
     assert dashboard._translation_test_generation > previous_generation
     assert dashboard._translation_test_fingerprint is None
     assert "✅" not in dashboard.trans_test_result.text()
+    _dispose(dashboard, app)
+
+
+def test_agnes_and_custom_api_share_one_provider(app):
+    dashboard = Dashboard()
+    assert dashboard.translation_mode.findData("api") >= 0
+    assert dashboard.translation_mode.findData("online") == -1
+    assert dashboard.translation_mode.findData("custom") == -1
+    assert dashboard.api_preset.findData("agnes") >= 0
+    assert dashboard.api_preset.findData("custom") >= 0
+    _dispose(dashboard, app)
+
+
+def test_offline_translation_is_clearly_separate_from_speech_models(app):
+    dashboard = Dashboard()
+    assert dashboard.translation_mode.findData("offline") >= 0
+    assert dashboard.offline_translation_model.findData("opus-en-zh") >= 0
+    assert "MB" in dashboard.offline_translation_model.currentText()
+    _dispose(dashboard, app)
+
+
+def test_offline_translation_does_not_offer_wrong_language_pair(app):
+    dashboard = Dashboard()
+    dashboard.live_source_language.setCurrentIndex(
+        dashboard.live_source_language.findData("en")
+    )
+    dashboard.translation_mode.setCurrentIndex(
+        dashboard.translation_mode.findData("offline")
+    )
+    dashboard.target_lang.setCurrentIndex(dashboard.target_lang.findData("Japanese"))
+    assert dashboard.offline_translation_model.currentIndex() == -1
+    assert dashboard.offline_translation_model_action.isEnabled() is False
+    assert "Apple" in dashboard.offline_translation_model_status.text()
     _dispose(dashboard, app)
 
 

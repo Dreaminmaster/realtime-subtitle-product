@@ -37,6 +37,16 @@ def test_local_mode_does_not_require_api_key(monkeypatch, tmp_path):
     assert cfg.translation_mode == "local"
 
 
+def test_offline_mode_keeps_separate_downloaded_model(monkeypatch, tmp_path):
+    cfg = _config(
+        monkeypatch,
+        tmp_path,
+        "[translation]\nmode = offline\noffline_model = opus-zh-en\n",
+    )
+    assert cfg.translation_mode == "offline"
+    assert cfg.offline_translation_model == "opus-zh-en"
+
+
 def test_scheduler_can_call_translation_engine_with_target_language():
     engine = TranslationEngine()
     engine.set_mode("off")

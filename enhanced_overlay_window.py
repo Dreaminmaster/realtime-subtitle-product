@@ -45,6 +45,13 @@ class SubtitleBubble(QFrame):
         self.setObjectName("SubtitleBubble")
         self.chunk_id = chunk_id
         self.parent_style = parent_style or {}
+        # A subtitle row must take the width offered by the overlay instead of
+        # advertising the unwrapped text width to QScrollArea.  ``Ignored`` on
+        # the labels is intentional: their height still follows word wrapping,
+        # while their horizontal size hint can no longer push the row beyond
+        # the visible viewport and get clipped.
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.setMinimumWidth(0)
         
         # Read font sizes FIRST — used in height calculation
         original_font_size = self.parent_style.get("original_font_size", 18)
@@ -73,6 +80,10 @@ class SubtitleBubble(QFrame):
             f"font-weight: bold; background: transparent;"
         )
         self.original_label.setWordWrap(True)
+        self.original_label.setMinimumWidth(0)
+        self.original_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
         self.original_label.setVisible(self.parent_style.get("show_original", True))
         layout.addWidget(self.original_label)
         
@@ -86,6 +97,10 @@ class SubtitleBubble(QFrame):
             f"background: transparent;"
         )
         self.translated_label.setWordWrap(True)
+        self.translated_label.setMinimumWidth(0)
+        self.translated_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
         if not show_trans or not translated_text:
             self.translated_label.setVisible(False)
         layout.addWidget(self.translated_label)
@@ -115,6 +130,8 @@ class SubtitleBubble(QFrame):
     
     def update_original(self, text):
         self.original_label.setText(text)
+        self.original_label.updateGeometry()
+        self.updateGeometry()
     
         # Show copy button on hover
         self.setMouseTracking(True)
@@ -128,6 +145,8 @@ class SubtitleBubble(QFrame):
             self.translated_label.setVisible(show_trans)
         else:
             self.translated_label.setVisible(False)
+        self.translated_label.updateGeometry()
+        self.updateGeometry()
     
     def copy_to_clipboard(self):
         """Copy original + translation text to clipboard."""
@@ -260,6 +279,9 @@ class EnhancedOverlayWindow(QWidget):
         self.is_moving = False
         self.oldPos = None
         self.hidden = False
+        self._reflow_timer = QTimer(self)
+        self._reflow_timer.setSingleShot(True)
+        self._reflow_timer.timeout.connect(self._fit_bubbles_to_viewport)
         
         self.init_ui()
     
@@ -348,6 +370,10 @@ class EnhancedOverlayWindow(QWidget):
         # Container
         self.container = QFrame()
         self.container.setStyleSheet("background: transparent;")
+        self.container.setMinimumWidth(0)
+        self.container.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
         self.container_layout = QVBoxLayout()
         self.container_layout.setContentsMargins(5, 5, 5, 5)
         self.container_layout.setSpacing(0)
@@ -577,6 +603,22 @@ class EnhancedOverlayWindow(QWidget):
         """Refresh all existing bubbles with new style"""
         for chunk_id, widget in self.items:
             widget.update_style(self.subtitle_style)
+        self._fit_bubbles_to_viewport()
+
+    def resizeEvent(self, event):
+        """Reflow existing subtitles whenever the floating window changes size."""
+        super().resizeEvent(event)
+        self._reflow_timer.start(0)
+
+    def _fit_bubbles_to_viewport(self):
+        """Constrain rows to the visible width so labels wrap instead of clip."""
+        if not hasattr(self, "scroll_area"):
+            return
+        available = max(120, self.scroll_area.viewport().width() - 10)
+        for _chunk_id, bubble in self.items:
+            bubble.setMaximumWidth(available)
+            bubble.updateGeometry()
+        self.container.updateGeometry()
     
     def set_style(self, style_dict: dict):
         """Set multiple style properties at once"""
@@ -636,6 +678,7 @@ class EnhancedOverlayWindow(QWidget):
             )
             self.items.append((chunk_id, bubble))
             self.container_layout.addWidget(bubble)
+            self._fit_bubbles_to_viewport()
         
         # Bound memory without conflating retention with the visible row count.
         history_limit = max(20, int(self.subtitle_style.get("history_limit", 250)))

@@ -30,3 +30,9 @@ def test_maximum_preserves_continuous_enhancement():
 def test_unknown_profile_safely_uses_balanced():
     assert RuntimePerformancePolicy("mystery").profile == "balanced"
 
+
+def test_caption_segments_remain_scannable_by_profile():
+    assert RuntimePerformancePolicy("efficient").caption_segment_limit(30) == 7.5
+    assert RuntimePerformancePolicy("balanced").caption_segment_limit(30) == 9.0
+    assert RuntimePerformancePolicy("maximum").caption_segment_limit(30) == 12.0
+    assert RuntimePerformancePolicy("balanced").caption_segment_limit(6) == 6.0

@@ -6,6 +6,7 @@ Supports:
   - Mode B (Online): OpenAI-compatible API translation  
   - Mode C (Local): Local LLM via LM Studio / Ollama / OpenAI-compatible
   - Mode D (Off): No translation, original text only
+  - Mode E (Offline model): Downloaded CTranslate2 language-pair model
 """
 
 import os
@@ -299,6 +300,67 @@ class CustomAPITranslator(OnlineAPITranslator):
                         api_key=api_key, model=model or "gpt-3.5-turbo", timeout=timeout)
 
 
+class DownloadedModelTranslator(BaseTranslator):
+    """Small, pair-specific offline translation model managed by this app."""
+
+    name = "Downloaded Offline Model"
+
+    def __init__(self, model: str, source_lang="en", target_lang="zh"):
+        self.model = model
+        self.source_lang = source_lang
+        self.target_lang = target_lang
+        self._translator = None
+        self._source_processor = None
+        self._target_processor = None
+
+    def check_health(self) -> bool:
+        from translation_model_manager import translation_model_manager
+        item = translation_model_manager.model(self.model)
+        if item is None or not translation_model_manager.is_downloaded(self.model):
+            return False
+        from translation_model_manager import normalize_pair_language
+        return item.source == normalize_pair_language(self.source_lang) and item.target == normalize_pair_language(self.target_lang)
+
+    def _ensure_model(self):
+        if self._translator is not None:
+            return
+        from translation_model_manager import translation_model_manager
+        path, source_model, target_model = translation_model_manager.assets(self.model)
+        import ctranslate2
+        import sentencepiece as spm
+
+        # Keep the default offline path deliberately light. CTranslate2 still
+        # uses its optimized kernels, while a single inter-op worker prevents
+        # a subtitle session from saturating every CPU core.
+        self._translator = ctranslate2.Translator(
+            str(path), device="cpu", compute_type="int8",
+            inter_threads=1, intra_threads=2,
+        )
+        self._source_processor = spm.SentencePieceProcessor(model_file=str(source_model))
+        self._target_processor = spm.SentencePieceProcessor(model_file=str(target_model))
+
+    def translate(self, text: str) -> str:
+        if not text or not text.strip():
+            return ""
+        try:
+            self._ensure_model()
+            pieces = self._source_processor.encode(text.strip(), out_type=str)
+            kwargs = {
+                "beam_size": 2,
+                "max_decoding_length": 192,
+                "repetition_penalty": 1.2,
+                "no_repeat_ngram_size": 3,
+            }
+            result = self._translator.translate_batch([pieces], **kwargs)[0]
+            hypothesis = result.hypotheses[0]
+            return self._target_processor.decode(hypothesis).strip()
+        except Exception as exc:
+            return f"[Translation Failed: {type(exc).__name__}: {exc}]"
+
+    def translate_draft(self, text: str) -> str:
+        return self.translate(text)
+
+
 class NoopTranslator(BaseTranslator):
     """Mode Off: No translation"""
     
@@ -321,7 +383,8 @@ class TranslationEngine:
         "fast": "System Translation",
         "online": "Online API",
         "local": "Local LLM",
-        "custom": "Custom API"
+        "custom": "Custom API",
+        "offline": "Downloaded Offline Model",
     }
     
     def __init__(self):
@@ -367,6 +430,12 @@ class TranslationEngine:
                 api_key=kwargs.get("api_key"),
                 model=kwargs.get("model"),
                 timeout=kwargs.get("timeout", 12.0)
+            )
+        elif mode == "offline":
+            self._translator = DownloadedModelTranslator(
+                model=kwargs.get("model") or "opus-en-zh",
+                source_lang=kwargs.get("source_language", "en"),
+                target_lang=self.target_lang,
             )
         
         self._translators[mode] = self._translator

@@ -32,6 +32,15 @@ class RuntimePerformancePolicy:
             return max(0.55, min(requested, 0.75))
         return max(0.78, requested)
 
+    def caption_segment_limit(self, configured: float) -> float:
+        """Bound one acoustic segment so a timed caption stays scannable."""
+        requested = max(4.0, min(float(configured), 30.0))
+        if self.profile == "efficient":
+            return min(requested, 7.5)
+        if self.profile == "maximum":
+            return min(requested, 12.0)
+        return min(requested, 9.0)
+
     def draft_translation_interval(self, translation_mode: str, live_mode: str) -> float | None:
         """Provider-aware interval for non-final translation previews."""
         live_mode = str(live_mode or "balanced").lower()
@@ -45,9 +54,11 @@ class RuntimePerformancePolicy:
         # Apple Translation is local and very quick.  Hosted and local LLMs
         # need wider spacing to avoid request/token churn while the sentence
         # is still changing.
-        base = 1.15 if provider == "fast" else 2.20
+        base = 1.15 if provider == "fast" else 1.80
+        if provider == "offline":
+            base = 1.35
         if provider in {"local", "custom"}:
-            base = 2.80
+            base = 2.20
         if live_mode == "realtime":
             base *= 0.62
 

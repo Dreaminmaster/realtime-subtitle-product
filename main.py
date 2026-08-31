@@ -301,13 +301,23 @@ def create_pipeline():
             self.translation_engine = translation_engine
             trans_mode = getattr(config, 'translation_mode', 'off')
             self.translation_engine.target_lang = config.target_lang
+            translation_model = (
+                config.offline_translation_model
+                if trans_mode == "offline" else config.model
+            )
+            translation_source = config.source_language or "auto"
+            if trans_mode == "offline" and translation_source == "auto":
+                from translation_model_manager import translation_model_manager
+                offline_item = translation_model_manager.model(translation_model)
+                if offline_item is not None:
+                    translation_source = offline_item.source
             self.translation_engine.set_mode(
                 trans_mode,
                 base_url=config.api_base_url,
                 api_key=config.api_key or "",
-                model=config.model,
+                model=translation_model,
                 timeout=getattr(config, 'translation_timeout', 12.0),
-                source_language=config.source_language or "auto",
+                source_language=translation_source,
             )
             log.info(f"Pipeline: translation engine ({trans_mode}) initialized")
 
@@ -591,7 +601,11 @@ def create_pipeline():
             # silently ignored values such as 1.0 s and split natural pauses.
             SILENCE_DUR_SEC = max(0.45, min(float(config.silence_duration), 2.0))
             MIN_UTTERANCE_DUR = 0.45
-            MAX_UTTERANCE_DUR = config.max_phrase_duration
+            # Keep one timed caption readable even when an older config still
+            # carries the former 15–30 second paragraph-sized ceiling.
+            MAX_UTTERANCE_DUR = self.performance_policy.caption_segment_limit(
+                config.max_phrase_duration
+            )
             # A draft every ~0.8 s still feels live while avoiding the repeated
             # whole-buffer inference seen at 0.5–0.6 s on CPU-only Macs.
             PARTIAL_INTERVAL = self.performance_policy.partial_interval(

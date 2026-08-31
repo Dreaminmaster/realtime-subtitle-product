@@ -42,6 +42,14 @@ def get_log_dir() -> Path:
     return Path.home() / "Library" / "Logs" / APP_NAME
 
 
+def get_translation_model_dir() -> Path:
+    """Directory for optional, user-downloaded offline translation models."""
+    override = os.getenv("REALTIME_SUBTITLE_TRANSLATION_MODEL_DIR")
+    if override:
+        return Path(override).expanduser()
+    return get_app_support_dir() / "translation_models"
+
+
 def write_config(parser, path: str | Path | None = None) -> Path:
     """Atomically save ConfigParser data with user-only file permissions."""
     destination = Path(path) if path is not None else get_config_path()

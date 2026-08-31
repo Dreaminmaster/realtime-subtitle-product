@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QMouseEvent
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QPushButton,
     QSlider,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -41,6 +42,8 @@ class TranscriptLine(QFrame):
         self._active = None
         self.setObjectName("TranscriptLine")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         root = QHBoxLayout(self)
         root.setContentsMargins(10, 8, 10, 9)
@@ -58,6 +61,10 @@ class TranscriptLine(QFrame):
         self.original = QLabel((getattr(segment, "original_text", "") or "").strip())
         self.original.setObjectName("TranscriptOriginal")
         self.original.setWordWrap(True)
+        self.original.setMinimumWidth(0)
+        self.original.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
         translated = (getattr(segment, "translated_text", "") or "").strip()
         translation_status = getattr(segment, "translation_status", None)
         if not translated and translation_status in ("FAILED", "TIMEOUT"):
@@ -65,6 +72,10 @@ class TranscriptLine(QFrame):
         self.translation = QLabel(translated)
         self.translation.setObjectName("TranscriptTranslation")
         self.translation.setWordWrap(True)
+        self.translation.setMinimumWidth(0)
+        self.translation.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
         text_column.addWidget(self.original)
         text_column.addWidget(self.translation)
         root.addLayout(text_column, 1)
@@ -76,7 +87,7 @@ class TranscriptLine(QFrame):
         self.original.setVisible(self.display_mode != "translation_only")
         self.translation.setVisible(self.display_mode != "original_only")
         self.updateGeometry()
-        QTimer.singleShot(0, self.geometry_changed.emit)
+        self.geometry_changed.emit()
 
     def set_active(self, active):
         active = bool(active)
@@ -102,7 +113,7 @@ class TranscriptLine(QFrame):
             "font-size: 10px; color: #777168;"
         )
         self.updateGeometry()
-        QTimer.singleShot(0, self.geometry_changed.emit)
+        self.geometry_changed.emit()
 
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -131,6 +142,9 @@ class SessionHistoryPlayer(QWidget):
         self._seeking = False
         self._active_index = -1
         self._session = None
+        self._reflow_timer = QTimer(self)
+        self._reflow_timer.setSingleShot(True)
+        self._reflow_timer.timeout.connect(self._sync_all_line_sizes)
         self.player = LocalAudioPlayer(self)
         self.player.position_changed.connect(self._on_position_changed)
         self.player.duration_changed.connect(self._on_duration_changed)
@@ -187,6 +201,7 @@ class SessionHistoryPlayer(QWidget):
         self.transcript.setObjectName("TranscriptTimeline")
         self.transcript.setSpacing(0)
         self.transcript.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.transcript.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.transcript.setStyleSheet(
             "QListWidget#TranscriptTimeline { padding: 4px 10px; }"
             "QListWidget#TranscriptTimeline::item { padding: 0; margin: 0; border: none; }"
@@ -293,7 +308,7 @@ class SessionHistoryPlayer(QWidget):
             self._line_items.append(item)
             self._line_widgets.append(line)
 
-        QTimer.singleShot(0, self._sync_all_line_sizes)
+        self._schedule_reflow()
 
         if not self._segments:
             empty = QListWidgetItem(self._t("No subtitle lines were saved in this session."))
@@ -308,13 +323,35 @@ class SessionHistoryPlayer(QWidget):
         self.display_mode_changed.emit(mode)
 
     def _sync_line_size(self, item, line):
+        width = self._available_line_width()
+        line.setFixedWidth(width)
         line.layout().activate()
-        line.adjustSize()
-        item.setSizeHint(line.sizeHint())
+        height = line.layout().heightForWidth(width)
+        if height < 0:
+            height = line.sizeHint().height()
+        height = max(48, height)
+        line.resize(width, height)
+        item.setSizeHint(QSize(width, height))
 
     def _sync_all_line_sizes(self):
         for item, line in zip(self._line_items, self._line_widgets):
             self._sync_line_size(item, line)
+
+    def _available_line_width(self):
+        viewport_width = self.transcript.viewport().width()
+        return max(220, viewport_width - 22)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._schedule_reflow()
+
+    def _schedule_reflow(self):
+        """Coalesce layout work in an object-owned timer.
+
+        A parented QTimer is cancelled with the player.  This avoids queued
+        Python callbacks touching transcript widgets after a window closes.
+        """
+        self._reflow_timer.start(0)
 
     def _update_transport_enabled(self):
         enabled = self._audio_path is not None and self.player.is_loaded

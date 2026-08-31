@@ -43,7 +43,7 @@ class PhraseDecision:
 class ContextualPhraseComposer:
     """Join a likely unfinished phrase with the next nearby ASR final."""
 
-    def __init__(self, *, join_window: float = 4.0, max_words: int = 42, max_chars: int = 280):
+    def __init__(self, *, join_window: float = 4.0, max_words: int = 30, max_chars: int = 220):
         self.join_window = float(join_window)
         self.max_words = int(max_words)
         self.max_chars = int(max_chars)

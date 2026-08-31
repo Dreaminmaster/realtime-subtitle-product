@@ -155,6 +155,7 @@ class Dashboard(QWidget):
     model_download_done = pyqtSignal(str, int, object, int)  # (model_id, terminal_state, error, attempt)
     progress_event = pyqtSignal(object)  # ProgressEvent — update ProgressPanel
     translation_test_finished = pyqtSignal(int, bool, str)
+    translation_model_download_finished = pyqtSignal(str, bool, str)
     model_list_finished = pyqtSignal(bool, object, str)
     model_search_finished = pyqtSignal(bool, object, str)
 
@@ -295,6 +296,9 @@ class Dashboard(QWidget):
         self.model_download_done.connect(self._on_model_done)
         self.progress_event.connect(self.progress_panel.set_progress)
         self.translation_test_finished.connect(self._on_translation_test_finished)
+        self.translation_model_download_finished.connect(
+            self._on_translation_model_download_finished
+        )
         self.model_list_finished.connect(self._on_model_list_finished)
         self.model_search_finished.connect(self._on_model_search_finished)
         apply_language(self, self.ui_language)
@@ -1140,9 +1144,9 @@ class Dashboard(QWidget):
         log = logging.getLogger("RealtimeSubtitle")
         api_key = self.api_key.text().strip()
         base_url = self.base_url.text().strip()
-        mode = self.translation_mode.currentData() or "off"
+        mode = self._effective_translation_mode()
 
-        if mode in ("off", "fast"):
+        if mode in ("off", "fast", "offline"):
             self.status_label.setText("ℹ️ This translation mode has no model endpoint")
             self.status_label.setStyleSheet("font-size: 18px; color: #89b4fa;")
             return
@@ -1588,6 +1592,7 @@ class Dashboard(QWidget):
         content.setMinimumWidth(520)
         content.setMaximumWidth(940)
         layout = QFormLayout(content)
+        self.translation_form_layout = layout
         layout.setContentsMargins(28, 24, 28, 28)
         layout.setHorizontalSpacing(18)
         layout.setVerticalSpacing(14)
@@ -1603,13 +1608,28 @@ class Dashboard(QWidget):
         self.translation_mode = ProviderSelector()
         self.translation_mode.addItem("No translation", "off")
         self.translation_mode.addItem("Apple Translation", "fast")
-        self.translation_mode.addItem("Agnes AI", "online")
+        self.translation_mode.addItem("Downloaded offline model", "offline")
         self.translation_mode.addItem("LM Studio / local server", "local")
-        self.translation_mode.addItem("Custom API", "custom")
-        mode_index = self.translation_mode.findData(config.translation_mode)
+        self.translation_mode.addItem("Online API", "api")
+        selected_provider = (
+            "api" if config.translation_mode in {"online", "custom"}
+            else config.translation_mode
+        )
+        mode_index = self.translation_mode.findData(selected_provider)
         self.translation_mode.setCurrentIndex(max(0, mode_index))
         self.translation_mode.currentIndexChanged.connect(self._on_provider_changed)
         layout.addRow("Provider:", self.translation_mode)
+
+        self.api_preset = QComboBox()
+        self.api_preset.addItem("Agnes AI", "agnes")
+        self.api_preset.addItem("Custom OpenAI-compatible API", "custom")
+        self.api_preset.setCurrentIndex(
+            max(0, self.api_preset.findData(
+                "agnes" if config.translation_mode == "online" else "custom"
+            ))
+        )
+        self.api_preset.currentIndexChanged.connect(self._on_api_preset_changed)
+        layout.addRow("API service:", self.api_preset)
         
         self.api_key = QLineEdit(config.api_key)
         self.api_key.setEchoMode(QLineEdit.EchoMode.Password)
@@ -1625,6 +1645,7 @@ class Dashboard(QWidget):
         
         # Model selection with refresh button
         model_layout = QHBoxLayout()
+        self.translation_model_row = model_layout
         model_layout.setSpacing(10)
         self.model = QComboBox()
         self.model.setEditable(True)
@@ -1646,6 +1667,35 @@ class Dashboard(QWidget):
         self.translation_model_hint.setObjectName("Muted")
         self.translation_model_hint.setWordWrap(True)
         layout.addRow(self.translation_model_hint)
+
+        offline_row = QHBoxLayout()
+        self.offline_translation_model_row = offline_row
+        offline_row.setSpacing(10)
+        self.offline_translation_model = QComboBox()
+        from translation_model_manager import translation_model_manager
+        for item in translation_model_manager.catalog():
+            self.offline_translation_model.addItem(
+                f"{item.title} · {item.size_mb} MB", item.model_id
+            )
+        offline_index = self.offline_translation_model.findData(
+            getattr(config, "offline_translation_model", "opus-en-zh")
+        )
+        self.offline_translation_model.setCurrentIndex(max(0, offline_index))
+        self.offline_translation_model.currentIndexChanged.connect(
+            self._on_offline_translation_model_changed
+        )
+        offline_row.addWidget(self.offline_translation_model, 1)
+        self.offline_translation_model_action = QPushButton("Download")
+        self.offline_translation_model_action.setObjectName("SecondaryButton")
+        self.offline_translation_model_action.clicked.connect(
+            self._toggle_offline_translation_model
+        )
+        offline_row.addWidget(self.offline_translation_model_action)
+        layout.addRow("Offline model:", offline_row)
+        self.offline_translation_model_status = QLabel("")
+        self.offline_translation_model_status.setObjectName("Muted")
+        self.offline_translation_model_status.setWordWrap(True)
+        layout.addRow(self.offline_translation_model_status)
         
         self.target_lang = QComboBox()
         for language in ("Chinese", "English", "Japanese", "French", "Spanish", "German", "Korean"):
@@ -1660,6 +1710,10 @@ class Dashboard(QWidget):
             self.target_lang.addItem(str(config.target_lang), str(config.target_lang))
             self.target_lang.setCurrentIndex(self.target_lang.count() - 1)
         self.target_lang.currentTextChanged.connect(self._on_translation_settings_changed)
+        self.target_lang.currentTextChanged.connect(self._select_recommended_offline_model)
+        self.live_source_language.currentIndexChanged.connect(
+            self._select_recommended_offline_model
+        )
         layout.addRow("Translate into:", self.target_lang)
 
         self.live_translation_mode = SegmentedControl()
@@ -1702,6 +1756,7 @@ class Dashboard(QWidget):
         self.trans_mode_label.setStyleSheet("color: #6c7086; font-size: 12px; padding: 5px 0;")
         self.trans_mode_label.setWordWrap(True)
         layout.addRow(self.trans_mode_label)
+        self._refresh_offline_translation_model_ui()
         self.update_translation_mode_label()
         wrapper = QWidget()
         wrapper_layout = QHBoxLayout(wrapper)
@@ -1715,8 +1770,9 @@ class Dashboard(QWidget):
 
     def _use_agnes_preset(self):
         """Apply the provider's documented OpenAI-compatible defaults."""
-        index = self.translation_mode.findData("online")
+        index = self.translation_mode.findData("api")
         self.translation_mode.setCurrentIndex(index)
+        self.api_preset.setCurrentIndex(self.api_preset.findData("agnes"))
         self.base_url.setText("https://apihub.agnes-ai.com/v1")
         self.model.setCurrentText("agnes-2.0-flash")
         self.api_key.setFocus()
@@ -1733,7 +1789,7 @@ class Dashboard(QWidget):
     def _on_provider_changed(self, *_):
         self._invalidate_translation_test()
         mode = self.translation_mode.currentData() or "off"
-        if mode == "online":
+        if mode == "api" and (self.api_preset.currentData() or "agnes") == "agnes":
             if not self.base_url.text().strip() or "127.0.0.1" in self.base_url.text() or "localhost" in self.base_url.text():
                 self.base_url.setText("https://apihub.agnes-ai.com/v1")
             if not self.model.currentText().strip() or "qwen" in self.model.currentText().lower():
@@ -1743,7 +1799,140 @@ class Dashboard(QWidget):
                 self.base_url.setText("http://127.0.0.1:1234/v1")
             if not self.model.currentText().strip() or self.model.currentText() == "agnes-2.0-flash":
                 self.model.setCurrentText("qwen2.5-coder-14b-instruct-mlx")
+        elif mode == "offline":
+            self._select_recommended_offline_model()
         self.update_translation_mode_label()
+
+    def _on_api_preset_changed(self, *_):
+        if (self.translation_mode.currentData() or "off") != "api":
+            return
+        if (self.api_preset.currentData() or "agnes") == "agnes":
+            self.base_url.setText("https://apihub.agnes-ai.com/v1")
+            if not self.model.currentText().strip() or "qwen" in self.model.currentText().lower():
+                self.model.setCurrentText("agnes-2.0-flash")
+        self._on_translation_settings_changed()
+
+    def _effective_translation_mode(self) -> str:
+        provider = self.translation_mode.currentData() or "off"
+        if provider != "api":
+            return str(provider)
+        return "online" if (self.api_preset.currentData() or "agnes") == "agnes" else "custom"
+
+    def _offline_source_language(self) -> str:
+        source = (
+            self.live_source_language.currentData()
+            if hasattr(self, "live_source_language") else None
+        ) or getattr(config, "source_language", None) or "auto"
+        if source == "auto":
+            target = str(self.target_lang.currentData() or self.target_lang.currentText()).lower()
+            return "zh" if target.startswith("english") else "en"
+        return str(source)
+
+    def _select_recommended_offline_model(self):
+        from translation_model_manager import translation_model_manager
+        target = self.target_lang.currentData() or self.target_lang.currentText()
+        item = translation_model_manager.recommended(self._offline_source_language(), target)
+        if item is not None:
+            index = self.offline_translation_model.findData(item.model_id)
+            if index >= 0:
+                self.offline_translation_model.setCurrentIndex(index)
+        else:
+            self.offline_translation_model.setCurrentIndex(-1)
+        self._refresh_offline_translation_model_ui()
+
+    def _on_offline_translation_model_changed(self, *_):
+        self._invalidate_translation_test()
+        self._refresh_offline_translation_model_ui()
+        self.update_translation_mode_label()
+
+    def _refresh_offline_translation_model_ui(self, *_):
+        if not hasattr(self, "offline_translation_model"):
+            return
+        from translation_model_manager import translation_model_manager
+        model_id = self.offline_translation_model.currentData() or ""
+        item = translation_model_manager.model(str(model_id))
+        installed = bool(item and translation_model_manager.is_downloaded(str(model_id)))
+        zh = self.ui_language == "zh-Hans"
+        self.offline_translation_model_action.setText(
+            ("删除" if zh else "Delete") if installed
+            else ("下载" if zh else "Download")
+        )
+        if item is None:
+            status = (
+                "当前语言组合暂无轻量离线模型，请使用 Apple 翻译、LM Studio 或在线 API"
+                if zh else
+                "No compact offline model for this pair; use Apple Translation, LM Studio, or Online API"
+            )
+        elif installed:
+            status = (
+                f"已安装 · {item.title} · 完全离线"
+                if zh else f"Installed · {item.title} · fully offline"
+            )
+        else:
+            status = (
+                f"按需下载 {item.size_mb} MB · {item.license} · 不会打包进 App"
+                if zh else
+                f"Optional {item.size_mb} MB download · {item.license} · not bundled with the app"
+            )
+        if self._offline_source_language() in {"auto", ""}:
+            status += ""
+        elif getattr(config, "source_language", None) is None:
+            status += (
+                " · 当前按译入语言推荐；固定原语言会更准确"
+                if zh else " · inferred from destination; set spoken language for best accuracy"
+            )
+        self.offline_translation_model_status.setText(status)
+        self.offline_translation_model_action.setEnabled(
+            item is not None and self._effective_translation_mode() == "offline"
+        )
+
+    def _toggle_offline_translation_model(self):
+        from translation_model_manager import translation_model_manager
+        model_id = str(self.offline_translation_model.currentData() or "")
+        if not model_id:
+            return
+        if translation_model_manager.is_downloaded(model_id):
+            translation_model_manager.delete_model(model_id)
+            self._refresh_offline_translation_model_ui()
+            self._invalidate_translation_test()
+            return
+        zh = self.ui_language == "zh-Hans"
+        self.offline_translation_model_action.setEnabled(False)
+        self.offline_translation_model_action.setText("下载中…" if zh else "Downloading…")
+        self.offline_translation_model_status.setText(
+            "正在下载并校验模型，请保持网络连接…"
+            if zh else "Downloading and verifying the model…"
+        )
+
+        def _download():
+            try:
+                translation_model_manager.download_model_sync(model_id)
+                self.translation_model_download_finished.emit(model_id, True, "")
+            except Exception as exc:
+                self.translation_model_download_finished.emit(
+                    model_id, False, f"{type(exc).__name__}: {str(exc)[:180]}"
+                )
+
+        import threading
+        threading.Thread(
+            target=_download, daemon=True, name=f"translation-model-{model_id}"
+        ).start()
+
+    def _on_translation_model_download_finished(self, model_id: str, ok: bool, detail: str):
+        if str(self.offline_translation_model.currentData() or "") != model_id:
+            return
+        self.offline_translation_model_action.setEnabled(True)
+        self._refresh_offline_translation_model_ui()
+        if ok:
+            self.offline_translation_model_status.setText(
+                "✅ 下载完成，可以立即测试并使用"
+                if self.ui_language == "zh-Hans" else
+                "✅ Download complete — ready to test and use"
+            )
+        else:
+            self.offline_translation_model_status.setText(
+                ("❌ 下载失败：" if self.ui_language == "zh-Hans" else "❌ Download failed: ") + detail
+            )
 
     def _show_apple_translation_help(self):
         zh = self.ui_language == "zh-Hans"
@@ -1781,10 +1970,12 @@ class Dashboard(QWidget):
     def _translation_settings_snapshot(self):
         """Return the exact settings identity covered by a connection test."""
         return (
-            self.translation_mode.currentData() or "off",
+            self._effective_translation_mode(),
+            self.api_preset.currentData() or "agnes",
             self.api_key.text().strip(),
             self.base_url.text().strip().rstrip("/"),
             self.model.currentText().strip(),
+            self.offline_translation_model.currentData() or "",
             str(self.target_lang.currentData() or self.target_lang.currentText()).strip(),
         )
 
@@ -1808,8 +1999,8 @@ class Dashboard(QWidget):
                 "color: #8f8a82; font-size: 12px; padding-top: 5px;"
             )
         if hasattr(self, "test_trans_btn"):
-            testable_mode = (self.translation_mode.currentData() or "off") in {
-                "fast", "online", "local", "custom",
+            testable_mode = self._effective_translation_mode() in {
+                "fast", "online", "local", "custom", "offline",
             }
             self.test_trans_btn.setEnabled(testable_mode)
             self._set_localized_text(self.test_trans_btn, "Test Connection")
@@ -1819,12 +2010,26 @@ class Dashboard(QWidget):
             )
         
     def update_translation_mode_label(self, *_):
-        mode = self.translation_mode.currentData() or "off"
+        provider = self.translation_mode.currentData() or "off"
+        mode = self._effective_translation_mode()
         endpoint_mode = mode in {"online", "local", "custom"}
+        form = self.translation_form_layout
+        form.setRowVisible(self.api_preset, provider == "api")
+        form.setRowVisible(self.api_key, mode in {"online", "custom"})
+        form.setRowVisible(self.base_url, endpoint_mode)
+        form.setRowVisible(self.translation_model_row, endpoint_mode)
+        form.setRowVisible(self.translation_model_hint, endpoint_mode)
+        form.setRowVisible(self.offline_translation_model_row, mode == "offline")
+        form.setRowVisible(self.offline_translation_model_status, mode == "offline")
+        self.api_preset.setEnabled(provider == "api")
         self.api_key.setEnabled(mode in {"online", "custom"})
         self.base_url.setEnabled(endpoint_mode)
         self.model.setEnabled(endpoint_mode)
         self.refresh_models_btn.setEnabled(endpoint_mode)
+        self.offline_translation_model.setEnabled(mode == "offline")
+        self.offline_translation_model_action.setEnabled(
+            mode == "offline" and self.offline_translation_model.currentData() is not None
+        )
         self.target_lang.setEnabled(mode != "off")
         self.test_trans_btn.setEnabled(mode != "off")
         if hasattr(self, "apple_translation_help"):
@@ -1845,6 +2050,17 @@ class Dashboard(QWidget):
             self.trans_mode_label.setText(
                 "翻译：Apple 本地翻译 · 需 macOS 26 与已下载语言包" if zh
                 else "Translation: Apple on-device · macOS 26 and installed language assets required"
+            )
+        elif mode == "offline":
+            from translation_model_manager import translation_model_manager
+            model_id = str(self.offline_translation_model.currentData() or "")
+            item = translation_model_manager.model(model_id)
+            installed = translation_model_manager.is_downloaded(model_id)
+            title = item.title if item else model_id
+            state = ("已安装" if zh else "installed") if installed else ("需要下载" if zh else "download required")
+            self.trans_mode_label.setText(
+                f"翻译：离线模型 · {title} · {state}" if zh
+                else f"Translation: Offline model · {title} · {state}"
             )
         elif mode == "online":
             endpoint = base_url or "OpenAI default endpoint"
@@ -1873,12 +2089,15 @@ class Dashboard(QWidget):
         log = logging.getLogger("RealtimeSubtitle")
         
         api_key = self.api_key.text().strip()
-        mode = self.translation_mode.currentData() or "off"
+        mode = self._effective_translation_mode()
         from translation_engine import normalize_base_url
         base_url = normalize_base_url(self.base_url.text(), mode)
         if base_url != self.base_url.text().strip():
             self.base_url.setText(base_url)
-        model = self.model.currentText().strip()
+        model = (
+            str(self.offline_translation_model.currentData() or "")
+            if mode == "offline" else self.model.currentText().strip()
+        )
         target_lang = self.target_lang.currentData() or self.target_lang.currentText()
         self._translation_test_generation += 1
         request_generation = self._translation_test_generation
@@ -1920,6 +2139,16 @@ class Dashboard(QWidget):
             )
             self.trans_test_result.setStyleSheet("color: #f38ba8; font-size: 12px;")
             return
+
+        if mode == "offline":
+            from translation_model_manager import translation_model_manager
+            if not translation_model_manager.is_downloaded(model):
+                self.trans_test_result.setText(
+                    "❌ 请先下载所选离线翻译模型" if self.ui_language == "zh-Hans"
+                    else "❌ Download the selected offline translation model first"
+                )
+                self.trans_test_result.setStyleSheet("color: #f38ba8; font-size: 12px;")
+                return
         
         is_local = any(h in base_url for h in ("localhost", "127.0.0.1", "::1"))
         
@@ -1944,7 +2173,10 @@ class Dashboard(QWidget):
                 # language.  That checks an unsupported no-op pair rather than
                 # the installed translation assets.
                 target_code = normalize_language_code(target_lang, default="zh-Hans")
-                if mode == "fast" and target_code.lower().startswith("en"):
+                if mode == "offline" and self._offline_source_language() == "zh":
+                    sample_text = "连接测试正常。"
+                    sample_source = "Chinese"
+                elif mode == "fast" and target_code.lower().startswith("en"):
                     sample_text = "连接测试正常。"
                     sample_source = "Chinese"
                 else:
@@ -1957,7 +2189,11 @@ class Dashboard(QWidget):
                     base_url=base_url,
                     api_key=api_key,
                     model=model,
-                    source_language=sample_source if mode == "fast" else "auto",
+                    source_language=(
+                        sample_source if mode == "fast"
+                        else self._offline_source_language() if mode == "offline"
+                        else "auto"
+                    ),
                 )
                 sample = engine.translate(sample_text)
                 if sample and not sample.startswith("[Translation Failed:"):
@@ -3031,12 +3267,14 @@ class Dashboard(QWidget):
         
         # Translation — normalize exactly once so Test and Live share it.
         from translation_engine import normalize_base_url
-        translation_mode = str(self.translation_mode.currentData() or "off")
+        translation_mode = self._effective_translation_mode()
         normalized_url = normalize_base_url(self.base_url.text(), translation_mode)
         self.base_url.setText(normalized_url)
         cp.set("api", "api_key", self.api_key.text())
         cp.set("api", "base_url", normalized_url)
         cp.set("translation", "model", self.model.currentText())
+        offline_model = str(self.offline_translation_model.currentData() or "opus-en-zh")
+        cp.set("translation", "offline_model", offline_model)
         cp.set("translation", "target_lang", str(self.target_lang.currentData() or self.target_lang.currentText()))
         cp.set("translation", "mode", translation_mode)
         live_translation_mode = str(
@@ -3085,6 +3323,7 @@ class Dashboard(QWidget):
         config.api_key = self.api_key.text().strip()
         config.api_base_url = normalized_url
         config.model = self.model.currentText().strip()
+        config.offline_translation_model = offline_model
         config.target_lang = str(self.target_lang.currentData() or self.target_lang.currentText())
         config.translation_mode = translation_mode
         config.live_translation_mode = live_translation_mode
@@ -3117,6 +3356,38 @@ class Dashboard(QWidget):
         log = logging.getLogger("RealtimeSubtitle")
         log.info("Launch Translator clicked")
         self.save_config()
+
+        if getattr(config, "translation_mode", "off") == "offline":
+            from translation_model_manager import translation_model_manager
+            compatible = translation_model_manager.recommended(
+                config.source_language or self._offline_source_language(),
+                config.target_lang,
+            )
+            selected_model = str(self.offline_translation_model.currentData() or "")
+            if compatible is None:
+                QMessageBox.information(
+                    self,
+                    "离线翻译不可用" if self.ui_language == "zh-Hans" else "Offline translation unavailable",
+                    (
+                        "当前说话语言和译入语言没有可下载的轻量模型，请改用 Apple 翻译、LM Studio 或在线 API。"
+                        if self.ui_language == "zh-Hans" else
+                        "No compact model is available for this language pair. Choose Apple Translation, LM Studio, or Online API."
+                    ),
+                )
+                self.tabs.showRoute("Settings", "Translation")
+                return
+            if not selected_model or not translation_model_manager.is_downloaded(selected_model):
+                QMessageBox.information(
+                    self,
+                    "需要下载翻译模型" if self.ui_language == "zh-Hans" else "Translation model required",
+                    (
+                        "请先在翻译页下载所选离线模型，完成后再开始字幕。"
+                        if self.ui_language == "zh-Hans" else
+                        "Download the selected offline model on Translation before starting captions."
+                    ),
+                )
+                self.tabs.showRoute("Settings", "Translation")
+                return
 
         if bool(getattr(config, "enhanced_accuracy", False)):
             from model_manager import model_manager

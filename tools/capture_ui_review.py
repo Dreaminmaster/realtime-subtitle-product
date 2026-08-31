@@ -82,6 +82,13 @@ def main() -> int:
     dashboard.target_lang._popup.grab().save(str(args.output / "04b-target-language-popup.png"))
     dashboard.target_lang.hidePopup()
 
+    dashboard.translation_mode.setCurrentIndex(
+        dashboard.translation_mode.findData("offline")
+    )
+    dashboard.target_lang.setCurrentIndex(dashboard.target_lang.findData("Chinese"))
+    app.processEvents()
+    dashboard.grab().save(str(args.output / "04c-offline-translation.png"))
+
     from src.segment_api import SegmentView, SessionView
     from session_recording import SessionAudioRecorder
     import numpy as np
@@ -119,6 +126,33 @@ def main() -> int:
     dashboard.history_player._on_position_changed(2600)
     app.processEvents()
     dashboard.grab().save(str(args.output / "04-session-playback.png"))
+    dashboard.resize(900, args.height)
+    app.processEvents()
+    dashboard.grab().save(str(args.output / "04d-session-narrow.png"))
+
+    from enhanced_overlay_window import EnhancedOverlayWindow
+    overlay = EnhancedOverlayWindow({
+        "ui_language": "zh-Hans",
+        "window_width": 760,
+        "visible_subtitles": 2,
+        "original_font_size": 22,
+        "translation_font_size": 19,
+    })
+    overlay.resize(760, 360)
+    overlay.update_text(
+        1,
+        "You also mentioned a long section about making money, investing it properly, and the emotional and logical parts of the decision.",
+        "你还提到了一段很长的内容，讲如何赚钱、合理投资，以及决策中情感与逻辑的不同部分。",
+    )
+    overlay.update_text(
+        2,
+        "This remains one subtitle and wraps naturally inside the current window.",
+        "这仍然是同一条字幕，只会在当前窗口内自然换行。",
+    )
+    overlay.show()
+    app.processEvents()
+    overlay.grab().save(str(args.output / "04e-overlay-long-wrap.png"))
+    overlay.close()
 
     dashboard.tabs.stack.setCurrentIndex(2)
     settings.setCurrentIndex(1)
@@ -142,7 +176,7 @@ def main() -> int:
         from PyQt6.QtGui import QColor, QImage, QPainter
 
         reference = QImage(str(args.reference))
-        implementation = QImage(str(args.output / "04-session-playback.png"))
+        implementation = QImage(str(args.output / "04d-session-narrow.png"))
         slot_width, slot_height = 900, 720
         comparison = QImage(slot_width * 2, slot_height, QImage.Format.Format_ARGB32)
         comparison.fill(QColor("#171716"))

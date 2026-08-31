@@ -251,7 +251,7 @@ fi
 
 # Verify critical imports
 IMPORT_CHECK=$(run_arch "${TMP_PY}" -c "
-for m in ['PyQt6','numpy','sounddevice','httpx','openai','faster_whisper']:
+for m in ['PyQt6','numpy','sounddevice','httpx','openai','faster_whisper','sentencepiece']:
     __import__(m)
     print(f'  ✅ {m}')
 " 2>&1)

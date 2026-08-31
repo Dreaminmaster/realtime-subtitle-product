@@ -61,6 +61,9 @@ class Config:
         
         # Translation settings
         self.model = self._get("translation", "model", "gpt-4o-mini")
+        self.offline_translation_model = self._get(
+            "translation", "offline_model", "opus-en-zh"
+        )
         self.target_lang = self._get("translation", "target_lang", "Chinese")
         self.translation_threads = self._getint("translation", "threads", 4)
         self.live_translation_mode = self._get(
@@ -73,7 +76,7 @@ class Config:
             # Backward compatibility: older config files had no explicit mode
             # and treated a configured API key as online translation.
             configured_mode = "online" if self.api_key else "off"
-        if configured_mode not in ("off", "fast", "online", "local", "custom"):
+        if configured_mode not in ("off", "fast", "online", "local", "custom", "offline"):
             configured_mode = "off"
         # Only the hosted online mode strictly requires a real key. Local and
         # custom OpenAI-compatible endpoints often accept a blank/dummy key.
@@ -139,7 +142,7 @@ class Config:
             self.device_index = None
             
         # Max phrase duration - force processing after N seconds
-        self.max_phrase_duration = self._getfloat("audio", "max_phrase_duration", 15.0)
+        self.max_phrase_duration = self._getfloat("audio", "max_phrase_duration", 9.0)
         
         # Streaming mode settings
         self.streaming_mode = self._get("audio", "streaming_mode", "false").lower() == "true"
