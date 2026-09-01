@@ -147,3 +147,52 @@ def test_long_live_caption_reflows_inside_viewport_after_updates(app):
     assert bubble.original_label.height() > bubble.original_label.fontMetrics().height()
     assert window.scroll_area.horizontalScrollBar().maximum() == 0
     window.close()
+
+
+def test_streaming_state_updates_one_row_without_animation_or_duplication(app):
+    window = EnhancedOverlayWindow(
+        {"ui_language": "zh-Hans", "window_width": 640, "visible_subtitles": 2}
+    )
+    window.show()
+    window.update_caption_state(4, "我们正在测试", "", "PARTIAL", 1)
+    app.processEvents()
+    bubble = window.items[0][1]
+    assert "草稿" in bubble.timestamp_label.text()
+    assert bubble.phase_label.isVisible()
+    assert bubble.phase_label.text() == "草稿"
+    assert bubble.original_label.graphicsEffect().opacity() == pytest.approx(0.74)
+
+    window.update_caption_state(4, "我们正在测试稳定字幕", "", "STABLE", 2)
+    app.processEvents()
+    assert len(window.items) == 1
+    assert "稳定" in bubble.timestamp_label.text()
+    assert bubble.original_label.graphicsEffect().opacity() == pytest.approx(0.92)
+
+    window.update_caption_state(4, "我们正在测试稳定字幕。", "完成", "FINAL", 3)
+    app.processEvents()
+    assert len(window.items) == 1
+    assert "草稿" not in bubble.timestamp_label.text()
+    assert "稳定" not in bubble.timestamp_label.text()
+    assert not bubble.phase_label.isVisible()
+    assert bubble.original_label.graphicsEffect().opacity() == pytest.approx(1.0)
+    assert window.transcript_data[4]["revision"] == 3
+    window.close()
+
+
+def test_caption_state_reflows_after_narrow_resize(app):
+    window = EnhancedOverlayWindow({"window_width": 760, "visible_subtitles": 2})
+    window.show()
+    window.update_caption_state(
+        5,
+        "A changing streaming hypothesis must remain one semantic caption while the visual line wraps.",
+        "正在变化的流式识别结果应保持为同一条语义字幕，只在视觉上自动换行。",
+        "STABLE",
+        2,
+    )
+    window.resize(390, window.height())
+    app.processEvents()
+    bubble = window.items[0][1]
+    assert bubble.width() <= window.scroll_area.viewport().width()
+    assert window.scroll_area.horizontalScrollBar().maximum() == 0
+    assert bubble.original_label.height() > bubble.original_label.fontMetrics().height()
+    window.close()

@@ -9,6 +9,68 @@ allowed to consume the machine.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
+import platform
+
+
+@dataclass(frozen=True)
+class HardwareRuntimePlan:
+    profile: str
+    machine: str
+    memory_gb: float
+    cpu_count: int
+    cpu_threads: int
+    num_workers: int
+    compute_type: str
+    partial_window_seconds: float
+
+
+def resolve_hardware_runtime_plan(
+    profile: str = "balanced",
+    *,
+    machine: str | None = None,
+    memory_gb: float | None = None,
+    cpu_count: int | None = None,
+) -> HardwareRuntimePlan:
+    """Resolve conservative sustained-inference budgets for one Mac."""
+    normalized = str(profile or "balanced").lower()
+    if normalized not in RuntimePerformancePolicy.PROFILES:
+        normalized = "balanced"
+    machine = str(machine or platform.machine()).lower()
+    if memory_gb is None:
+        try:
+            from recognition_quality import detect_memory_gb
+
+            memory_gb = detect_memory_gb()
+        except Exception:
+            memory_gb = 8.0
+    cores = max(1, int(cpu_count or os.cpu_count() or 4))
+
+    if normalized == "efficient":
+        threads = max(1, min(4, cores // 2 or 1))
+        workers = 1
+        window = 7.5
+    elif normalized == "maximum":
+        threads = max(2, min(10, cores - 1 if cores > 2 else cores))
+        workers = 2 if memory_gb >= 16 else 1
+        window = 12.0
+    else:
+        threads = max(2, min(6, cores // 2 or 2))
+        workers = 1
+        window = 9.0
+
+    return HardwareRuntimePlan(
+        profile=normalized,
+        machine=machine,
+        memory_gb=float(memory_gb),
+        cpu_count=cores,
+        cpu_threads=threads,
+        num_workers=workers,
+        # CTranslate2's portable macOS packages use CPU int8. MLX remains a
+        # separate Apple-Silicon backend selected by the user.
+        compute_type="int8",
+        partial_window_seconds=window,
+    )
 
 
 @dataclass(frozen=True)
@@ -72,6 +134,15 @@ class RuntimePerformancePolicy:
         if str(live_mode or "balanced").lower() == "realtime":
             return 5 if self.profile == "maximum" else 7
         return 14 if self.profile == "efficient" else 10
+
+    def translation_workers(self, configured: int) -> int:
+        """Bound concurrent translation calls for a sustained live session."""
+        requested = max(1, min(int(configured or 1), 8))
+        if self.profile == "efficient":
+            return 1
+        if self.profile == "maximum":
+            return min(requested, 4)
+        return min(requested, 2)
 
     def accuracy_cooldown(self, elapsed_seconds: float, model_id: str) -> float:
         """Cooling pause after one optional second-pass recognition job.

@@ -14,8 +14,11 @@ def _model_name_for_backend(settings):
 
 def _config_hash():
     from config import config
+    from runtime_performance import resolve_hardware_runtime_plan
+    plan = resolve_hardware_runtime_plan(config.performance_profile)
     return hash((config.asr_backend, config.whisper_model, config.funasr_model,
-                 config.whisper_device, config.whisper_compute_type, config.source_language))
+                 config.whisper_device, config.whisper_compute_type, config.source_language,
+                 plan.cpu_threads, plan.num_workers))
 
 def get_or_create_transcriber():
     global _transcriber_singleton, _transcriber_config_hash
@@ -25,9 +28,11 @@ def get_or_create_transcriber():
     
     from transcriber import Transcriber
     from config import config
+    from runtime_performance import resolve_hardware_runtime_plan
     
     asr_backend = config.asr_backend
     model_name = _model_name_for_backend(config)
+    runtime_plan = resolve_hardware_runtime_plan(config.performance_profile)
     
     # Resolve model to local path if available — critical for offline first-launch
     resolved_model = model_name
@@ -49,7 +54,9 @@ def get_or_create_transcriber():
         model_size=resolved_model,
         device=config.whisper_device,
         compute_type=config.whisper_compute_type,
-        language=config.source_language
+        language=config.source_language,
+        cpu_threads=runtime_plan.cpu_threads,
+        num_workers=runtime_plan.num_workers,
     )
     _transcriber_singleton.warmup()
     _transcriber_config_hash = current

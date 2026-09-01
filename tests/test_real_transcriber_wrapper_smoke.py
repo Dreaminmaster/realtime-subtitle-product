@@ -22,8 +22,10 @@ class FakeWhisperBackend:
     def __init__(self, text="hello world", fail=False):
         self._text = text
         self.fail = fail
+        self.last_kwargs = None
 
     def transcribe(self, audio, **kwargs):
+        self.last_kwargs = kwargs
         if self.fail:
             raise RuntimeError("fake backend failure")
         return (FAKE_SEGMENTS, type("info", (), {"language": "en", "language_probability": 0.99}))
@@ -72,6 +74,25 @@ def test_uses_fake_backend():
         text = tc.transcribe(audio)
         assert isinstance(text, str)
         assert len(text) > 0
+        break
+
+
+def test_partial_and_final_use_different_bounded_decode_settings():
+    backend = FakeWhisperBackend()
+    for tc in _build_wrapper(fake_backend=backend):
+        tc.transcribe_partial(_dummy_audio())
+        partial = dict(backend.last_kwargs)
+        tc.transcribe(_dummy_audio())
+        final = dict(backend.last_kwargs)
+
+        assert partial["beam_size"] == 1
+        assert partial["best_of"] == 1
+        assert partial["word_timestamps"] is False
+        assert final["beam_size"] == 5
+        assert final["word_timestamps"] is True
+        assert final["no_repeat_ngram_size"] == 3
+        assert final["hallucination_silence_threshold"] == 1.2
+        assert final["vad_filter"] is False
         break
 
 

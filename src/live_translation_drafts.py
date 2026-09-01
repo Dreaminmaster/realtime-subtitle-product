@@ -16,7 +16,8 @@ class _Draft:
     session_generation: int
     chunk_id: int
     revision: int
-    text: str
+    source_text: str
+    translation_text: str
     due_at: float
 
 
@@ -71,9 +72,25 @@ class LiveTranslationDrafts:
             self._last_started_at = 0.0
             self._condition.notify_all()
 
-    def submit(self, session_generation: int, chunk_id: int, text: str) -> bool:
+    def submit(
+        self,
+        session_generation: int,
+        chunk_id: int,
+        text: str,
+        *,
+        stable_text: str | None = None,
+        source_revision: int | None = None,
+    ) -> bool:
+        """Queue the newest useful stable prefix for bounded retranslation.
+
+        ``text`` is the latest full source shown by the overlay.  When supplied,
+        ``stable_text`` is the smaller monotonic prefix sent to the translator.
+        The optional source revision lets the transcript state machine and this
+        worker share one stale-result identity.
+        """
         text = str(text or "").strip()
-        if len(text) < 6:
+        translation_text = str(stable_text or text).strip()
+        if len(translation_text) < 6:
             return False
         with self._condition:
             if not self._running or self._session_generation != session_generation:
@@ -81,23 +98,33 @@ class LiveTranslationDrafts:
             if chunk_id in self._finalized:
                 return False
             previous = self._last_submitted_text.get(chunk_id, "")
-            if previous and text == previous:
+            if previous and translation_text == previous:
+                self._latest_text[chunk_id] = text
                 return False
-            if previous and text.startswith(previous) and len(text) - len(previous) < self._min_growth:
+            if (
+                previous
+                and translation_text.startswith(previous)
+                and len(translation_text) - len(previous) < self._min_growth
+            ):
                 self._latest_text[chunk_id] = text
                 return False
 
-            revision = self._latest_revision.get(chunk_id, 0) + 1
+            current_revision = self._latest_revision.get(chunk_id, 0)
+            revision = max(
+                current_revision + 1,
+                int(source_revision or 0),
+            )
             self._latest_revision[chunk_id] = revision
             self._latest_text[chunk_id] = text
-            self._last_submitted_text[chunk_id] = text
+            self._last_submitted_text[chunk_id] = translation_text
             due_at = max(self._clock(), self._last_started_at + self._interval)
             replaced = self._pending is not None
             self._pending = _Draft(
                 session_generation=session_generation,
                 chunk_id=chunk_id,
                 revision=revision,
-                text=text,
+                source_text=text,
+                translation_text=translation_text,
                 due_at=due_at,
             )
             self._condition.notify_all()
@@ -149,7 +176,7 @@ class LiveTranslationDrafts:
 
             started = self._clock()
             try:
-                translated = self._translator(draft.text)
+                translated = self._translator(draft.translation_text)
             except Exception:
                 log.exception("Draft translation failed for chunk %s", draft.chunk_id)
                 continue
@@ -167,19 +194,22 @@ class LiveTranslationDrafts:
                     and self._session_generation == draft.session_generation
                     and draft.chunk_id not in self._finalized
                 )
-                current_text = self._latest_text.get(draft.chunk_id, draft.text)
+                current_text = self._latest_text.get(draft.chunk_id, draft.source_text)
                 current_revision = self._latest_revision.get(draft.chunk_id, 0)
                 # A translation for a recent prefix is useful, but never show
                 # text from an unrelated replacement hypothesis.
                 compatible = (
                     current_revision >= draft.revision
-                    and (current_text.startswith(draft.text) or draft.text.startswith(current_text))
+                    and (
+                        current_text.startswith(draft.translation_text)
+                        or draft.translation_text.startswith(current_text)
+                    )
                 )
             if valid and compatible and translated:
                 log.info(
                     "Draft translation[%s] chars=%s latency_ms=%.0f",
                     draft.chunk_id,
-                    len(draft.text),
+                    len(draft.translation_text),
                     elapsed * 1000,
                 )
                 try:

@@ -1,7 +1,16 @@
 import numpy as np
 
 class Transcriber:
-    def __init__(self, backend="whisper", model_size="base", device="cpu", compute_type="int8", language=None):
+    def __init__(
+        self,
+        backend="whisper",
+        model_size="base",
+        device="cpu",
+        compute_type="int8",
+        language=None,
+        cpu_threads=0,
+        num_workers=1,
+    ):
         """
         Initialize Transcriber with multiple backend support
         
@@ -17,6 +26,8 @@ class Transcriber:
         self.model_size = model_size
         self.device = device
         self.compute_type = compute_type
+        self.cpu_threads = max(0, int(cpu_threads or 0))
+        self.num_workers = max(1, int(num_workers or 1))
         self.model = None
         
         if self.backend == "funasr":
@@ -30,7 +41,13 @@ class Transcriber:
         """Initialize faster-whisper backend"""
         from faster_whisper import WhisperModel
         import os
-        self.model = WhisperModel(model_size, device=device, compute_type=compute_type)
+        self.model = WhisperModel(
+            model_size,
+            device=device,
+            compute_type=compute_type,
+            cpu_threads=self.cpu_threads,
+            num_workers=self.num_workers,
+        )
         is_local = os.path.isdir(model_size)
         print(f"[Transcriber] Using faster-whisper (CPU/CUDA) with model: {model_size}"
               f"{' (local path)' if is_local else ' (HF id)'}")
@@ -574,12 +591,27 @@ class Transcriber:
         """Transcribe audio via faster-whisper.
         prompt is intentionally IGNORED — initial_prompt causes cross-utterance
         contamination on repeated phrases (whisper echoes prompt as 'already transcribed')."""
+        partial = int(beam_size) <= 1
         segments, _ = self.model.transcribe(
-            audio_data, 
-            language=self.language, 
+            audio_data,
+            language=self.language,
             beam_size=max(1, int(beam_size)),
+            best_of=1 if partial else 5,
             condition_on_previous_text=False,
-            no_speech_threshold=0.6
+            temperature=0.0,
+            compression_ratio_threshold=2.4,
+            log_prob_threshold=-1.0,
+            no_speech_threshold=0.6,
+            repetition_penalty=1.05,
+            no_repeat_ngram_size=0 if partial else 3,
+            max_initial_timestamp=0.8,
+            word_timestamps=not partial,
+            # Capture-time adaptive VAD already decides which short streaming
+            # windows reach ASR. Running Silero again for every draft adds
+            # avoidable latency; the final pass still uses timestamp-aware
+            # silence filtering for long hallucinated tails.
+            vad_filter=False,
+            hallucination_silence_threshold=None if partial else 1.2,
         )
         text = " ".join([segment.text for segment in segments]).strip()
         return text

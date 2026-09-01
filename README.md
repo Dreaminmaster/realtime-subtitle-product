@@ -8,14 +8,14 @@
 
 ## 下载 / Download
 
-当前稳定版：**v2.9.4** · macOS 13 Ventura 或更高版本
+当前稳定版：**v2.10.0** · macOS 13 Ventura 或更高版本
 
-Current stable release: **v2.9.4** · macOS 13 Ventura or later
+Current stable release: **v2.10.0** · macOS 13 Ventura or later
 
 | Mac | 安装包 / Installer | 适用设备 / Hardware |
 |---|---|---|
-| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.9.4-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
-| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.9.4-macos-x86_64.dmg) | Intel-based Macs |
+| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.10.0-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
+| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.10.0-macos-x86_64.dmg) | Intel-based Macs |
 
 [查看全部版本 / View all releases](https://github.com/Dreaminmaster/realtime-subtitle-product/releases)
 
@@ -30,13 +30,16 @@ Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本�
 ### 主要功能
 
 - 本地实时语音识别，内置 `faster-whisper tiny` 模型，安装后即可开始。
-- v2.9.4 修复长字幕显示：原文与译文会在当前字幕框内自然换行，不会被右侧裁掉；视觉换行仍属于同一条字幕。
+- v2.10.0 引入 **草稿 → 稳定 → 最终** 三级流式字幕：草稿尽快出现，连续推理一致的前缀会固定，最终段落才写入历史；同一行原位更新，不因滑动窗口重复、闪烁或抢焦点。
+- LocalAgreement 思路与语义端点共同工作：短停顿、未完成短语和连接词不会立即断句，长讲话仍会受到时长和词数上限约束。
+- 增量翻译只提交稳定前缀，使用防抖、最小增长、单个运行请求与一个最新待处理请求；会话/文本版本变化会让过期结果失效，慢服务不会阻塞识别或 UI。
+- 原文与译文会在当前字幕框内自然换行，不会被右侧裁掉；视觉换行仍属于同一条字幕。
 - 会话时间轴现在会随窗口宽度重新排版，不再出现底部横向滚动条；长双语内容在窄窗口也能完整阅读。
 - Agnes AI 与自定义 OpenAI-compatible 接口合并为“在线 API”及预设；翻译页新增按需下载、校验、选择和删除的轻量英中 / 中英离线模型，并与识别模型明确分区。
 - 均衡模式把单段语音控制在九秒以内，上下文合句长度同步收紧；草稿翻译刷新更快，同时保留节能模式控制发热。
 - v2.9.3 新增增量实时翻译：讲话中的识别草稿会按“均衡 / 更实时”节奏提前翻译，随后在同一行原位更新；最终定稿仍通过可靠队列覆盖草稿，不会把临时译文写入会话记录。
-- Apple Translation 现在为固定语言组合复用一个原生系统翻译会话，不再为每次更新重新启动框架。本机测试中首次初始化约 2.5 秒，后续调用约 0.056 秒。
-- 新增节能 / 均衡 / 最高性能三档运行策略。均衡与节能会在耗时的大模型修正后自动冷却并仅保留最新任务；最高性能保留给更快或具有额外散热条件的 Mac。
+- Apple Translation 为固定语言组合复用一个原生系统翻译会话，不再为每次更新重新启动框架；连接测试会实际验证当前语言对和已下载系统语言资源，而不是只检查桥接文件是否存在。
+- 新增节能 / 均衡 / 高精度三档运行策略。均衡与节能会在耗时的大模型修正后自动冷却并仅保留最新任务；高精度持续运行已启用的修正，但大模型仍需用户按需下载。
 - v2.9.2 将增强模型改为字幕启动后在后台加载；慢模型繁忙时只保留最新一句待修正，避免旧任务积压造成长时间发热。实测本机管线准备时间由约 25 秒降至约 1.3 秒。
 - Live 页可直接选定**说话语言**。明确的单一语言会跳过反复语言检测，通常比“自动检测”更准确且负担更低；混合语言对话仍可选择自动。
 - 音频页新增关闭 / 均衡 / 强力三档自适应环境降噪。它只改进说话起止判断，不改变录音和送入识别模型的原始音频。
@@ -64,6 +67,16 @@ Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本�
 - 麦克风输入与内置 macOS 系统声音采集，无需 BlackHole 或虚拟声卡。
 - “识别模型”页面只管理语音识别模型，分为内置推荐与 Hugging Face 搜索；轻量离线翻译模型在“翻译”页按需下载，LM Studio / API 模型仍由对应服务提供。Tiny / Base 会明确提示准确率限制，日常建议 Small，性能较好的 Mac 建议 Turbo。
 - Apple Silicon 与 Intel 分架构原生安装包。
+
+### 准确率、延迟与功耗
+
+| 运行档位 | 适用场景 | 延迟 / 功耗取舍 |
+|---|---|---|
+| 节能 | Intel、低内存设备、长时间会议 | 更少线程、更慢的草稿刷新和单路翻译；温度优先 |
+| 均衡（默认） | 大多数 Mac 和日常字幕 | 自动匹配硬件；在首字延迟、稳定性与持续负载之间平衡 |
+| 高精度 | 高性能或散热条件更好的 M 系列 | 更快刷新并持续运行可选大模型修正；CPU、内存与发热更高 |
+
+`tiny` 适合低延迟预览，但中文、混合语言和噪声环境准确率有限；`small` / `turbo` 等较大模型按需下载。固定“说话语言”通常比自动检测更稳定且负担更低，只有真正的混合语言对话才建议自动检测。完整的可重复方法、数据和限制见 [性能基准](docs/performance-benchmark.md)，架构来源与许可证见 [流式架构研究](docs/streaming-architecture-research.md)。
 
 ![会话录音与歌词式字幕回放](docs/images/session-playback.png)
 
@@ -146,13 +159,16 @@ Realtime Subtitle is a native-feeling macOS control center with an always-on-top
 ### Highlights
 
 - Local live transcription with a bundled `faster-whisper tiny` model.
-- v2.9.4 wraps long source and translated text inside the active floating caption without clipping or creating a second caption.
+- v2.10.0 introduces a real **Partial → Stable → Final** caption lifecycle. Drafts arrive early, repeated agreement locks a monotonic prefix, and only finalized segments enter history; the same row changes in place without focus activation or animated flicker.
+- LocalAgreement-inspired confirmation works with semantic endpointing so a short pause or unfinished phrase does not automatically become a new caption, while duration and word limits still bound long speech.
+- Incremental translation sends stable prefixes with debounce, minimum growth, one running request and one newest pending request. Session/source revisions invalidate stale results, and provider work stays off the recognition and UI threads.
+- Long source and translated text wraps inside the active floating caption without clipping or creating a second caption.
 - Session transcript rows now reflow with the control-center width and no longer expose a horizontal scrollbar.
 - Agnes AI and custom OpenAI-compatible endpoints share one Online API provider with presets. Lightweight English↔Chinese offline models can be downloaded, verified, selected, and removed directly on Translation.
 - Balanced acoustic segments are capped at nine seconds, phrase-composer limits are shorter, and draft translation updates arrive sooner while Efficient mode remains available for lower thermal load.
 - v2.9.3 adds incremental live translation: throttled partial-ASR drafts can show a changing translation before the utterance ends, while the reliable final scheduler replaces the same row and only final text is persisted.
-- Apple Translation now reuses one native system session for a fixed language pair instead of launching the framework for every update. On the development Mac, the first request took about 2.5 seconds and the next request about 0.056 seconds.
-- Efficient, Balanced, and Maximum runtime profiles separate the workload budget from model quality. Balanced and Efficient cool down slow refinement passes while keeping only the latest task; Maximum preserves continuous correction for faster or externally cooled Macs.
+- Apple Translation reuses one native system session for a fixed language pair instead of launching the framework for every update. Connection tests verify the selected pair and installed system language assets instead of treating the helper binary alone as readiness.
+- Efficient, Balanced, and High accuracy runtime profiles separate workload budget from model downloads. Balanced and Efficient cool down slow refinement passes while keeping only the latest task; High accuracy preserves continuous enabled correction while larger models remain explicit downloads.
 - v2.9.2 starts captions before loading the optional refiner and keeps only the latest pending correction, preventing stale work from building up and reducing sustained heat. The measured pipeline preparation time on the development Mac fell from about 25 seconds to about 1.3 seconds.
 - A prominent **Spoken language** selector on Live skips repeated language detection when the conversation uses one known language, improving stability and lowering processing work; Automatic remains available for mixed-language speech.
 - Lightweight adaptive room-noise filtering offers Off, Balanced, and Strong modes without altering the original audio sent to recognition or saved in recordings.
@@ -180,6 +196,16 @@ Realtime Subtitle is a native-feeling macOS control center with an always-on-top
 - Microphone and built-in ScreenCaptureKit system-audio input; no virtual audio driver is required.
 - A dedicated Recognition Models page for offline ASR downloads and Hugging Face search. Optional offline translation models are downloaded separately on Translation; service-hosted models remain owned by LM Studio or the selected API. Tiny/Base models show an accuracy warning and recommend Small or Turbo.
 - Separate native downloads for Apple Silicon and Intel Macs.
+
+### Accuracy, latency, and power
+
+| Runtime profile | Intended use | Latency / power trade-off |
+|---|---|---|
+| Efficient | Intel, low-memory Macs, long meetings | Fewer threads, slower draft cadence, one translation call; prioritizes sustained temperature |
+| Balanced (default) | Most Macs and everyday captions | Hardware-aware compromise between first text, stability, and continuous load |
+| High accuracy | High-performance or externally cooled M-series Macs | Faster cadence and continuous optional refinement; higher CPU, memory, and heat |
+
+`tiny` is appropriate for low-latency preview but has clear accuracy limits for Chinese, mixed-language, quiet, and noisy speech. Larger `small` / `turbo` models are optional downloads. Selecting a fixed spoken language generally improves stability and lowers work; Automatic is intended for genuinely mixed-language conversations. See the repeatable [performance benchmark](docs/performance-benchmark.md) and the sourced [streaming architecture research](docs/streaming-architecture-research.md).
 
 ![Synchronized session playback](docs/images/session-playback.png)
 
@@ -263,17 +289,17 @@ Build a native DMG on a matching Mac:
 
 ```bash
 # Apple Silicon host
-bash build_dmg.sh 2.9.4 arm64
+bash build_dmg.sh 2.10.0 arm64
 
 # Intel host, or Apple Silicon with Rosetta installed
-bash build_dmg.sh 2.9.4 x86_64
+bash build_dmg.sh 2.10.0 x86_64
 ```
 
 Outputs:
 
 ```text
-dist/RealtimeSubtitle-2.9.4-macos-arm64.dmg
-dist/RealtimeSubtitle-2.9.4-macos-x86_64.dmg
+dist/RealtimeSubtitle-2.10.0-macos-arm64.dmg
+dist/RealtimeSubtitle-2.10.0-macos-x86_64.dmg
 ```
 
 The GitHub Actions release workflow builds `arm64` on an Apple Silicon runner and `x86_64` on an Intel runner, verifies the embedded architecture and app icon, creates SHA-256 checksums, and publishes both DMGs to one release.
@@ -282,8 +308,9 @@ The GitHub Actions release workflow builds `arm64` on an Apple Silicon runner an
 
 ```text
 Audio input → fast local ASR → utterance lifecycle → subtitle overlay
+                                ├→ Partial → Stable → Final state
                                 ├→ optional accurate local pass → same-line revision
-                                └→ translation scheduler → translation provider
+                                └→ stable-prefix translation → provider → revision guard
 
 Control Center
 ├── Live
@@ -304,6 +331,7 @@ Control Center
 - MLX Whisper is optional and Apple Silicon-only; the packaged default uses `faster-whisper` for both architectures.
 - Apple Translation inside Realtime Subtitle requires macOS 26 or later; older supported macOS versions can use local LM Studio or an online/custom provider.
 - The compact downloaded English↔Chinese models prioritize privacy and size over the fluency of Apple Translation or larger API/LM Studio models.
+- Apple Translation readiness is language-pair specific. The native helper may be present while the selected system language assets are unavailable; use the in-app connection test and install guide.
 
 ## License and acknowledgements
 

@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version, for example 2.9.4"
+        description: "Release version, for example 2.10.0"
         required: true
-        default: "2.9.4"
+        default: "2.10.0"
       publish:
         description: "Publish or update the GitHub release"
         required: true
@@ -67,7 +67,8 @@ jobs:
             translation_model_manager.py \
             recognition_quality.py accuracy_transcriber.py \
             adaptive_vad.py runtime_performance.py \
-            src/live_translation_drafts.py \
+            src/live_translation_drafts.py src/runtime_metrics.py \
+            src/semantic_endpoint.py src/streaming_transcript_state.py \
             transcriber_pool.py src/accuracy_refinement.py \
             src/contextual_phrase_composer.py
       - name: Test
@@ -147,15 +148,16 @@ jobs:
           TAG="v${VERSION}"
           TITLE="Realtime Subtitle ${TAG}"
           cat > release-notes.md <<'EOF'
-          Realtime Subtitle 2.9.4 fixes long-caption layout and makes offline translation a first-class optional workflow.
+          Realtime Subtitle 2.10.0 upgrades live captions from sentence-at-a-time output to a measured streaming lifecycle.
 
-          - Long original and translated text now wraps inside the active floating subtitle without clipping or creating a new caption.
-          - Session transcripts reflow when the control center narrows; the unwanted horizontal scrollbar is removed.
-          - Agnes AI and custom OpenAI-compatible endpoints now share one Online API provider with clear presets.
-          - Small English↔Chinese offline translation models can be downloaded, verified, selected and removed directly in the Translation page.
-          - Speech-recognition and translation downloads are clearly separated; offline translation models remain optional and outside the app bundle.
-          - Balanced caption segments are bounded to nine seconds, with shorter phrase-composer limits for more readable live rows.
-          - Draft translation updates arrive sooner while Efficient mode still offers a lower-heat workload budget.
+          - Partial, Stable and Final states update one caption in place; confirmed prefixes stay monotonic and only final segments enter history.
+          - LocalAgreement-inspired confirmation and semantic endpointing combine VAD, silence, punctuation, incomplete phrases, language, duration and word limits.
+          - Incremental translation sends stable prefixes with provider-aware debounce and source/session revision guards, so late responses cannot overwrite current subtitles.
+          - Balanced hardware budgets cap ASR and translation concurrency; Efficient and Maximum remain explicit alternatives.
+          - Long bilingual captions and narrow session history reflow without horizontal scrolling or clipping.
+          - Playback remains recording-aware and highlights the active line like lyrics; transcript-only sessions do not show misleading playback controls.
+          - A privacy-safe benchmark corpus, 30-minute acoustic workload, sourced architecture review and license matrix are included under `docs/` and `benchmarks/`.
+          - The full release regression suite contains 693 passing tests.
 
           Native macOS downloads are provided separately for Apple Silicon and Intel.
 

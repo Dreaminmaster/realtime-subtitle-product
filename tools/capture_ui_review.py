@@ -139,15 +139,19 @@ def main() -> int:
         "translation_font_size": 19,
     })
     overlay.resize(760, 360)
-    overlay.update_text(
+    overlay.update_caption_state(
         1,
         "You also mentioned a long section about making money, investing it properly, and the emotional and logical parts of the decision.",
         "你还提到了一段很长的内容，讲如何赚钱、合理投资，以及决策中情感与逻辑的不同部分。",
+        "FINAL",
+        3,
     )
-    overlay.update_text(
+    overlay.update_caption_state(
         2,
-        "This remains one subtitle and wraps naturally inside the current window.",
-        "这仍然是同一条字幕，只会在当前窗口内自然换行。",
+        "This changing draft remains one subtitle and wraps naturally inside the current window while the speaker continues",
+        "这条正在变化的草稿仍然属于同一条字幕，并会在当前窗口内自然换行",
+        "PARTIAL",
+        2,
     )
     overlay.show()
     app.processEvents()
@@ -176,8 +180,8 @@ def main() -> int:
         from PyQt6.QtGui import QColor, QImage, QPainter
 
         reference = QImage(str(args.reference))
-        implementation = QImage(str(args.output / "04d-session-narrow.png"))
-        slot_width, slot_height = 900, 720
+        implementation = QImage(str(args.output / "04-session-playback.png"))
+        slot_width, slot_height = 1200, 780
         comparison = QImage(slot_width * 2, slot_height, QImage.Format.Format_ARGB32)
         comparison.fill(QColor("#171716"))
         painter = QPainter(comparison)

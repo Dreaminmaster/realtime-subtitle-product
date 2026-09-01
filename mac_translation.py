@@ -60,7 +60,10 @@ def availability() -> tuple[bool, str]:
     path = helper_path()
     if not path.is_file():
         return False, "Apple Translation helper is not installed"
-    return True, "Apple Translation is ready"
+    return True, (
+        "Apple Translation helper is available; the selected language pair "
+        "and downloaded assets are verified when the connection is tested"
+    )
 
 
 class _PersistentTranslationService:

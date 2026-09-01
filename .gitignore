@@ -9,3 +9,5 @@ build
 dist
 runtime/artifacts/
 native/mac-translation
+benchmarks/generated/
+benchmarks/results/

@@ -205,6 +205,7 @@ def create_pipeline():
     
     class WorkerSignals(QObject):
         update_text = pyqtSignal(int, str, str)
+        update_caption_state = pyqtSignal(int, str, str, str, int)
         remove_text = pyqtSignal(int)
         audio_status = pyqtSignal(str, float)  # (status_text, volume_level 0.0-1.0)
         pipeline_failed = pyqtSignal(str)       # error message when pipeline crashes
@@ -246,6 +247,23 @@ def create_pipeline():
             self.performance_policy = RuntimePerformancePolicy(
                 getattr(config, "performance_profile", "balanced")
             )
+            from src.runtime_metrics import RuntimeMetrics
+            self.runtime_metrics = RuntimeMetrics(
+                profile=self.performance_policy.profile,
+                backend=getattr(config, "asr_backend", "unknown"),
+                model=(
+                    getattr(config, "whisper_model", "unknown")
+                    if getattr(config, "asr_backend", "whisper") in {"whisper", "mlx"}
+                    else getattr(config, "funasr_model", "unknown")
+                ),
+            )
+            from src.streaming_transcript_state import StreamingTranscriptState
+            self.streaming_transcript_state = StreamingTranscriptState(
+                unsafe_tail_tokens=2,
+                min_stable_tokens=1,
+            )
+            self._latest_hypothesis_text = {}
+            self._latest_hypothesis_changed_at = {}
             self.live_translation_drafts = None
             self._cleanup_in_progress = False
             self._failed = False
@@ -330,7 +348,7 @@ def create_pipeline():
 
                 self.live_translation_drafts = LiveTranslationDrafts(
                     translator=self.translation_engine.translate_draft,
-                    on_result=self.signals.update_text.emit,
+                    on_result=self._on_live_translation_draft,
                     interval=draft_interval,
                     min_growth=self.performance_policy.draft_min_growth(
                         getattr(config, "live_translation_mode", "balanced")
@@ -372,11 +390,13 @@ def create_pipeline():
                 self._translation_scheduler = TranslationScheduler(
                     translator=self.translation_engine.translate,
                     max_queue=30,
-                    max_workers=2,
+                    max_workers=self.performance_policy.translation_workers(
+                        getattr(config, "translation_threads", 2)
+                    ),
                 )
                 self.translation_adapter = TranslationAdapter(
                     scheduler=self._translation_scheduler,
-                    on_update_text=self.signals.update_text.emit,
+                    on_update_text=self._on_final_translation_update,
                     repository=self._repository,
                     repository_enabled=self._repository is not None,
                 )
@@ -426,6 +446,15 @@ def create_pipeline():
                 self.transcriber_output_bridge = None
                 log.info("Pipeline: using legacy translate_executor (use_translation_scheduler=false)")
         
+        def _on_live_translation_draft(self, chunk_id, original, translated):
+            self.runtime_metrics.record_translation(chunk_id)
+            self.signals.update_text.emit(chunk_id, original, translated)
+
+        def _on_final_translation_update(self, chunk_id, original, translated):
+            if translated:
+                self.runtime_metrics.record_translation(chunk_id)
+            self.signals.update_text.emit(chunk_id, original, translated)
+
         def start(self):
             self._stopping = False  # reset for new session
             self.running = True     # reset from previous stop
@@ -514,10 +543,19 @@ def create_pipeline():
         def processing_loop(self):
             log.info("Pipeline: processing loop started (state-machine mode)")
             
-            translate_executor = ThreadPoolExecutor(max_workers=config.translation_threads)
+            translate_executor = ThreadPoolExecutor(
+                max_workers=self.performance_policy.translation_workers(
+                    getattr(config, "translation_threads", 2)
+                ),
+                thread_name_prefix="live-translation",
+            )
             accuracy_executor = None
             lifecycle_lock = self._lifecycle_lock
             session_gen = self._session_generation  # snapshot for this session
+            self.runtime_metrics.start_session()
+            self.streaming_transcript_state.reset()
+            self._latest_hypothesis_text.clear()
+            self._latest_hypothesis_changed_at.clear()
             self.accuracy_coordinator.reset(session_gen)
             self._start_accuracy_worker(session_gen, translate_executor)
             if self.live_translation_drafts is not None:
@@ -613,9 +651,16 @@ def create_pipeline():
             )
             PRE_ROLL_MS = 0.4
             from adaptive_vad import AdaptiveNoiseGate
+            from src.semantic_endpoint import EndpointSignals, SemanticEndpointPolicy
             noise_gate = AdaptiveNoiseGate(
                 self.audio.silence_threshold,
                 getattr(config, "noise_gate_mode", "balanced"),
+            )
+            endpoint_policy = SemanticEndpointPolicy(
+                base_silence=SILENCE_DUR_SEC,
+                min_duration=MIN_UTTERANCE_DUR,
+                max_duration=MAX_UTTERANCE_DUR,
+                max_words=42 if self.performance_policy.profile != "efficient" else 34,
             )
             
             def _reset_recording_state():
@@ -678,6 +723,7 @@ def create_pipeline():
                         if is_speech:
                             utterance_generation += 1
                             self._utt_lifecycle[utterance_id] = {"generation": utterance_generation, "state": "recording"}
+                            self.runtime_metrics.begin_segment(utterance_id)
                             log.info(f"Utterance[{utterance_id}] START gen={utterance_generation} state=recording rms={chunk_rms:.4f} pre_roll_ms={len(pre_roll)/self.audio.sample_rate*1000:.0f}")
                             buffer = pre_roll.copy()
                             utterance_start_offset = max(
@@ -699,15 +745,28 @@ def create_pipeline():
                         else:
                             silence_counter += chunk_dur
                         
-                        should_finalize = False
-                        reason = ""
-                        
-                        if buf_dur >= MAX_UTTERANCE_DUR:
-                            should_finalize = True
-                            reason = "max_dur"
-                        elif silence_counter >= SILENCE_DUR_SEC and buf_dur >= MIN_UTTERANCE_DUR:
-                            should_finalize = True
-                            reason = "silence"
+                        with lifecycle_lock:
+                            latest_hypothesis = self._latest_hypothesis_text.get(
+                                utterance_id, ""
+                            )
+                            changed_at = self._latest_hypothesis_changed_at.get(
+                                utterance_id
+                            )
+                        endpoint = endpoint_policy.decide(
+                            EndpointSignals(
+                                duration=buf_dur,
+                                silence=silence_counter,
+                                text=latest_hypothesis,
+                                language=getattr(config, "source_language", None),
+                                seconds_since_text_change=(
+                                    time.monotonic() - changed_at
+                                    if changed_at is not None
+                                    else None
+                                ),
+                            )
+                        )
+                        should_finalize = endpoint.should_finalize
+                        reason = endpoint.reason
                         
                         if should_finalize:
                             uid = utterance_id
@@ -724,6 +783,7 @@ def create_pipeline():
                                 log.info(f"Utterance[{uid}] state {old_state} -> finalizing")
                             
                             log.info(f"Utterance[{uid}] END dur={buf_dur:.1f}s silence={silence_counter:.1f}s reason={reason}")
+                            self.runtime_metrics.record_endpoint(reason)
                             
                             self._seq_counter += 1
                             task = {
@@ -743,7 +803,12 @@ def create_pipeline():
                             _reset_recording_state()
                         
                         # Partial: throttled, replaces pending if same uid
-                        elif buf_dur >= 1.0 and (now - last_partial_time) >= PARTIAL_INTERVAL:
+                        elif (
+                            buf_dur >= 0.75
+                            and (now - last_partial_time) >= PARTIAL_INTERVAL
+                            and not asr_running.is_set()
+                            and asr_queue.qsize() == 0
+                        ):
                             gen = utterance_generation
                             uid = utterance_id
                             
@@ -848,6 +913,7 @@ def create_pipeline():
                             log.critical("Failed to emit cleanup_finished")
                 
                 self._cleanup_in_progress = False
+                self.runtime_metrics.log_summary(log)
                 log.info("Pipeline loop ended (ASR queue drained)")
         
         def _partial_safe_to_emit_v2(self, uid, gen):
@@ -886,6 +952,7 @@ def create_pipeline():
                 return
             
             try:
+                inference_started = time.monotonic()
                 partial_transcribe = getattr(self.transcriber, "transcribe_partial", None)
                 text = (
                     partial_transcribe(audio_data, prompt=prompt)
@@ -917,15 +984,43 @@ def create_pipeline():
                         self._latest_partial_seq.pop(chunk_id, None)
                 
                 if text:
+                    update = self.streaming_transcript_state.observe(chunk_id, text)
+                    if update is None:
+                        return
+                    with lifecycle_lock or self._lifecycle_lock:
+                        previous_text = self._latest_hypothesis_text.get(chunk_id)
+                        self._latest_hypothesis_text[chunk_id] = update.display_text
+                        if previous_text != update.display_text:
+                            self._latest_hypothesis_changed_at[chunk_id] = time.monotonic()
                     log.info(
-                        f"Utterance[{chunk_id}] PARTIAL chars={len(text)} seq={seq}"
+                        "Utterance[%s] %s chars=%s stable=%s revision=%s seq=%s",
+                        chunk_id,
+                        update.phase.name,
+                        len(update.display_text),
+                        len(update.stable_text),
+                        update.revision,
+                        seq,
                     )
-                    self.signals.update_text.emit(chunk_id, text, "")
-                    if self.live_translation_drafts is not None:
+                    self.signals.update_caption_state.emit(
+                        chunk_id,
+                        update.display_text,
+                        "",
+                        update.phase.name,
+                        update.revision,
+                    )
+                    self.runtime_metrics.record_asr(
+                        chunk_id,
+                        update.phase.name,
+                        inference_seconds=time.monotonic() - inference_started,
+                        audio_seconds=len(audio_data) / self.audio.sample_rate,
+                    )
+                    if self.live_translation_drafts is not None and update.stable_text:
                         self.live_translation_drafts.submit(
                             session_gen,
                             chunk_id,
-                            text,
+                            update.display_text,
+                            stable_text=update.stable_text,
+                            source_revision=update.revision,
                         )
             except Exception:
                 log.exception(f"Utterance[{chunk_id}] PARTIAL error")
@@ -949,6 +1044,7 @@ def create_pipeline():
                 return
             
             try:
+                inference_started = time.monotonic()
                 dur = len(audio_data) / self.audio.sample_rate
                 rms = float(np.sqrt(np.mean(audio_data**2)))
                 peak = float(np.max(np.abs(audio_data)))
@@ -976,8 +1072,31 @@ def create_pipeline():
                     )
                 else:
                     log.warning(f"Utterance[{chunk_id}] FINAL empty: dur={dur:.1f}s rms={rms:.4f} peak={peak:.3f} samples={len(audio_data)} reason=whisper_no_text")
+                    self.streaming_transcript_state.discard(chunk_id)
+                    self.signals.remove_text.emit(chunk_id)
                 
                 if text:
+                    streaming_final = self.streaming_transcript_state.finalize(
+                        chunk_id, text
+                    )
+                    if (
+                        streaming_final is not None
+                        and streaming_final.final_conflicted_with_stable
+                    ):
+                        log.info(
+                            "Utterance[%s] final corrected the volatile agreement boundary",
+                            chunk_id,
+                        )
+                    self.runtime_metrics.record_asr(
+                        chunk_id,
+                        "FINAL",
+                        inference_seconds=time.monotonic() - inference_started,
+                        audio_seconds=dur,
+                        stable_conflict=bool(
+                            streaming_final
+                            and streaming_final.final_conflicted_with_stable
+                        ),
+                    )
                     with self._phrase_lock:
                         decision = self.phrase_composer.compose(chunk_id, text)
                         display_chunk_id = decision.chunk_id
@@ -1003,7 +1122,13 @@ def create_pipeline():
                         self.last_final_text = display_text[-240:]
                     trans_active = self.translation_engine.current_mode != "off"
                     if trans_active:
-                        self.signals.update_text.emit(display_chunk_id, display_text, "…")
+                        self.signals.update_caption_state.emit(
+                            display_chunk_id,
+                            display_text,
+                            "…",
+                            "FINAL",
+                            decision.revision,
+                        )
                         if hasattr(self, 'translation_adapter'):
                             self.translation_adapter.on_final_text(
                                 display_text,
@@ -1020,7 +1145,13 @@ def create_pipeline():
                                 decision.revision,
                             )
                     else:
-                        self.signals.update_text.emit(display_chunk_id, display_text, "")
+                        self.signals.update_caption_state.emit(
+                            display_chunk_id,
+                            display_text,
+                            "",
+                            "FINAL",
+                            decision.revision,
+                        )
                         if hasattr(self, 'translation_adapter'):
                             # Translation-off mode still records the original
                             # transcript in the v2.4 session repository.
@@ -1052,6 +1183,8 @@ def create_pipeline():
             finally:
                 with lifecycle_lock or self._lifecycle_lock:
                     self._finalizing_uids.discard(chunk_id)
+                    self._latest_hypothesis_text.pop(chunk_id, None)
+                    self._latest_hypothesis_changed_at.pop(chunk_id, None)
 
         def _start_accuracy_worker(self, session_gen, translate_executor):
             """Arm optional refinement without loading anything yet.
@@ -1287,6 +1420,7 @@ def create_and_show_overlay(pipeline, signals, start_pipeline=True, subtitle_sty
             "translation_color": getattr(config, "translation_color", "#d99a69"),
             "window_opacity": getattr(config, "window_opacity", 0.94),
             "display_mode": getattr(config, "display_mode", "bilingual"),
+            "ui_language": getattr(config, "ui_language", "en"),
         }
     window = EnhancedOverlayWindow(subtitle_style)
     window.show()
@@ -1294,6 +1428,7 @@ def create_and_show_overlay(pipeline, signals, start_pipeline=True, subtitle_sty
     
     # Connect signals
     signals.update_text.connect(window.update_text)
+    signals.update_caption_state.connect(window.update_caption_state)
     signals.remove_text.connect(window.remove_text)
     signals.audio_status.connect(window.update_audio_status)
     window.stop_requested.connect(pipeline.stop)

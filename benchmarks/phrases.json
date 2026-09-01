@@ -1,0 +1,67 @@
+{
+  "license": "CC0-1.0",
+  "description": "Project-authored synthetic benchmark phrases. No user recordings.",
+  "cases": [
+    {
+      "id": "en_short",
+      "language": "en",
+      "voice": "Samantha",
+      "text": "The meeting starts in five minutes.",
+      "tags": ["microphone", "short"]
+    },
+    {
+      "id": "en_hesitation",
+      "language": "en",
+      "voice": "Samantha",
+      "text": "I think we should, um, wait for the final report before we decide.",
+      "tags": ["hesitation", "short-pause"]
+    },
+    {
+      "id": "en_long_fast",
+      "language": "en",
+      "voice": "Daniel",
+      "rate": 235,
+      "text": "When the network returns, cancel every obsolete request, keep the newest stable prefix, and never let an old translation replace the current caption.",
+      "tags": ["long", "fast", "system-audio"]
+    },
+    {
+      "id": "zh_short",
+      "language": "zh",
+      "voice": "Tingting",
+      "text": "实时字幕应该快速、稳定，而且不能打断当前应用。",
+      "tags": ["microphone", "short"]
+    },
+    {
+      "id": "zh_hesitation",
+      "language": "zh",
+      "voice": "Tingting",
+      "text": "我们先看一下，嗯，当前结果，然后再决定要不要继续。",
+      "tags": ["hesitation", "short-pause"]
+    },
+    {
+      "id": "mixed_zh_en",
+      "language": "auto",
+      "voice": "Tingting",
+      "text": "请打开 Realtime Subtitle，然后选择 balanced 模式开始测试。",
+      "tags": ["mixed-language", "system-audio"]
+    },
+    {
+      "id": "en_weak_noisy",
+      "language": "en",
+      "voice": "Samantha",
+      "gain": 0.32,
+      "noise": 0.018,
+      "text": "A quiet voice should remain readable in steady background noise.",
+      "tags": ["weak-volume", "noise"]
+    },
+    {
+      "id": "zh_music_noise",
+      "language": "zh",
+      "voice": "Tingting",
+      "noise": 0.012,
+      "tone_hz": 220,
+      "text": "背景音乐存在时，也不应该重复或者产生幻觉。",
+      "tags": ["music", "noise"]
+    }
+  ]
+}

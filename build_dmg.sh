@@ -126,6 +126,7 @@ rsync -av --exclude='.git' \
       --exclude='tests' \
       --exclude='tools' \
       --exclude='docs' \
+      --exclude='benchmarks' \
       --exclude='demo' \
       --exclude='build_dmg.sh' \
       --exclude='install_mac.sh' \
@@ -615,7 +616,7 @@ else
     echo "  ✅ stamped architecture ${ARCH}"
 fi
 
-for excluded in .venv tests tools docs .github; do
+for excluded in .venv tests tools docs benchmarks .github; do
     if [ -e "${APP_BUNDLE}/Contents/Resources/${excluded}" ]; then
         echo "  ❌ development path bundled: ${excluded}"; FAIL=true
     fi

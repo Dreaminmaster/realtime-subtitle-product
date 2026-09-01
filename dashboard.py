@@ -1307,17 +1307,17 @@ class Dashboard(QWidget):
         self.performance_profile = SegmentedControl()
         self.performance_profile.addItem("Efficient", "efficient")
         self.performance_profile.addItem("Balanced", "balanced")
-        self.performance_profile.addItem("Maximum", "maximum")
+        self.performance_profile.addItem("High accuracy", "maximum")
         performance_index = self.performance_profile.findData(
             getattr(config, "performance_profile", "balanced")
         )
         self.performance_profile.setCurrentIndex(max(0, performance_index))
         self.performance_profile.setToolTip(
-            "Balanced adapts update cadence and pauses a slow enhancement model between corrections. Maximum keeps every correction running continuously."
+            "Balanced adapts update cadence and pauses a slow enhancement model between corrections. High accuracy keeps every enabled correction running continuously."
         )
         layout.addRow("Runtime performance:", self.performance_profile)
         performance_hint = QLabel(
-            "Balanced is recommended. Efficient lowers heat; Maximum is intended for faster or externally cooled Macs."
+            "Balanced is recommended. Efficient lowers heat; High accuracy is intended for faster or externally cooled Macs and still requires an optional refinement model."
         )
         performance_hint.setObjectName("Muted")
         performance_hint.setWordWrap(True)

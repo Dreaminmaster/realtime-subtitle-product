@@ -13,7 +13,7 @@ Features:
 
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
-    QLabel, QScrollArea, QFrame, QPushButton, QSizePolicy
+    QLabel, QScrollArea, QFrame, QPushButton, QSizePolicy, QGraphicsOpacityEffect
 )
 from PyQt6.QtCore import Qt, QPoint, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont, QColor, QPalette, QAction, QFontDatabase
@@ -45,6 +45,7 @@ class SubtitleBubble(QFrame):
         self.setObjectName("SubtitleBubble")
         self.chunk_id = chunk_id
         self.parent_style = parent_style or {}
+        self.phase = "FINAL"
         # A subtitle row must take the width offered by the overlay instead of
         # advertising the unwrapped text width to QScrollArea.  ``Ignored`` on
         # the labels is intentional: their height still follows word wrapping,
@@ -70,6 +71,17 @@ class SubtitleBubble(QFrame):
         self.timestamp_label.setStyleSheet("color: rgba(200,200,200,120); font-size: 10px;")
         self.timestamp_label.setVisible(self.parent_style.get("show_timestamp", True))
         layout.addWidget(self.timestamp_label)
+
+        # The timestamp is optional, so streaming state needs its own compact
+        # textual cue.  This keeps Partial/Stable distinguishable without
+        # relying on colour or opacity alone.
+        self.phase_label = QLabel("")
+        self.phase_label.setStyleSheet(
+            "color: rgba(235,235,235,180); font-size: 10px; "
+            "font-weight: 600; background: transparent;"
+        )
+        self.phase_label.hide()
+        layout.addWidget(self.phase_label)
         
         # Original text
         self.original_label = QLabel(original_text)
@@ -116,6 +128,9 @@ class SubtitleBubble(QFrame):
         self.copy_btn.clicked.connect(self.copy_to_clipboard)
         self.copy_btn.hide()
         layout.addWidget(self.copy_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        self.setMouseTracking(True)
+        self.enterEvent = lambda event: self.copy_btn.show()
+        self.leaveEvent = lambda event: self.copy_btn.hide()
     
     def _get_bubble_style(self):
         opacity = max(0.3, min(1.0, float(self.parent_style.get("window_opacity", 0.94))))
@@ -132,11 +147,35 @@ class SubtitleBubble(QFrame):
         self.original_label.setText(text)
         self.original_label.updateGeometry()
         self.updateGeometry()
-    
-        # Show copy button on hover
-        self.setMouseTracking(True)
-        self.enterEvent = lambda e: self.copy_btn.show()
-        self.leaveEvent = lambda e: self.copy_btn.hide()
+
+    def update_phase(self, phase):
+        """Apply a quiet, non-animated distinction between live states."""
+        normalized = str(phase or "FINAL").upper()
+        if normalized not in {"PARTIAL", "STABLE", "FINAL"}:
+            normalized = "FINAL"
+        self.phase = normalized
+        language = self.parent_style.get("ui_language", "en")
+        if normalized == "PARTIAL":
+            suffix = "草稿" if language == "zh-Hans" else "Draft"
+            opacity = 0.74
+        elif normalized == "STABLE":
+            suffix = "稳定" if language == "zh-Hans" else "Stable"
+            opacity = 0.92
+        else:
+            suffix = ""
+            opacity = 1.0
+        timestamp = self.timestamp_label.text().split(" · ", 1)[0]
+        self.timestamp_label.setText(
+            f"{timestamp} · {suffix}" if suffix else timestamp
+        )
+        self.phase_label.setText(suffix)
+        self.phase_label.setVisible(bool(suffix))
+        for label in (self.original_label, self.translated_label):
+            effect = label.graphicsEffect()
+            if not isinstance(effect, QGraphicsOpacityEffect):
+                effect = QGraphicsOpacityEffect(label)
+                label.setGraphicsEffect(effect)
+            effect.setOpacity(opacity)
     
     def update_translated(self, text):
         show_trans = self.parent_style.get("show_translation", True)
@@ -191,6 +230,7 @@ class SubtitleBubble(QFrame):
         
         self.setMinimumHeight(max(70, original_font_size + translation_font_size + 30))
         self.setStyleSheet(self._get_bubble_style())
+        self.update_phase(self.phase)
 
 
 class ResizeHandle(QLabel):
@@ -648,7 +688,8 @@ class EnhancedOverlayWindow(QWidget):
             self.transcript_data[chunk_id] = {
                 'timestamp': time.strftime("%H:%M:%S"),
                 'original': original_text,
-                'translated': translated_text or ""
+                'translated': translated_text or "",
+                'phase': "FINAL",
             }
         else:
             if original_text:
@@ -692,6 +733,20 @@ class EnhancedOverlayWindow(QWidget):
         # Auto-scroll to latest
         if self.subtitle_style.get("auto_scroll", True) and was_near_bottom:
             QTimer.singleShot(10, self._scroll_to_bottom)
+
+    def update_caption_state(
+        self, chunk_id, original_text, translated_text, phase, revision=0
+    ):
+        """Update a streaming row in place without animation or focus changes."""
+        self.update_text(chunk_id, original_text, translated_text)
+        normalized = str(phase or "FINAL").upper()
+        if chunk_id in self.transcript_data:
+            self.transcript_data[chunk_id]["phase"] = normalized
+            self.transcript_data[chunk_id]["revision"] = int(revision or 0)
+        for existing_id, bubble in self.items:
+            if existing_id == chunk_id:
+                bubble.update_phase(normalized)
+                break
     
     def _scroll_to_bottom(self):
         sb = self.scroll_area.verticalScrollBar()
