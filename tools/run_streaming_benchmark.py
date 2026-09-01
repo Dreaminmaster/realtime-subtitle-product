@@ -7,7 +7,6 @@ import argparse
 import json
 from pathlib import Path
 import re
-import resource
 import sys
 import time
 import wave
@@ -18,6 +17,8 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+from src.runtime_metrics import _process_peak_rss_mb
 
 
 def _normal(text: str) -> list[str]:
@@ -156,9 +157,10 @@ def main() -> int:
     results = [benchmark_case(transcriber, case, partial_step=args.partial_step) for case in cases]
     wall = time.monotonic() - wall_started
     cpu = time.process_time() - cpu_started
-    max_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 * 1024)
+    from version import BUILD_VERSION
+
     summary = {
-        "version": "2.10.0",
+        "version": str(BUILD_VERSION).removeprefix("v"),
         "backend": config.asr_backend,
         "model": model_name,
         "source_language": "fixed per case; mixed-language case uses auto",
@@ -166,7 +168,7 @@ def main() -> int:
         "cpu_threads": plan.cpu_threads,
         "wall_seconds": round(wall, 3),
         "process_cpu_percent": round(cpu / max(0.001, wall) * 100, 2),
-        "max_rss_mb": round(max_rss, 2),
+        "max_rss_mb": round(_process_peak_rss_mb(), 2),
         "mean_error_rate": round(sum(item["wer_or_cer"] for item in results) / max(1, len(results)), 4),
         "mean_rtf": round(sum(item["rtf"] for item in results) / max(1, len(results)), 3),
         "cases": results,
