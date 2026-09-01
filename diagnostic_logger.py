@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 import os, json, time, platform, shutil
+from app_paths import get_log_dir
 
-LOG_DIR = os.path.expanduser("~/Library/Logs/RealtimeSubtitle")
+LOG_DIR = os.fspath(get_log_dir())
 LOG_FILE = os.path.join(LOG_DIR, "launcher.log")
 
 _diagnostics = []

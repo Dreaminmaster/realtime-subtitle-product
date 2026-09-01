@@ -26,10 +26,16 @@ class HardwareProfile:
     machine: str
     memory_gb: float
     apple_silicon: bool
+    system: str = ""
 
     @property
     def label(self) -> str:
-        family = "Apple Silicon" if self.apple_silicon else "Intel / compatible"
+        if self.apple_silicon:
+            family = "Apple Silicon"
+        elif self.system == "Windows":
+            family = "Windows ARM64" if self.machine in {"arm64", "aarch64"} else "Windows x64"
+        else:
+            family = "Intel Mac" if self.system == "Darwin" else "Compatible desktop"
         return f"{family} · {self.memory_gb:.0f} GB memory"
 
 
@@ -63,6 +69,29 @@ def detect_memory_gb() -> float:
             return max(1.0, int(result.stdout.strip()) / (1024 ** 3))
         except (OSError, ValueError, subprocess.SubprocessError):
             pass
+    if platform.system() == "Windows":
+        try:
+            import ctypes
+
+            class _MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+
+            status = _MEMORYSTATUSEX()
+            status.dwLength = ctypes.sizeof(status)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+                return max(1.0, status.ullTotalPhys / (1024 ** 3))
+        except (AttributeError, OSError, ValueError):
+            pass
     try:
         pages = os.sysconf("SC_PHYS_PAGES")
         page_size = os.sysconf("SC_PAGE_SIZE")
@@ -73,10 +102,12 @@ def detect_memory_gb() -> float:
 
 def detect_hardware() -> HardwareProfile:
     machine = platform.machine().lower()
+    system = platform.system()
     return HardwareProfile(
         machine=machine,
         memory_gb=detect_memory_gb(),
-        apple_silicon=machine in {"arm64", "aarch64"} and platform.system() == "Darwin",
+        apple_silicon=machine in {"arm64", "aarch64"} and system == "Darwin",
+        system=system,
     )
 
 

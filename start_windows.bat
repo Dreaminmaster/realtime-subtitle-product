@@ -11,8 +11,8 @@ if not exist .venv (
 echo [Launcher] Activating environment...
 call .venv\Scripts\activate.bat
 
-echo [Launcher] Starting App (Hot Reload Mode)...
-python reloader.py
+echo [Launcher] Starting Realtime Subtitle...
+python launcher.py
 if %errorlevel% neq 0 (
     echo.
     echo [App Crashed or Exited]

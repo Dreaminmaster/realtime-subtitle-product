@@ -1,4 +1,4 @@
-"""Native macOS system-audio input backed by the bundled ScreenCaptureKit helper."""
+"""Native system-audio input selected for the current desktop platform."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import numpy as np
 from audio_capture import AudioCaptureError
 
 
-class SystemAudioCapture:
+class MacOSSystemAudioCapture:
     """Expose ScreenCaptureKit PCM output through the AudioCapture interface."""
 
     def __init__(self, *, sample_rate=16000, streaming_step_size=0.2, **_ignored):
@@ -146,3 +146,9 @@ class SystemAudioCapture:
                 stage="permission" if "permission" in detail.lower() else "read",
                 requested_device="system_audio",
             )
+
+
+if os.name == "nt":
+    from windows_system_audio import WindowsSystemAudioCapture as SystemAudioCapture
+else:
+    SystemAudioCapture = MacOSSystemAudioCapture

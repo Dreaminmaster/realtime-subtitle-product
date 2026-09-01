@@ -2,7 +2,7 @@
 """
 Realtime Subtitle - Main Entry Point
 
-macOS real-time speech recognition + translation with floating subtitle overlay.
+Desktop real-time speech recognition and translation with a floating overlay.
 
 Usage:
     python3 main.py                    # Launch with dashboard
@@ -279,7 +279,9 @@ def create_pipeline():
             if getattr(config, "input_source", "microphone") == "system_audio":
                 from system_audio_capture import SystemAudioCapture
                 capture_class = SystemAudioCapture
-                capture_options = {}
+                capture_options = {
+                    "output_device_id": getattr(config, "system_output_device", "")
+                }
 
             self.audio = capture_class(
                 sample_rate=config.sample_rate,

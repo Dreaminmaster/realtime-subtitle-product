@@ -29,9 +29,9 @@ def _build_identity():
 
 
 def _user_venv_python():
-    return os.path.expanduser(
-        "~/Library/Application Support/RealtimeSubtitle/venv/bin/python3"
-    )
+    from app_paths import get_venv_python
+
+    return os.fspath(get_venv_python())
 
 
 def _reexec_in_user_venv_for_asr_smoke():
@@ -114,8 +114,9 @@ if "--bootstrap-test" in sys.argv:
     info = get_system_info()
     model_source = evidence.get("model_source", "unknown")
     if model_source == "unknown":
-        prepared_model = os.path.expanduser(
-            f"~/Library/Application Support/RealtimeSubtitle/models/whisper/{model_id}"
+        from app_paths import get_app_support_dir
+        prepared_model = os.fspath(
+            get_app_support_dir() / "models" / "whisper" / model_id
         )
         required_model_files = ("config.json", "model.bin", "tokenizer.json")
         if all(os.path.isfile(os.path.join(prepared_model, f)) for f in required_model_files):
@@ -145,7 +146,8 @@ if "--bootstrap-test" in sys.argv:
     
     # Also write full diagnostic
     diag = write_full_report()
-    diag_file = os.path.expanduser("~/Library/Logs/RealtimeSubtitle/bootstrap_test.log")
+    from app_paths import get_log_dir
+    diag_file = os.fspath(get_log_dir() / "bootstrap_test.log")
     os.makedirs(os.path.dirname(diag_file), exist_ok=True)
     with open(diag_file, "w") as f:
         f.write(diag)
@@ -362,9 +364,13 @@ class LauncherWindow(QMainWindow):
         QTimer.singleShot(1500, lambda: self.diag_btn.setText("Copy Diagnostics"))
 
     def _open_logs(self):
-        log_dir = os.path.expanduser("~/Library/Logs/RealtimeSubtitle")
+        from app_paths import get_log_dir
+        log_dir = os.fspath(get_log_dir())
         import subprocess
-        subprocess.Popen(["open", log_dir])
+        if os.name == "nt":
+            os.startfile(log_dir)
+        else:
+            subprocess.Popen(["open", log_dir])
 
     def _btn_style(self, color):
         return (f"QPushButton {{ background: {color}; color: #1e1e2e; "
@@ -375,8 +381,7 @@ class LauncherWindow(QMainWindow):
         coordinator = getattr(self, "_single_instance", None)
         if coordinator is not None:
             coordinator.release()
-        venv_py = os.path.expanduser(
-            "~/Library/Application Support/RealtimeSubtitle/venv/bin/python3")
+        venv_py = _user_venv_python()
         resources = os.path.dirname(os.path.abspath(__file__))
         main_py = os.path.join(resources, "main.py")
         env = os.environ.copy()

@@ -27,10 +27,9 @@ class Logger:
     
     def __init__(self, log_dir=None):
         if log_dir is None:
-            log_dir = os.path.join(
-                os.path.expanduser("~"),
-                "Library", "Logs", "RealtimeSubtitle"
-            )
+            from app_paths import get_log_dir
+
+            log_dir = get_log_dir()
         
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
@@ -139,16 +138,17 @@ class Diagnostics:
         return self.results
     
     def _check_platform(self):
-        is_mac = platform.system() == "Darwin"
+        system = platform.system()
+        supported = system in {"Darwin", "Windows"}
         is_arm = platform.machine() == "arm64"
         
         self.results["platform"] = {
-            "ok": is_mac,
-            "system": platform.system(),
+            "ok": supported,
+            "system": system,
             "release": platform.release(),
             "machine": platform.machine(),
             "is_apple_silicon": is_arm,
-            "issues": [] if is_mac else ["macOS required for full functionality"]
+            "issues": [] if supported else ["macOS or Windows is required"]
         }
         self.logger.info(f"Platform: {platform.platform()}, ARM={is_arm}")
     
@@ -192,6 +192,18 @@ class Diagnostics:
                 ],
                 "issues": issues
             }
+            if platform.system() == "Windows":
+                try:
+                    from windows_system_audio import WindowsSystemAudioCapture
+
+                    self.results["audio"]["wasapi_loopback"] = (
+                        WindowsSystemAudioCapture.is_available()
+                    )
+                    if not self.results["audio"]["wasapi_loopback"]:
+                        issues.append("No active Windows playback endpoint for system audio")
+                except Exception as exc:
+                    self.results["audio"]["wasapi_loopback"] = False
+                    issues.append(f"WASAPI loopback check failed: {exc}")
             self.logger.info(f"Audio: {len(input_devices)} input devices, BlackHole={has_blackhole}")
         except Exception as e:
             self.results["audio"] = {

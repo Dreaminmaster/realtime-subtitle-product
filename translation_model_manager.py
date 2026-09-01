@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app_paths import get_translation_model_dir
+from platform_support import bundled_resources_dir
 
 
 @dataclass(frozen=True)
@@ -59,8 +60,12 @@ def normalize_pair_language(value: str | None) -> str:
 
 
 class TranslationModelManager:
-    def __init__(self, root: str | Path | None = None):
+    def __init__(self, root: str | Path | None = None, bundled_root: str | Path | None = None):
         self.root = Path(root) if root is not None else get_translation_model_dir()
+        self.bundled_root = (
+            Path(bundled_root) if bundled_root is not None
+            else bundled_resources_dir() / "models" / "translation"
+        )
 
     def catalog(self) -> tuple[TranslationModel, ...]:
         return TRANSLATION_MODELS
@@ -85,6 +90,11 @@ class TranslationModelManager:
             raise ValueError(f"Unknown translation model: {model_id}")
         return self.root / model_id
 
+    def bundled_path_for(self, model_id: str) -> Path:
+        if self.model(model_id) is None:
+            raise ValueError(f"Unknown translation model: {model_id}")
+        return self.bundled_root / model_id
+
     @staticmethod
     def _sentencepiece_files(path: Path) -> tuple[Path | None, Path | None]:
         source = next((p for p in (path / "source.spm", path / "source.model") if p.exists()), None)
@@ -97,12 +107,32 @@ class TranslationModelManager:
                 source, target = candidates[:2]
         return source, target
 
-    def assets(self, model_id: str) -> tuple[Path, Path, Path]:
-        path = self.path_for(model_id)
+    def _assets_at(self, path: Path, model_id: str) -> tuple[Path, Path, Path]:
         source, target = self._sentencepiece_files(path)
         if not (path / "model.bin").is_file() or source is None or target is None:
             raise FileNotFoundError(f"Offline translation model is incomplete: {model_id}")
         return path, source, target
+
+    def assets(self, model_id: str) -> tuple[Path, Path, Path]:
+        user_path = self.path_for(model_id)
+        try:
+            return self._assets_at(user_path, model_id)
+        except FileNotFoundError:
+            return self._assets_at(self.bundled_path_for(model_id), model_id)
+
+    def is_bundled(self, model_id: str) -> bool:
+        try:
+            self._assets_at(self.bundled_path_for(model_id), model_id)
+            return True
+        except (FileNotFoundError, ValueError):
+            return False
+
+    def is_user_downloaded(self, model_id: str) -> bool:
+        try:
+            self._assets_at(self.path_for(model_id), model_id)
+            return True
+        except (FileNotFoundError, ValueError):
+            return False
 
     def is_downloaded(self, model_id: str) -> bool:
         try:
@@ -142,6 +172,8 @@ class TranslationModelManager:
         return destination
 
     def delete_model(self, model_id: str) -> None:
+        # Bundled language packs are immutable installer assets.  Only a
+        # user-downloaded copy may be removed from inside the app.
         path = self.path_for(model_id)
         if path.exists():
             shutil.rmtree(path)

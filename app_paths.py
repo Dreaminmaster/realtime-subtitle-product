@@ -1,4 +1,4 @@
-"""User-writable storage paths for the installed macOS application."""
+"""Cross-platform user-writable storage paths for the installed app."""
 
 from __future__ import annotations
 
@@ -11,10 +11,9 @@ APP_NAME = "RealtimeSubtitle"
 
 
 def get_app_support_dir() -> Path:
-    override = os.getenv("REALTIME_SUBTITLE_APP_SUPPORT_DIR")
-    if override:
-        return Path(override).expanduser()
-    return Path.home() / "Library" / "Application Support" / APP_NAME
+    from platform_support import local_app_data_dir
+
+    return local_app_data_dir(APP_NAME)
 
 
 def get_config_path() -> Path:
@@ -39,7 +38,22 @@ def get_log_dir() -> Path:
     override = os.getenv("REALTIME_SUBTITLE_LOG_DIR")
     if override:
         return Path(override).expanduser()
+    if os.name == "nt":
+        return get_app_support_dir() / "logs"
     return Path.home() / "Library" / "Logs" / APP_NAME
+
+
+def get_setup_state_path() -> Path:
+    return get_app_support_dir() / ".setup_state.json"
+
+
+def get_venv_dir() -> Path:
+    return get_app_support_dir() / "venv"
+
+
+def get_venv_python() -> Path:
+    directory = get_venv_dir()
+    return directory / ("Scripts/python.exe" if os.name == "nt" else "bin/python3")
 
 
 def get_translation_model_dir() -> Path:

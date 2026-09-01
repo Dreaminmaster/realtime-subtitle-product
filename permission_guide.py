@@ -136,6 +136,11 @@ def _check_microphone_raw():
 
 
 def should_show_permission_guide() -> bool:
+    # Windows asks for microphone privacy permission at first use and system
+    # audio loopback needs no screen-recording consent. The macOS onboarding
+    # dialog is therefore both irrelevant and misleading on Windows.
+    if platform.system() != "Darwin":
+        return False
     from app_paths import get_permission_guide_marker
     if not get_permission_guide_marker().exists():
         return True

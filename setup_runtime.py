@@ -79,7 +79,7 @@ def prepare_default_model(model_id="tiny"):
              f"Bundled default model not found at: {bundled_dir}",
              model_id=model_id,
              bundled_dir=bundled_dir, exists=False,
-             hint="The app bundle is incomplete. Please re-download the DMG and reinstall.")
+             hint="The application is incomplete. Please download the installer again.")
 
     # 2. Check key files
     required = ["config.json", "model.bin", "tokenizer.json"]
@@ -90,7 +90,7 @@ def prepare_default_model(model_id="tiny"):
              f"Bundled model at {bundled_dir} is missing: {', '.join(missing)}",
              model_id=model_id, bundled_dir=bundled_dir,
              missing=missing, available_files=avail,
-             hint="The app bundle is damaged. Please re-download the DMG.")
+             hint="The application is damaged. Please download the installer again.")
 
     # 3. Check if user already has it
     def _is_valid(dirpath):
@@ -169,7 +169,7 @@ def verify_model(model_id="tiny"):
                  f"Bundled default model is missing or damaged. Please reinstall the app.",
                  model_id=model_id, expected=user_model_dir,
                  bundled_present=False,
-                 hint="The DMG may be damaged. Re-download and reinstall.")
+                 hint="The installer may be damaged. Download and reinstall it.")
 
     # 2. Check key files
     required = ["config.json", "model.bin", "tokenizer.json"]
@@ -242,7 +242,7 @@ def main():
     parser.add_argument("--resources-dir", required=True,
                         help="Path to app Resources directory (contains model_manager.py, models/)")
     parser.add_argument("--user-data-dir", required=True,
-                        help="Path to user data directory (~/Library/Application Support/RealtimeSubtitle)")
+                        help="Path to the platform-specific RealtimeSubtitle user-data directory")
 
     args = parser.parse_args()
     RESOURCES_DIR = os.path.abspath(args.resources_dir)

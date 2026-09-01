@@ -1,12 +1,12 @@
-name: Build and publish macOS DMGs
+name: Build and publish desktop installers
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version, for example 2.10.0"
+        description: "Release version, for example 2.11.0"
         required: true
-        default: "2.10.0"
+        default: "2.11.0"
       publish:
         description: "Publish or update the GitHub release"
         required: true
@@ -66,6 +66,7 @@ jobs:
             model_catalog.py model_manager.py translation_engine.py \
             translation_model_manager.py \
             recognition_quality.py accuracy_transcriber.py \
+            platform_support.py windows_integration.py windows_system_audio.py \
             adaptive_vad.py runtime_performance.py \
             src/live_translation_drafts.py src/runtime_metrics.py \
             src/semantic_endpoint.py src/streaming_transcript_state.py \
@@ -121,8 +122,47 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  build-windows:
+    needs: [metadata, quality]
+    name: Build Windows x64
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run Windows regression suite
+        shell: powershell
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python -m pip install --disable-pip-version-check --quiet -r requirements-core.txt pytest
+          python -m pytest -q
+      - name: Install Inno Setup
+        shell: powershell
+        run: choco install innosetup --no-progress -y
+      - name: Build and verify Windows installer
+        shell: powershell
+        run: .\build_windows.ps1 -Version "${{ needs.metadata.outputs.version }}"
+      - name: Verify target identity
+        shell: powershell
+        run: |
+          $Installer = "dist\RealtimeSubtitle-${{ needs.metadata.outputs.version }}-windows-x64-setup.exe"
+          if (-not (Test-Path $Installer)) { throw "Missing Windows installer" }
+          if ((Get-Item $Installer).Length -lt 100MB) { throw "Windows installer is unexpectedly small" }
+          if (-not (Select-String -Path "build\windows-x64\app\version.py" -Pattern 'BUILD_PLATFORM = "windows"' -Quiet)) { throw "Wrong build platform" }
+          if (-not (Select-String -Path "build\windows-x64\app\version.py" -Pattern 'BUILD_ARCH = "x86_64"' -Quiet)) { throw "Wrong build architecture" }
+          Get-FileHash $Installer -Algorithm SHA256
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RealtimeSubtitle-windows-x64
+          path: dist/RealtimeSubtitle-${{ needs.metadata.outputs.version }}-windows-x64-setup.exe
+          if-no-files-found: error
+          retention-days: 30
+
   release:
-    needs: [metadata, build]
+    needs: [metadata, build, build-windows]
     if: ${{ github.event_name == 'push' || inputs.publish == true }}
     runs-on: macos-15
     steps:
@@ -135,7 +175,7 @@ jobs:
       - name: Create checksums
         run: |
           cd release-assets
-          shasum -a 256 *.dmg > SHA256SUMS.txt
+          shasum -a 256 *.dmg *.exe > SHA256SUMS.txt
           ls -lh
           cat SHA256SUMS.txt
       - name: Publish GitHub release
@@ -148,23 +188,22 @@ jobs:
           TAG="v${VERSION}"
           TITLE="Realtime Subtitle ${TAG}"
           cat > release-notes.md <<'EOF'
-          Realtime Subtitle 2.10.0 upgrades live captions from sentence-at-a-time output to a measured streaming lifecycle.
+          Realtime Subtitle 2.11.0 adds a first-class Windows application while preserving the streaming caption architecture introduced in 2.10.
 
-          - Partial, Stable and Final states update one caption in place; confirmed prefixes stay monotonic and only final segments enter history.
-          - LocalAgreement-inspired confirmation and semantic endpointing combine VAD, silence, punctuation, incomplete phrases, language, duration and word limits.
-          - Incremental translation sends stable prefixes with provider-aware debounce and source/session revision guards, so late responses cannot overwrite current subtitles.
-          - Balanced hardware budgets cap ASR and translation concurrency; Efficient and Maximum remain explicit alternatives.
-          - Long bilingual captions and narrow session history reflow without horizontal scrolling or clipping.
-          - Playback remains recording-aware and highlights the active line like lyrics; transcript-only sessions do not show misleading playback controls.
-          - A privacy-safe benchmark corpus, 30-minute acoustic workload, sourced architecture review and license matrix are included under `docs/` and `benchmarks/`.
-          - The full release regression suite contains 693 passing tests.
+          - Windows system audio uses native WASAPI loopback; VB-CABLE and playback-device rerouting are no longer required.
+          - The Windows installer includes portable Python, an offline wheelhouse, Whisper Tiny, and Apache-2.0 English↔Simplified Chinese translation models.
+          - Windows translation settings omit Apple-only controls and offer built-in offline translation, LM Studio/local servers, and OpenAI-compatible online APIs.
+          - The floating caption window uses native no-activate tool-window behavior so updates stay above other apps without stealing focus or entering Alt-Tab.
+          - Windows uses Local AppData, Windows playback-device selection, Segoe UI, and hardware-aware sustained performance budgets.
+          - Partial, Stable and Final captions, incremental translation, semantic endpointing, responsive history, lyric-style playback and session export remain shared across platforms.
 
-          Native macOS downloads are provided separately for Apple Silicon and Intel.
+          Downloads:
 
           - `arm64`: Apple M1, M2, M3, M4 and newer Apple Silicon Macs
           - `x86_64`: Intel-based Macs
+          - `windows-x64-setup.exe`: Windows 10/11 x64 installer
 
-          This community build is currently unsigned and not notarized. On first launch, Control-click the app and choose Open if macOS blocks it.
+          These community builds are currently unsigned. On macOS, Control-click and choose Open if Gatekeeper blocks the app. On Windows, verify the published SHA-256 checksum before choosing “Run anyway” in SmartScreen.
 
           See the bilingual README for setup, permissions and privacy details.
           EOF

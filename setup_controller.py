@@ -2,12 +2,21 @@
 """Orchestrator with Popen pip, subprocess model, clean env, real cancel."""
 import os, json, subprocess, sys, time, threading
 from setup_states import SetupStateMachine, SetupStage
+from app_paths import get_app_support_dir, get_setup_state_path, get_venv_dir, get_venv_python
 
-SETUP_FILE = os.path.expanduser("~/Library/Application Support/RealtimeSubtitle/.setup_state.json")
+SETUP_FILE = os.fspath(get_setup_state_path())
 RESOURCES = os.path.dirname(os.path.abspath(__file__))
-APP_SUPPORT = os.path.expanduser("~/Library/Application Support/RealtimeSubtitle")
-VENV_DIR = os.path.join(APP_SUPPORT, "venv")
-VENV_PYTHON = os.path.join(VENV_DIR, "bin", "python3")
+APP_SUPPORT = os.fspath(get_app_support_dir())
+VENV_DIR = os.fspath(get_venv_dir())
+VENV_PYTHON = os.fspath(get_venv_python())
+
+
+def _bundled_python() -> str:
+    return os.path.join(
+        RESOURCES,
+        "python",
+        "python.exe" if os.name == "nt" else "bin/python3",
+    )
 
 def _child_env():
     env = os.environ.copy()
@@ -272,9 +281,11 @@ class SetupController:
     def _step_check_system(self):
         import platform, shutil
         try:
-            assert platform.system()=="Darwin"
-            assert platform.machine() in ("arm64","aarch64")
-            assert os.access(os.path.join(RESOURCES,"python","bin","python3"),os.X_OK)
+            assert platform.system() in {"Darwin", "Windows"}
+            assert platform.machine().lower() in {
+                "arm64", "aarch64", "x86_64", "amd64",
+            }
+            assert os.path.isfile(_bundled_python())
             assert os.path.isfile(os.path.join(RESOURCES,"requirements-core.txt"))
             os.makedirs(APP_SUPPORT,exist_ok=True)
             assert os.access(APP_SUPPORT,os.W_OK)
@@ -287,7 +298,7 @@ class SetupController:
     def _step_create_env(self):
         if os.path.exists(VENV_PYTHON):
             return True
-        bundled = os.path.join(RESOURCES,"python","bin","python3")
+        bundled = _bundled_python()
         return self._run_process([bundled,"-m","venv","--copies",VENV_DIR],timeout=120)
 
     def _step_install_deps(self):
@@ -351,7 +362,7 @@ class SetupController:
         else:
             self._last_error = (
                 "Bundled dependency packages are missing. "
-                "This app bundle is incomplete. Please re-download the DMG."
+                "The installed application is incomplete. Please download the installer again."
             )
             from diagnostic_logger import log_diagnostic
             log_diagnostic("Install dependencies", "Install requirements-core.txt",
@@ -371,7 +382,7 @@ class SetupController:
             pip_error = self._last_error or "unknown"
             self._last_error = (
                 "Could not install bundled dependencies. "
-                "The app bundle may be corrupted. Please re-download the DMG."
+                "The installed application may be corrupted. Please download the installer again."
             )
             from diagnostic_logger import log_diagnostic
             log_diagnostic("Install dependencies", "Install requirements-core.txt",

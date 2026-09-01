@@ -7,7 +7,7 @@ from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication
 
 from single_instance import SingleInstance
-from system_audio_capture import SystemAudioCapture
+from system_audio_capture import MacOSSystemAudioCapture
 
 
 def test_second_instance_notifies_primary(tmp_path):
@@ -55,7 +55,7 @@ def test_system_audio_reads_float_pcm_from_helper(monkeypatch, tmp_path):
     )
     monkeypatch.setattr("system_audio_capture.subprocess.Popen", lambda *a, **k: FakeProcess())
 
-    capture = SystemAudioCapture(sample_rate=16000)
+    capture = MacOSSystemAudioCapture(sample_rate=16000)
     chunks = list(capture.generator())
 
     assert len(chunks) == 1

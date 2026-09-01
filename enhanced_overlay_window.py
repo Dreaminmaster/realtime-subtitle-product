@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QPoint, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont, QColor, QPalette, QAction, QFontDatabase
+import sys
 import time
 
 # macOS: show on all Spaces
@@ -329,6 +330,10 @@ class EnhancedOverlayWindow(QWidget):
         super().showEvent(event)
         if HAS_APPKIT and QApplication.platformName() != "offscreen":
             self._set_all_spaces()
+        elif QApplication.platformName() == "windows":
+            from windows_integration import apply_no_activate_tool_window
+
+            apply_no_activate_tool_window(self)
 
     def _sync_display_mode_flags(self):
         mode = self.subtitle_style.get("display_mode", "bilingual")
@@ -377,7 +382,8 @@ class EnhancedOverlayWindow(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow)
+        if sys.platform == "darwin":
+            self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self.setWindowTitle("")  # prevent macOS title bar text
         self.setObjectName("OverlaySurface")

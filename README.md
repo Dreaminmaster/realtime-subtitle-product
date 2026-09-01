@@ -1,34 +1,40 @@
 <div align="center">
   <img src="assets/icon/realtime-subtitle-icon.png" width="128" alt="Realtime Subtitle icon">
   <h1>Realtime Subtitle</h1>
-  <p><strong>让每一句话，都在你眼前。</strong><br>Private, low-latency live captions and translation for macOS.</p>
+  <p><strong>让每一句话，都在你眼前。</strong><br>Private, low-latency live captions and translation for macOS and Windows.</p>
 </div>
 
 ![Realtime Subtitle Control Center](docs/images/control-center.png)
 
 ## 下载 / Download
 
-当前稳定版：**v2.10.0** · macOS 13 Ventura 或更高版本
+当前稳定版：**v2.11.0** · macOS 13+ / Windows 10 或 11（x64）
 
-Current stable release: **v2.10.0** · macOS 13 Ventura or later
+Current stable release: **v2.11.0** · macOS 13+ / Windows 10 or 11 (x64)
 
-| Mac | 安装包 / Installer | 适用设备 / Hardware |
+| 平台 / Platform | 安装包 / Installer | 适用设备 / Hardware |
 |---|---|---|
-| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.10.0-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
-| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.10.0-macos-x86_64.dmg) | Intel-based Macs |
+| Windows | [下载 Windows x64 安装程序](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.11.0-windows-x64-setup.exe) | Windows 10 / 11 x64 |
+| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.11.0-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
+| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.11.0-macos-x86_64.dmg) | Intel-based Macs |
+| 校验 / Verify | [SHA256SUMS.txt](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/SHA256SUMS.txt) | 三个平台安装包 / all installers |
 
 [查看全部版本 / View all releases](https://github.com/Dreaminmaster/realtime-subtitle-product/releases)
 
-> 当前社区安装包未使用 Apple Developer ID 签名，也未公证。首次启动若被 macOS 拦截，请按住 Control 点击 App，选择“打开”，再确认一次。
+> 当前社区安装包尚未进行商业代码签名。macOS 首次启动若被拦截，请按住 Control 点击 App，选择“打开”；Windows 出现 SmartScreen 时，请先对照 `SHA256SUMS.txt` 校验文件，再选择“仍要运行”。
 >
-> The community builds are currently unsigned and not notarized. If macOS blocks the first launch, Control-click the app, choose **Open**, then confirm.
+> Community builds are currently unsigned. On macOS, Control-click and choose **Open**. On Windows, verify the SHA-256 checksum before choosing **Run anyway** in SmartScreen.
 
 ## 中文说明
 
-Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本机完成；原文会先显示，翻译结果随后异步补全，因此翻译服务变慢时也不会阻塞字幕。
+Realtime Subtitle 是一款 macOS / Windows 实时字幕应用。语音识别默认在本机完成；原文会先显示，翻译结果随后异步补全，因此翻译服务变慢时也不会阻塞字幕。
 
 ### 主要功能
 
+- v2.11.0 新增真正可安装的 Windows x64 版本：自带运行环境、离线依赖、Whisper Tiny 和英中 / 中英基础离线翻译，不要求用户安装 Python。
+- Windows 系统声音使用 WASAPI 回环捕获，可直接选择播放设备，不需要 VB-CABLE，也不会改变系统默认播放路径。
+- Windows 悬浮字幕使用原生 `WS_EX_NOACTIVATE` 工具窗口语义：字幕更新保持置顶但不会抢占当前 App、进入 Alt-Tab 或召回控制中心。
+- Windows 翻译页不会出现 Apple 专属入口；默认可选内置离线英中翻译，也保留 LM Studio、本地服务与在线 API。其他语言可用 LM Studio / API，避免把大体积多语模型强塞进基础安装包。
 - 本地实时语音识别，内置 `faster-whisper tiny` 模型，安装后即可开始。
 - v2.10.0 引入 **草稿 → 稳定 → 最终** 三级流式字幕：草稿尽快出现，连续推理一致的前缀会固定，最终段落才写入历史；同一行原位更新，不因滑动窗口重复、闪烁或抢焦点。
 - LocalAgreement 思路与语义端点共同工作：短停顿、未完成短语和连接词不会立即断句，长讲话仍会受到时长和词数上限约束。
@@ -86,18 +92,17 @@ Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本�
 
 ### 安装与首次使用
 
-1. 根据上表下载与你的 Mac 匹配的 DMG。
-2. 打开 DMG，把 `RealtimeSubtitle.app` 拖入 `Applications`。
-3. 首次启动若出现安全提示，Control-click App → **打开**。
-4. App 会直接进入控制中心；首次使用麦克风或系统声音时，按 macOS 提示授予对应权限。
-5. 打开 **设置**，在 **音频 / 识别 / 翻译** 中完成配置。
-6. 回到 **Live**，点击 **Start Live Subtitles**。
+1. Windows：下载安装程序，核对 SHA-256 后运行；默认安装到当前用户目录，不要求管理员权限。
+2. macOS：下载匹配架构的 DMG，把 App 拖入 `Applications`；若被拦截，Control-click App → **打开**。
+3. App 会直接进入控制中心；首次使用麦克风时，按系统提示授予权限。
+4. 打开 **设置**，在 **音频 / 识别 / 翻译** 中完成配置。
+5. 回到 **Live**，点击 **Start Live Subtitles**。
 
 首次启动会在用户目录创建独立运行环境，所需核心依赖和默认模型已包含在 App 中。这个过程通常需要一两分钟，不会修改系统 Python。
 
 ### 系统声音
 
-在 **音频 → 输入来源** 选择 **系统声音（内置）**，即可给视频、会议或浏览器内容加字幕。App 使用 macOS ScreenCaptureKit 只读取音频，不保存屏幕画面，也不需要 BlackHole。
+在 **音频 → 输入来源** 选择 **系统声音（内置）**，即可给视频、会议或浏览器内容加字幕。macOS 使用 ScreenCaptureKit，只读取音频且不保存屏幕画面；Windows 使用 WASAPI loopback，并可选择具体播放设备。两者都不需要虚拟声卡。
 
 首次使用时，macOS 会要求“屏幕与系统音频录制”权限。授权后请完全退出并重新打开 Realtime Subtitle，然后再开始字幕。
 
@@ -115,7 +120,7 @@ Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本�
 `agnes-2.0-flash`；也可以切换为自定义 OpenAI-compatible 服务。选择 **LM Studio / 本地服务** 会使用
 `http://127.0.0.1:1234/v1`。缺失的协议和本地 `/v1` 路径会自动补全。API Key 不会写入仓库，只在你保存设置后进入本机用户配置。
 
-**已下载的离线模型**目前提供轻量英中与中英语言对，单个约 153 MB，使用 Apache-2.0 模型并完全在 CPU 上运行。它们不会进入安装包，只会在点击下载后保存在用户目录。轻量模型适合隐私和断网场景；对自然度要求更高时，建议使用 Apple Translation、在线 API，或在 LM Studio 中加载更强的本地模型。
+**离线模型**目前提供轻量英中与中英语言对，单个约 153 MB，使用 Apache-2.0 模型并完全在 CPU 上运行。Windows 安装包已内置这两个方向；macOS 可在翻译页按需下载。轻量模型适合隐私和断网场景；对自然度或其他语言有更高要求时，建议使用 Apple Translation（macOS）、在线 API，或在 LM Studio 中加载更强的本地模型。
 
 连接测试结果只对当前服务、API Key、地址、模型和“翻译成”语言有效。切换服务或修改任一字段后，旧的成功状态会立即变为“尚未测试当前设置”；旧请求稍后返回也不会覆盖新状态。
 
@@ -141,6 +146,8 @@ Realtime Subtitle 是一款 macOS 实时字幕应用。语音识别默认在本�
 | 离线翻译模型 | `~/Library/Application Support/RealtimeSubtitle/translation_models` |
 | 手动保存的字幕 | `~/Documents/Realtime Subtitle/Transcripts` |
 
+Windows 的设置、运行环境、日志、会话和模型位于 `%LOCALAPPDATA%\RealtimeSubtitle`，手动导出的字幕位于 `%USERPROFILE%\Documents\Realtime Subtitle\Transcripts`。
+
 API Key 保存在本机配置文件中。共享诊断信息前，请先检查其中是否包含设备名称、路径或服务地址。
 
 ### 权限排查
@@ -154,10 +161,14 @@ API Key 保存在本机配置文件中。共享诊断信息前，请先检查其
 
 ## English
 
-Realtime Subtitle is a native-feeling macOS control center with an always-on-top caption overlay. Speech recognition runs locally by default. Original text appears immediately, while optional translation is scheduled asynchronously so a slow provider does not stall captions.
+Realtime Subtitle is a native-feeling macOS and Windows control center with an always-on-top caption overlay. Speech recognition runs locally by default. Original text appears immediately, while optional translation is scheduled asynchronously so a slow provider does not stall captions.
 
 ### Highlights
 
+- v2.11.0 ships a real Windows x64 installer with portable Python, an offline wheelhouse, Whisper Tiny, and built-in Apache-2.0 English↔Simplified Chinese translation models.
+- Windows system audio uses WASAPI loopback with selectable playback endpoints. It requires no VB-CABLE and does not reroute normal playback.
+- The Windows overlay combines Qt's no-focus flag with native `WS_EX_NOACTIVATE` / `WS_EX_TOOLWINDOW` behavior, keeping captions visible without stealing focus or entering Alt-Tab.
+- Apple-only translation controls are absent on Windows. Built-in offline translation, LM Studio/local servers, and OpenAI-compatible online providers are presented as platform-appropriate choices.
 - Local live transcription with a bundled `faster-whisper tiny` model.
 - v2.10.0 introduces a real **Partial → Stable → Final** caption lifecycle. Drafts arrive early, repeated agreement locks a monotonic prefix, and only finalized segments enter history; the same row changes in place without focus activation or animated flicker.
 - LocalAgreement-inspired confirmation works with semantic endpointing so a short pause or unfinished phrase does not automatically become a new caption, while duration and word limits still bound long speech.
@@ -211,18 +222,17 @@ Realtime Subtitle is a native-feeling macOS control center with an always-on-top
 
 ### Install and start
 
-1. Download the DMG matching your Mac from the table above.
-2. Open it and drag `RealtimeSubtitle.app` to `Applications`.
-3. If Gatekeeper blocks the unsigned build, Control-click the app and choose **Open**.
-4. The control center opens immediately; grant microphone or Screen & System Audio Recording access when first requested.
-5. Open **Settings** and configure **Audio**, **Recognition**, and **Translation**.
-6. Return to **Live** and click **Start Live Subtitles**.
+1. Windows: download the x64 setup EXE, verify its SHA-256, and install it for the current user; no administrator access or Python installation is required.
+2. macOS: download the matching DMG, drag the app to Applications, then Control-click **Open** if Gatekeeper blocks it.
+3. Grant the microphone permission requested by the operating system.
+4. Open **Settings** and configure **Audio**, **Recognition**, and **Translation**.
+5. Return to **Live** and click **Start Live Subtitles**.
 
 On first launch the app creates an isolated runtime under your user account. Core dependencies and the default model are bundled, and the system Python installation is not modified.
 
 ### System audio
 
-Choose **System audio (built in)** under **Audio → Input Source** to caption meetings, browsers, or media players. Realtime Subtitle uses macOS ScreenCaptureKit and does not require BlackHole or a Multi-Output Device. The app consumes audio samples only; it does not save screen video.
+Choose **System audio (built in)** under **Audio → Input Source** to caption meetings, browsers, or media players. macOS uses ScreenCaptureKit; Windows uses native WASAPI loopback and lets you select a playback endpoint. Neither path requires a virtual audio cable.
 
 macOS asks for **Screen & System Audio Recording** permission the first time. After allowing Realtime Subtitle, quit it completely and reopen it before starting captions again.
 
@@ -238,7 +248,7 @@ Missing schemes and the local `/v1` path are normalized automatically.
 Credentials are never committed to this repository; saving them writes only to
 the current user's local configuration.
 
-The optional downloaded offline provider currently offers compact English↔Chinese models (about 153 MB per direction). They run entirely on CPU, stay outside the app bundle, and can be removed from Translation at any time. For the most natural output, prefer Apple Translation, a capable online API, or a stronger model served by LM Studio.
+The offline provider offers compact English↔Chinese models (about 153 MB per direction). They are bundled in the Windows installer and optional downloads on macOS, run entirely on CPU, and keep text on the device. For other languages or more natural output, use Apple Translation on supported macOS versions, a capable online API, or a stronger model served by LM Studio.
 
 Connection results are scoped to the exact provider, credential, endpoint,
 model, and target language. Editing any of them immediately invalidates the old
@@ -289,20 +299,24 @@ Build a native DMG on a matching Mac:
 
 ```bash
 # Apple Silicon host
-bash build_dmg.sh 2.10.0 arm64
+bash build_dmg.sh 2.11.0 arm64
 
 # Intel host, or Apple Silicon with Rosetta installed
-bash build_dmg.sh 2.10.0 x86_64
+bash build_dmg.sh 2.11.0 x86_64
+
+# Windows x64 PowerShell (requires Inno Setup 6)
+.\build_windows.ps1 -Version 2.11.0
 ```
 
 Outputs:
 
 ```text
-dist/RealtimeSubtitle-2.10.0-macos-arm64.dmg
-dist/RealtimeSubtitle-2.10.0-macos-x86_64.dmg
+dist/RealtimeSubtitle-2.11.0-macos-arm64.dmg
+dist/RealtimeSubtitle-2.11.0-macos-x86_64.dmg
+dist/RealtimeSubtitle-2.11.0-windows-x64-setup.exe
 ```
 
-The GitHub Actions release workflow builds `arm64` on an Apple Silicon runner and `x86_64` on an Intel runner, verifies the embedded architecture and app icon, creates SHA-256 checksums, and publishes both DMGs to one release.
+The GitHub Actions release workflow builds macOS `arm64`, macOS `x86_64`, and Windows `x64` on native runners, verifies each artifact, creates one SHA-256 manifest, and publishes all installers to one release.
 
 ## 项目结构 / Architecture
 
@@ -325,12 +339,13 @@ Control Center
 
 - The public community builds are unsigned and not notarized.
 - System-audio capture requires macOS 13 or later and the user's Screen & System Audio Recording permission.
+- Windows system audio requires a shared-mode playback endpoint; an app holding the device in exclusive mode cannot be captured.
 - Intel recognition is supported but generally slower than Apple Silicon.
 - Enhanced accuracy runs a second local CPU pass and can use substantially more memory; its Fast/Balanced/Accurate models are optional downloads.
-- The current product targets macOS only.
+- Windows v2.11.0 is x64 only. Windows ARM64 is not advertised until the full native dependency stack passes CI and device testing.
 - MLX Whisper is optional and Apple Silicon-only; the packaged default uses `faster-whisper` for both architectures.
 - Apple Translation inside Realtime Subtitle requires macOS 26 or later; older supported macOS versions can use local LM Studio or an online/custom provider.
-- The compact downloaded English↔Chinese models prioritize privacy and size over the fluency of Apple Translation or larger API/LM Studio models.
+- The compact English↔Chinese models (bundled on Windows, optional on macOS) prioritize privacy and size over the fluency of Apple Translation or larger API/LM Studio models.
 - Apple Translation readiness is language-pair specific. The native helper may be present while the selected system language assets are unavailable; use the in-app connection test and install guide.
 
 ## License and acknowledgements

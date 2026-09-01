@@ -10,10 +10,56 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import json
 import os
-import resource
 import sys
 import threading
 import time
+
+try:
+    import resource
+except ImportError:  # Windows does not provide the POSIX resource module.
+    resource = None
+
+
+def _process_peak_rss_mb() -> float:
+    """Return peak resident memory without adding a runtime dependency."""
+
+    if resource is not None:
+        max_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        # macOS reports bytes; Linux and the other POSIX builds report KiB.
+        return max_rss / (1024 * 1024) if sys.platform == "darwin" else max_rss / 1024
+
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+                _fields_ = [
+                    ("cb", wintypes.DWORD),
+                    ("PageFaultCount", wintypes.DWORD),
+                    ("PeakWorkingSetSize", ctypes.c_size_t),
+                    ("WorkingSetSize", ctypes.c_size_t),
+                    ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                    ("PagefileUsage", ctypes.c_size_t),
+                    ("PeakPagefileUsage", ctypes.c_size_t),
+                ]
+
+            counters = PROCESS_MEMORY_COUNTERS()
+            counters.cb = ctypes.sizeof(counters)
+            handle = ctypes.windll.kernel32.GetCurrentProcess()
+            ok = ctypes.windll.psapi.GetProcessMemoryInfo(
+                handle,
+                ctypes.byref(counters),
+                counters.cb,
+            )
+            if ok:
+                return counters.PeakWorkingSetSize / (1024 * 1024)
+        except (AttributeError, OSError):
+            pass
+    return 0.0
 
 
 def _percentile(values: list[float], percentile: float) -> float | None:
@@ -114,16 +160,13 @@ class RuntimeMetrics:
         with self._lock:
             wall = max(0.001, self.clock() - self._started) if self._started else 0.0
             cpu = max(0.0, time.process_time() - self._started_cpu) if self._started else 0.0
-            max_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-            # macOS reports bytes; Linux reports KiB.
-            rss_mb = max_rss / (1024 * 1024) if sys.platform == "darwin" else max_rss / 1024
             return {
                 "profile": self.profile,
                 "backend": self.backend,
                 "model": self.model,
                 "wall_seconds": round(wall, 3),
                 "process_cpu_percent": round((cpu / wall) * 100, 2) if wall else 0.0,
-                "max_rss_mb": round(rss_mb, 2),
+                "max_rss_mb": round(_process_peak_rss_mb(), 2),
                 "segments": len(self._segments),
                 "first_partial_ms_p50": self._ms(_percentile(self._partial_latency, 0.50)),
                 "first_stable_ms_p50": self._ms(_percentile(self._stable_latency, 0.50)),

@@ -123,6 +123,7 @@ class Config:
         self.input_source = self._get("audio", "input_source", "microphone").lower()
         if self.input_source not in ("microphone", "system_audio"):
             self.input_source = "microphone"
+        self.system_output_device = self._get("audio", "system_output_device", "")
         self.sample_rate = self._getint("audio", "sample_rate", 16000)
         self.silence_threshold = self._getfloat("audio", "silence_threshold", 0.01)
         self.silence_duration = self._getfloat("audio", "silence_duration", 1.0)
@@ -132,7 +133,7 @@ class Config:
         self.chunk_duration = self._getfloat("audio", "chunk_duration", 0.5)
         
         # Device index applies only to microphone capture. System audio uses
-        # native ScreenCaptureKit and needs no virtual audio device.
+        # the native ScreenCaptureKit or WASAPI loopback backend.
         device_idx_str = self._get("audio", "device_index", "auto")
         if device_idx_str.isdigit():
             self.device_index = int(device_idx_str)

@@ -24,6 +24,14 @@ def _prepare_environment() -> Path:
     state_dir = Path(tempfile.mkdtemp(prefix="realtime-subtitle-ui-"))
     os.environ.setdefault("REALTIME_SUBTITLE_APP_SUPPORT_DIR", str(state_dir))
     os.environ.setdefault("REALTIME_SUBTITLE_CONFIG_PATH", str(state_dir / "config.ini"))
+    if os.getenv("REALTIME_SUBTITLE_PLATFORM") == "Windows":
+        resources = state_dir / "resources"
+        for model_id in ("opus-en-zh", "opus-zh-en"):
+            model = resources / "models" / "translation" / model_id
+            model.mkdir(parents=True, exist_ok=True)
+            for name in ("model.bin", "source.spm", "target.spm"):
+                (model / name).write_bytes(b"ui-review")
+        os.environ.setdefault("REALTIME_SUBTITLE_RESOURCES_DIR", str(resources))
     return state_dir
 
 
@@ -71,12 +79,18 @@ def main() -> int:
     dashboard.grab().save(str(args.output / "04-enhanced-recognition.png"))
 
     dashboard.tabs.showRoute("Settings", "Translation")
+    native_mode = "offline" if os.getenv("REALTIME_SUBTITLE_PLATFORM") == "Windows" else "fast"
     dashboard.translation_mode.setCurrentIndex(
-        dashboard.translation_mode.findData("fast")
+        dashboard.translation_mode.findData(native_mode)
     )
-    dashboard.target_lang.setCurrentIndex(dashboard.target_lang.findData("English"))
+    dashboard.target_lang.setCurrentIndex(
+        dashboard.target_lang.findData("Chinese" if native_mode == "offline" else "English")
+    )
     app.processEvents()
-    dashboard.grab().save(str(args.output / "04a-apple-translation.png"))
+    dashboard.grab().save(str(args.output / (
+        "04a-windows-translation.png" if native_mode == "offline"
+        else "04a-apple-translation.png"
+    )))
     dashboard.target_lang.showPopup()
     app.processEvents()
     dashboard.target_lang._popup.grab().save(str(args.output / "04b-target-language-popup.png"))

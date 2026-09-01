@@ -32,7 +32,7 @@ def resolve_hardware_runtime_plan(
     memory_gb: float | None = None,
     cpu_count: int | None = None,
 ) -> HardwareRuntimePlan:
-    """Resolve conservative sustained-inference budgets for one Mac."""
+    """Resolve conservative sustained-inference budgets for one desktop."""
     normalized = str(profile or "balanced").lower()
     if normalized not in RuntimePerformancePolicy.PROFILES:
         normalized = "balanced"
@@ -66,8 +66,8 @@ def resolve_hardware_runtime_plan(
         cpu_count=cores,
         cpu_threads=threads,
         num_workers=workers,
-        # CTranslate2's portable macOS packages use CPU int8. MLX remains a
-        # separate Apple-Silicon backend selected by the user.
+        # The portable desktop packages use CPU int8. MLX remains a separate
+        # Apple-Silicon backend selected by the user.
         compute_type="int8",
         partial_window_seconds=window,
     )

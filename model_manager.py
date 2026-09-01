@@ -6,7 +6,7 @@ Supports:
   - mlx-whisper models (via huggingface hub)
   - FunASR models (via modelscope)
 
-Models are stored in ~/Library/Application Support/RealtimeSubtitle/models/
+Models are stored in the platform's per-user application-data directory.
 """
 
 import os
@@ -142,13 +142,9 @@ class ModelManager:
     
     def __init__(self, data_dir=None):
         if data_dir is None:
-            data_dir = os.path.join(
-                os.path.expanduser("~"),
-                "Library",
-                "Application Support",
-                "RealtimeSubtitle",
-                "models"
-            )
+            from app_paths import get_app_support_dir
+
+            data_dir = get_app_support_dir() / "models"
         
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -190,7 +186,7 @@ class ModelManager:
     def _user_model_dir(self, model_id: str, backend: str = "whisper") -> str:
         """Path to user model directory under data dir.
         
-        Example: ~/Library/Application Support/RealtimeSubtitle/models/whisper/tiny
+        Example: <app-data>/RealtimeSubtitle/models/whisper/tiny
         (self.data_dir already ends in 'models/', so we append backend/model_id directly.)
         """
         return os.path.join(str(self.data_dir), backend, model_id)
@@ -205,10 +201,9 @@ class ModelManager:
         This is the model shipped inside the DMG — ready-only, never modified.
         """
         if resources_dir is None:
-            # Best-effort fallback for development
-            import __main__
-            main_dir = os.path.dirname(os.path.abspath(getattr(__main__, '__file__', __file__)))
-            resources_dir = os.path.join(main_dir, "Resources")
+            from platform_support import bundled_resources_dir
+
+            resources_dir = os.fspath(bundled_resources_dir())
         return os.path.join(resources_dir, "models", backend, model_id)
     
     def get_model_path(self, model_id, backend="whisper"):

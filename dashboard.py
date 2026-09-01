@@ -20,6 +20,9 @@ from ui_components import (
     ThemedComboBox,
 )
 from session_history_player import SessionHistoryPlayer
+from platform_support import current_platform
+
+PLATFORM = current_platform()
 
 # Use one popup implementation everywhere so menus cannot revert to the
 # unreadable native light palette or clip long provider/model names.
@@ -46,7 +49,7 @@ STYLESHEET = """
 QWidget {
     background-color: #171716;
     color: #ece9e2;
-    font-family: -apple-system, 'Helvetica Neue', Arial;
+    font-family: 'Segoe UI Variable', 'Segoe UI', -apple-system, 'Helvetica Neue', Arial;
     font-size: 13px;
 }
 QFrame#Sidebar { background: #1e1e1c; border-right: 1px solid #34332f; }
@@ -359,7 +362,7 @@ class Dashboard(QWidget):
         prompt = QLabel("Ready when you are")
         prompt.setStyleSheet("font-size: 21px; font-weight: 700; color: #f4f0e7;")
         hero_layout.addWidget(prompt)
-        explanation = QLabel("Audio remains on this Mac. Saved sessions can keep a transcript and an optional recording.")
+        explanation = QLabel("Audio stays on this device. Saved sessions can keep a transcript and an optional recording.")
         explanation.setObjectName("Muted")
         explanation.setWordWrap(True)
         hero_layout.addWidget(explanation)
@@ -402,7 +405,7 @@ class Dashboard(QWidget):
         )
         self.session_mode_combo.setCurrentIndex(max(0, self.session_mode_combo.findData(configured_choice)))
         self.session_mode_combo.setToolTip(
-            "Choose exactly what remains on this Mac after the session."
+            "Choose exactly what remains on this device after the session."
         )
         self.session_mode_combo.currentIndexChanged.connect(self._on_session_mode_changed)
         hero_layout.addWidget(self.session_mode_combo)
@@ -507,7 +510,7 @@ class Dashboard(QWidget):
         messages = {
             "temporary": "Temporary captions leave no transcript or recording.",
             "saved_text": "Saves subtitles only. This session will not have audio playback.",
-            "saved_recording": "Saves subtitles and a playable recording locally on this Mac.",
+            "saved_recording": "Saves subtitles and a playable recording locally on this device.",
         }
         self._set_localized_text(self.record_audio_hint, messages.get(choice, messages["temporary"]))
 
@@ -537,7 +540,7 @@ class Dashboard(QWidget):
         title_row.addWidget(self.history_delete_btn)
         root.addLayout(title_row)
 
-        hint = QLabel("Saved sessions stay only on this Mac. Choose Temporary on Live for a session that leaves no history.")
+        hint = QLabel("Saved sessions stay only on this device. Choose Temporary on Live for a session that leaves no history.")
         hint.setObjectName("Muted")
         hint.setWordWrap(True)
         root.addWidget(hint)
@@ -772,55 +775,67 @@ class Dashboard(QWidget):
         layout.addWidget(self.input_source_combo, 0, 1, 1, 2)
 
         self.system_audio_hint = QLabel(
-            "Uses macOS ScreenCaptureKit. No BlackHole or virtual audio device is required."
+            (
+                "Uses Windows WASAPI loopback. No virtual cable or playback-device change is required."
+                if PLATFORM.is_windows else
+                "Uses macOS ScreenCaptureKit. No BlackHole or virtual audio device is required."
+            )
         )
         self.system_audio_hint.setObjectName("Muted")
         self.system_audio_hint.setWordWrap(True)
         layout.addWidget(self.system_audio_hint, 1, 1, 1, 2)
 
-        # Device Selection
+        self.system_output_label = QLabel("Playback device:")
+        layout.addWidget(self.system_output_label, 2, 0)
+        self.system_output_combo = QComboBox()
+        self.system_output_combo.setMaximumWidth(620)
+        self.system_output_combo.addItem("Default Windows output", "")
+        self._populate_system_output_devices()
+        layout.addWidget(self.system_output_combo, 2, 1, 1, 2)
+
+        # Microphone device selection
         self.device_label = QLabel("Input Device:")
-        layout.addWidget(self.device_label, 2, 0)
+        layout.addWidget(self.device_label, 3, 0)
         self.device_combo = QComboBox()
         self.device_combo.setMaximumWidth(620)
         self.populate_devices()
-        layout.addWidget(self.device_combo, 2, 1)
+        layout.addWidget(self.device_combo, 3, 1)
         
         # Refresh Button
         self.audio_refresh_btn = QPushButton("Refresh")
         self.audio_refresh_btn.setObjectName("SecondaryButton")
         self.audio_refresh_btn.setFixedWidth(90)
         self.audio_refresh_btn.clicked.connect(self.populate_devices)
-        layout.addWidget(self.audio_refresh_btn, 2, 2)
+        layout.addWidget(self.audio_refresh_btn, 3, 2)
         
         # Sample Rate
-        layout.addWidget(QLabel("Sample Rate:"), 3, 0)
+        layout.addWidget(QLabel("Sample Rate:"), 4, 0)
         self.sample_rate = QSpinBox()
         self.sample_rate.setMaximumWidth(260)
         self.sample_rate.setRange(8000, 48000)
         self.sample_rate.setValue(config.sample_rate)
-        layout.addWidget(self.sample_rate, 3, 1)
+        layout.addWidget(self.sample_rate, 4, 1)
 
         # Silence Threshold
-        layout.addWidget(QLabel("Silence Threshold:"), 4, 0)
+        layout.addWidget(QLabel("Silence Threshold:"), 5, 0)
         self.silence_thresh = QDoubleSpinBox()
         self.silence_thresh.setMaximumWidth(260)
         self.silence_thresh.setRange(0.001, 1.0)
         self.silence_thresh.setSingleStep(0.001)
         self.silence_thresh.setDecimals(3)
         self.silence_thresh.setValue(config.silence_threshold)
-        layout.addWidget(self.silence_thresh, 4, 1)
+        layout.addWidget(self.silence_thresh, 5, 1)
         
-        layout.addWidget(QLabel("Silence Duration (s):"), 5, 0)
+        layout.addWidget(QLabel("Silence Duration (s):"), 6, 0)
         self.silence_dur = QDoubleSpinBox()
         self.silence_dur.setRange(0.4, 2.0)
         self.silence_dur.setSingleStep(0.1)
         self.silence_dur.setDecimals(1)
         self.silence_dur.setMaximumWidth(260)
         self.silence_dur.setValue(config.silence_duration)
-        layout.addWidget(self.silence_dur, 5, 1)
+        layout.addWidget(self.silence_dur, 6, 1)
 
-        layout.addWidget(QLabel("Noise filtering:"), 6, 0)
+        layout.addWidget(QLabel("Noise filtering:"), 7, 0)
         self.noise_gate_mode = SegmentedControl()
         self.noise_gate_mode.addItem("Off", "off")
         self.noise_gate_mode.addItem("Balanced", "balanced")
@@ -832,9 +847,9 @@ class Dashboard(QWidget):
         self.noise_gate_mode.setToolTip(
             "Adaptive filtering ignores steady room noise without changing the recorded audio. Balanced is recommended."
         )
-        layout.addWidget(self.noise_gate_mode, 6, 1, 1, 2)
+        layout.addWidget(self.noise_gate_mode, 7, 1, 1, 2)
         
-        layout.setRowStretch(7, 1)
+        layout.setRowStretch(8, 1)
         
         outer = QHBoxLayout(tab)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -850,6 +865,23 @@ class Dashboard(QWidget):
         self.device_combo.setEnabled(not system_audio)
         self.audio_refresh_btn.setEnabled(not system_audio)
         self.system_audio_hint.setVisible(system_audio)
+        windows_output = system_audio and PLATFORM.is_windows
+        self.system_output_label.setVisible(windows_output)
+        self.system_output_combo.setVisible(windows_output)
+
+    def _populate_system_output_devices(self):
+        if not PLATFORM.is_windows:
+            return
+        try:
+            from windows_system_audio import WindowsSystemAudioCapture
+
+            current = getattr(config, "system_output_device", "")
+            for device_id, name in WindowsSystemAudioCapture.output_devices():
+                self.system_output_combo.addItem(name, device_id)
+            index = self.system_output_combo.findData(current)
+            self.system_output_combo.setCurrentIndex(max(0, index))
+        except Exception:
+            self.system_output_combo.setCurrentIndex(0)
 
     def init_device_manager_tab(self):
         """Audio Device Manager - Create/Manage Multi-Output Devices"""
@@ -1317,7 +1349,7 @@ class Dashboard(QWidget):
         )
         layout.addRow("Runtime performance:", self.performance_profile)
         performance_hint = QLabel(
-            "Balanced is recommended. Efficient lowers heat; High accuracy is intended for faster or externally cooled Macs and still requires an optional refinement model."
+            "Balanced is recommended. Efficient lowers heat; High accuracy is intended for faster or externally cooled computers and still requires an optional refinement model."
         )
         performance_hint.setObjectName("Muted")
         performance_hint.setWordWrap(True)
@@ -1452,7 +1484,7 @@ class Dashboard(QWidget):
         if normalized.startswith(("tiny", "base")):
             source = (
                 "Tiny/Base prioritizes speed and often splits or mishears natural speech. "
-                "Use Small for everyday accuracy or Turbo on a capable Mac."
+                "Use Small for everyday accuracy or Turbo on a capable computer."
             )
             self.recognition_quality_hint.setStyleSheet("color: #e9a36f; font-size: 12px;")
             self.open_recognition_models_btn.show()
@@ -1487,11 +1519,13 @@ class Dashboard(QWidget):
             return
         if self.ui_language == "zh-Hans":
             state = "已安装" if installed else ("正在下载" if downloading else "需要下载")
-            hardware_label = (
-                f"Apple Silicon · {hardware.memory_gb:.0f} GB 内存"
-                if hardware.apple_silicon else
-                f"Intel / 兼容架构 · {hardware.memory_gb:.0f} GB 内存"
-            )
+            if hardware.apple_silicon:
+                hardware_family = "Apple Silicon"
+            elif PLATFORM.is_windows:
+                hardware_family = "Windows ARM64" if hardware.machine in {"arm64", "aarch64"} else "Windows x64"
+            else:
+                hardware_family = "Intel Mac"
+            hardware_label = f"{hardware_family} · {hardware.memory_gb:.0f} GB 内存"
             text = (
                 f"检测到 {hardware_label} · 推荐 {plan.model_id}（{plan.size_label}）· {state}。"
                 "字幕会立即开始；增强模型在后台加载，并且只修正最新一句。"
@@ -1607,14 +1641,21 @@ class Dashboard(QWidget):
 
         self.translation_mode = ProviderSelector()
         self.translation_mode.addItem("No translation", "off")
-        self.translation_mode.addItem("Apple Translation", "fast")
-        self.translation_mode.addItem("Downloaded offline model", "offline")
+        if PLATFORM.supports_apple_translation:
+            self.translation_mode.addItem("Apple Translation", "fast")
+        self.translation_mode.addItem(
+            "Built-in offline translation" if PLATFORM.is_windows
+            else "Downloaded offline model",
+            "offline",
+        )
         self.translation_mode.addItem("LM Studio / local server", "local")
         self.translation_mode.addItem("Online API", "api")
         selected_provider = (
             "api" if config.translation_mode in {"online", "custom"}
             else config.translation_mode
         )
+        if selected_provider == "fast" and not PLATFORM.supports_apple_translation:
+            selected_provider = "offline"
         mode_index = self.translation_mode.findData(selected_provider)
         self.translation_mode.setCurrentIndex(max(0, mode_index))
         self.translation_mode.currentIndexChanged.connect(self._on_provider_changed)
@@ -1852,16 +1893,28 @@ class Dashboard(QWidget):
         model_id = self.offline_translation_model.currentData() or ""
         item = translation_model_manager.model(str(model_id))
         installed = bool(item and translation_model_manager.is_downloaded(str(model_id)))
+        bundled = bool(item and translation_model_manager.is_bundled(str(model_id)))
         zh = self.ui_language == "zh-Hans"
-        self.offline_translation_model_action.setText(
-            ("删除" if zh else "Delete") if installed
-            else ("下载" if zh else "Download")
-        )
+        if bundled:
+            self.offline_translation_model_action.setText("内置" if zh else "Built in")
+        else:
+            self.offline_translation_model_action.setText(
+                ("删除" if zh else "Delete") if installed
+                else ("下载" if zh else "Download")
+            )
         if item is None:
             status = (
-                "当前语言组合暂无轻量离线模型，请使用 Apple 翻译、LM Studio 或在线 API"
+                ("当前语言组合暂无内置模型，请使用 LM Studio 或在线 API" if PLATFORM.is_windows
+                 else "当前语言组合暂无轻量离线模型，请使用 Apple 翻译、LM Studio 或在线 API")
                 if zh else
-                "No compact offline model for this pair; use Apple Translation, LM Studio, or Online API"
+                ("No built-in model for this pair; use LM Studio or Online API" if PLATFORM.is_windows
+                 else "No compact offline model for this pair; use Apple Translation, LM Studio, or Online API")
+            )
+        elif bundled:
+            status = (
+                f"随 Windows 版内置 · {item.title} · 完全离线 · {item.license}"
+                if zh else
+                f"Included with Windows · {item.title} · fully offline · {item.license}"
             )
         elif installed:
             status = (
@@ -1883,13 +1936,17 @@ class Dashboard(QWidget):
             )
         self.offline_translation_model_status.setText(status)
         self.offline_translation_model_action.setEnabled(
-            item is not None and self._effective_translation_mode() == "offline"
+            item is not None and not bundled
+            and self._effective_translation_mode() == "offline"
         )
 
     def _toggle_offline_translation_model(self):
         from translation_model_manager import translation_model_manager
         model_id = str(self.offline_translation_model.currentData() or "")
         if not model_id:
+            return
+        if translation_model_manager.is_bundled(model_id):
+            self._refresh_offline_translation_model_ui()
             return
         if translation_model_manager.is_downloaded(model_id):
             translation_model_manager.delete_model(model_id)
@@ -2010,6 +2067,8 @@ class Dashboard(QWidget):
             )
         
     def update_translation_mode_label(self, *_):
+        from translation_model_manager import translation_model_manager
+
         provider = self.translation_mode.currentData() or "off"
         mode = self._effective_translation_mode()
         endpoint_mode = mode in {"online", "local", "custom"}
@@ -2028,7 +2087,11 @@ class Dashboard(QWidget):
         self.refresh_models_btn.setEnabled(endpoint_mode)
         self.offline_translation_model.setEnabled(mode == "offline")
         self.offline_translation_model_action.setEnabled(
-            mode == "offline" and self.offline_translation_model.currentData() is not None
+            mode == "offline"
+            and self.offline_translation_model.currentData() is not None
+            and not translation_model_manager.is_bundled(
+                str(self.offline_translation_model.currentData() or "")
+            )
         )
         self.target_lang.setEnabled(mode != "off")
         self.test_trans_btn.setEnabled(mode != "off")
@@ -2052,7 +2115,6 @@ class Dashboard(QWidget):
                 else "Translation: Apple on-device · macOS 26 and installed language assets required"
             )
         elif mode == "offline":
-            from translation_model_manager import translation_model_manager
             model_id = str(self.offline_translation_model.currentData() or "")
             item = translation_model_manager.model(model_id)
             installed = translation_model_manager.is_downloaded(model_id)
@@ -2973,7 +3035,7 @@ class Dashboard(QWidget):
         except ImportError:
             version_text = "Development"
         about_layout.addWidget(QLabel(f"Realtime Subtitle · {version_text}"))
-        privacy_note = QLabel("Audio and settings stay on this Mac.")
+        privacy_note = QLabel("Audio and settings stay on this device.")
         privacy_note.setObjectName("Muted")
         about_layout.addWidget(privacy_note)
         layout.addWidget(about_card)
@@ -3155,7 +3217,9 @@ class Dashboard(QWidget):
         except ImportError:
             report += f"\n\nApp: dev build"
         
-        log_dir = os.path.expanduser("~/Library/Logs/RealtimeSubtitle")
+        from app_paths import get_log_dir
+
+        log_dir = os.fspath(get_log_dir())
         report += f"\nLogs: {log_dir}"
         
         # Pipeline state
@@ -3237,6 +3301,10 @@ class Dashboard(QWidget):
         idx = self.device_combo.currentData()
         input_source = str(self.input_source_combo.currentData() or "microphone")
         cp.set("audio", "input_source", input_source)
+        cp.set(
+            "audio", "system_output_device",
+            str(self.system_output_combo.currentData() or ""),
+        )
         cp.set("audio", "device_index", str(idx) if idx is not None else "auto")
         cp.set("audio", "sample_rate", str(self.sample_rate.value()))
         cp.set("audio", "silence_threshold", str(self.silence_thresh.value()))
@@ -3306,6 +3374,7 @@ class Dashboard(QWidget):
         # with stale provider/model values after a successful connection test.
         config.device_index = idx
         config.input_source = input_source
+        config.system_output_device = str(self.system_output_combo.currentData() or "")
         config.sample_rate = self.sample_rate.value()
         config.silence_threshold = self.silence_thresh.value()
         config.silence_duration = self.silence_dur.value()
@@ -3369,9 +3438,13 @@ class Dashboard(QWidget):
                     self,
                     "离线翻译不可用" if self.ui_language == "zh-Hans" else "Offline translation unavailable",
                     (
-                        "当前说话语言和译入语言没有可下载的轻量模型，请改用 Apple 翻译、LM Studio 或在线 API。"
+                        ("当前说话语言和译入语言没有内置模型，请改用 LM Studio 或在线 API。"
+                         if PLATFORM.is_windows else
+                         "当前说话语言和译入语言没有可下载的轻量模型，请改用 Apple 翻译、LM Studio 或在线 API。")
                         if self.ui_language == "zh-Hans" else
-                        "No compact model is available for this language pair. Choose Apple Translation, LM Studio, or Online API."
+                        ("No built-in model is available for this language pair. Choose LM Studio or Online API."
+                         if PLATFORM.is_windows else
+                         "No compact model is available for this language pair. Choose Apple Translation, LM Studio, or Online API.")
                     ),
                 )
                 self.tabs.showRoute("Settings", "Translation")

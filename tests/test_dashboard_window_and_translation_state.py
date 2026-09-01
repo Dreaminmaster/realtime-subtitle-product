@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import QApplication
 
 from dashboard import Dashboard
 from enhanced_overlay_window import EnhancedOverlayWindow
+from platform_support import current_platform
 
 
 @pytest.fixture(scope="module")
@@ -65,7 +66,11 @@ def test_offline_translation_does_not_offer_wrong_language_pair(app):
     dashboard.target_lang.setCurrentIndex(dashboard.target_lang.findData("Japanese"))
     assert dashboard.offline_translation_model.currentIndex() == -1
     assert dashboard.offline_translation_model_action.isEnabled() is False
-    assert "Apple" in dashboard.offline_translation_model_status.text()
+    status = dashboard.offline_translation_model_status.text()
+    if current_platform().is_windows:
+        assert "LM Studio" in status and "Apple" not in status
+    else:
+        assert "Apple" in status
     _dispose(dashboard, app)
 
 
@@ -202,11 +207,14 @@ def test_overlay_control_toggles_dashboard_both_directions(app):
 
 
 def test_overlay_is_nonactivating_tool_window(app):
+    import sys
+
     overlay = EnhancedOverlayWindow()
     assert overlay.windowFlags() & Qt.WindowType.Tool
     assert overlay.windowFlags() & Qt.WindowType.WindowDoesNotAcceptFocus
     assert overlay.testAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-    assert overlay.testAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow)
+    if sys.platform == "darwin":
+        assert overlay.testAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow)
     _dispose(overlay, app)
 
 

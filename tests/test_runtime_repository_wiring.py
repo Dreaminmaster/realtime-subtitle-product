@@ -136,8 +136,8 @@ class TestNoRealUserPath:
     def test_default_path_is_user_home(self):
         from src.session_repository import get_default_database_path
         path = str(get_default_database_path())
-        assert "Application Support" in path
         assert "RealtimeSubtitle" in path
+        assert path.endswith("realtime_subtitle.sqlite3")
 
     def test_tests_use_tmp_or_memory(self, tmp_path):
         r = SQLiteSessionRepository(str(tmp_path / "test.sqlite3"))
