@@ -145,13 +145,22 @@ class TestStaleRevisionDiscarded:
 # ── 6. Stale session discarded ────────────────────────────────────
 class TestStaleSessionDiscarded:
     def test_old_session_result_not_written(self):
-        s, a, results = _setup(translator=_slow_translator(0.1))
+        first_started = threading.Event()
+        release_first = threading.Event()
+
+        def controlled_translator(text, lang=None):
+            if text == "session1 text":
+                first_started.set()
+                assert release_first.wait(timeout=2.0)
+            return f"ZH:{text}"
+
+        s, a, results = _setup(translator=controlled_translator)
         a.on_final_text("session1 text", chunk_id=1)
-        time.sleep(0.02)
+        assert first_started.wait(timeout=2.0)
         a.stop_session()
         a.start_session("new-session")
         a.on_final_text("session2 text", chunk_id=2)
-        time.sleep(0.3)
+        release_first.set()
         s.shutdown(wait=True)
         # Only session2 result should be delivered
         assert all(cid == 2 for cid, _, _ in results)

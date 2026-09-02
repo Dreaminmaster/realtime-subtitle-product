@@ -23,6 +23,7 @@ The adapter handles:
 """
 
 from __future__ import annotations
+import threading
 import time
 import uuid
 from src.transcript_event import TranscriptEvent, TranscriptPhase
@@ -51,6 +52,8 @@ class TranslationAdapter:
         self._chunk_to_segment: dict[int, str] = {}
         self._revision_by_segment: dict[str, int] = {}
         self._timing_by_segment: dict[str, tuple[float | None, float | None]] = {}
+        self._active_session_id: str | None = None
+        self._state_lock = threading.RLock()
 
         scheduler._on_result = self._on_result
         scheduler._on_error = self._on_error
@@ -64,9 +67,11 @@ class TranslationAdapter:
         metadata: dict | None = None,
     ) -> None:
         self.scheduler.start_session(session_id)
-        self._chunk_to_segment.clear()
-        self._revision_by_segment.clear()
-        self._timing_by_segment.clear()
+        with self._state_lock:
+            self._active_session_id = session_id
+            self._chunk_to_segment.clear()
+            self._revision_by_segment.clear()
+            self._timing_by_segment.clear()
         if self._repo_enabled:
             create_options = {
                 "source_language": source_language or "Auto",
@@ -77,6 +82,14 @@ class TranslationAdapter:
             self._repository.create_session(session_id, **create_options)
 
     def stop_session(self) -> None:
+        # Invalidate the adapter before releasing the scheduler session. This
+        # independently guards the tiny hand-off window where an executor
+        # callback and a new session can otherwise cross on a busy machine.
+        with self._state_lock:
+            self._active_session_id = None
+            self._chunk_to_segment.clear()
+            self._revision_by_segment.clear()
+            self._timing_by_segment.clear()
         self.scheduler.stop_session()
 
     def shutdown(self, wait: bool = True) -> None:
@@ -98,27 +111,27 @@ class TranslationAdapter:
         no-translation mode.  The original still belongs in session history,
         but no empty no-op translation job should be created.
         """
-        session_id = self.scheduler._session_id
-        if session_id is None:
-            return
         if not (text and text.strip()):
             return
+        with self._state_lock:
+            session_id = self._active_session_id
+            if session_id is None:
+                return
+            segment_id = self._chunk_to_segment.get(chunk_id)
+            if segment_id is None:
+                segment_id = str(uuid.uuid4())
+                self._chunk_to_segment[chunk_id] = segment_id
+                self._revision_by_segment[segment_id] = 1
 
-        segment_id = self._chunk_to_segment.get(chunk_id)
-        if segment_id is None:
-            segment_id = str(uuid.uuid4())
-            self._chunk_to_segment[chunk_id] = segment_id
-            self._revision_by_segment[segment_id] = 1
-
-        revision = self._revision_by_segment.get(segment_id, 1)
-        previous_start, previous_end = self._timing_by_segment.get(
-            segment_id, (None, None)
-        )
-        starts = [value for value in (previous_start, start_offset) if value is not None]
-        ends = [value for value in (previous_end, end_offset) if value is not None]
-        segment_start = min(starts) if starts else None
-        segment_end = max(ends) if ends else None
-        self._timing_by_segment[segment_id] = (segment_start, segment_end)
+            revision = self._revision_by_segment.get(segment_id, 1)
+            previous_start, previous_end = self._timing_by_segment.get(
+                segment_id, (None, None)
+            )
+            starts = [value for value in (previous_start, start_offset) if value is not None]
+            ends = [value for value in (previous_end, end_offset) if value is not None]
+            segment_start = min(starts) if starts else None
+            segment_end = max(ends) if ends else None
+            self._timing_by_segment[segment_id] = (segment_start, segment_end)
 
         # ── repository write (before scheduler, best-effort) ──
         if self._repo_enabled:
@@ -158,6 +171,20 @@ class TranslationAdapter:
 
     # ── scheduler callbacks ────────────────────────────────────
     def _on_result(self, result: TranslationResult) -> None:
+        with self._state_lock:
+            if result.session_id != self._active_session_id:
+                return
+            chunk_id = next(
+                (
+                    cid
+                    for cid, sid in self._chunk_to_segment.items()
+                    if sid == result.segment_id
+                ),
+                None,
+            )
+        if chunk_id is None:
+            return
+
         # Repository write-back with stale guard
         if self._repo_enabled and result.status == TranslationStatus.COMPLETED:
             try:
@@ -179,13 +206,9 @@ class TranslationAdapter:
         # Overlay update
         if self._on_update_text is None:
             return
-        chunk_id = None
-        for cid, sid in self._chunk_to_segment.items():
-            if sid == result.segment_id:
-                chunk_id = cid
-                break
-        if chunk_id is None:
-            return
+        with self._state_lock:
+            if result.session_id != self._active_session_id:
+                return
         self._on_update_text(chunk_id, result.original_text, result.translated_text)
 
     def _on_error(self, job, result: TranslationResult) -> None:
