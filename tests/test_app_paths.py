@@ -1,4 +1,5 @@
 import configparser
+import os
 import stat
 
 from app_paths import (
@@ -44,5 +45,6 @@ def test_atomic_config_write_is_private(tmp_path):
     loaded = configparser.ConfigParser()
     loaded.read(destination)
     assert loaded.get("translation", "mode") == "off"
-    assert stat.S_IMODE(destination.stat().st_mode) == 0o600
+    if os.name != "nt":
+        assert stat.S_IMODE(destination.stat().st_mode) == 0o600
     assert list(destination.parent.glob(".*.tmp")) == []

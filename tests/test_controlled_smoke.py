@@ -30,7 +30,7 @@ class TestFlagOff:
 class TestIsolated:
     def test_uses_tmpdir(self, tmp_path):
         result = run_controlled_smoke(config=FakeConfig(), tmpdir=tmp_path)
-        assert tmp_path.as_posix() in result.repo_path
+        assert Path(result.repo_path).is_relative_to(tmp_path)
 
 
 # ── 3. creates session ──────────────────────────────────────────
@@ -76,8 +76,10 @@ class TestDashboardRead:
 
 # ── 11. structured error ────────────────────────────────────────
 class TestErrorHandling:
-    def test_bad_repo_path_fails_gracefully(self):
-        result = run_controlled_smoke(config=FakeConfig(), tmpdir=Path("/dev/null/nonexistent"))
+    def test_bad_repo_path_fails_gracefully(self, tmp_path):
+        blocker = tmp_path / "not-a-directory"
+        blocker.write_text("blocked", encoding="utf-8")
+        result = run_controlled_smoke(config=FakeConfig(), tmpdir=blocker / "child")
         assert result.ok is False
         assert len(result.errors) > 0
 

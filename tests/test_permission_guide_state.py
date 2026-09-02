@@ -3,12 +3,14 @@ from main import should_open_permission_guide
 
 
 def test_permission_guide_shows_before_marker(monkeypatch, tmp_path):
+    monkeypatch.setattr("permission_guide.platform.system", lambda: "Darwin")
     monkeypatch.setenv("REALTIME_SUBTITLE_APP_SUPPORT_DIR", str(tmp_path))
     monkeypatch.setattr("permission_guide._check_microphone_raw", lambda: True)
     assert should_show_permission_guide() is True
 
 
 def test_permission_guide_stays_hidden_after_marker(monkeypatch, tmp_path):
+    monkeypatch.setattr("permission_guide.platform.system", lambda: "Darwin")
     monkeypatch.setenv("REALTIME_SUBTITLE_APP_SUPPORT_DIR", str(tmp_path))
     (tmp_path / ".permission_guide_seen").touch()
     monkeypatch.setattr("permission_guide._check_microphone_raw", lambda: True)
@@ -16,6 +18,7 @@ def test_permission_guide_stays_hidden_after_marker(monkeypatch, tmp_path):
 
 
 def test_denied_microphone_reopens_guide(monkeypatch, tmp_path):
+    monkeypatch.setattr("permission_guide.platform.system", lambda: "Darwin")
     monkeypatch.setenv("REALTIME_SUBTITLE_APP_SUPPORT_DIR", str(tmp_path))
     (tmp_path / ".permission_guide_seen").touch()
     monkeypatch.setattr("permission_guide._check_microphone_raw", lambda: False)

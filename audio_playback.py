@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import sys
+import wave
 
 from PyQt6.QtCore import QObject, QTimer, QUrl, pyqtSignal
 
@@ -26,6 +27,7 @@ class LocalAudioPlayer(QObject):
         self._qt_player = None
         self._qt_audio_output = None
         self._duration_ms = 0
+        self._requested_position_ms = 0
         self._timer = QTimer(self)
         self._timer.setInterval(60)
         self._timer.timeout.connect(self._poll_native_position)
@@ -44,6 +46,17 @@ class LocalAudioPlayer(QObject):
         if not source.is_file() or source.stat().st_size <= 44:
             self.error_occurred.emit("The recording file is missing or empty")
             return False
+        # Qt Multimedia discovers metadata asynchronously on Windows. Saved
+        # sessions are PCM WAV files, so read their duration synchronously to
+        # make the timeline and seek controls usable immediately after load.
+        try:
+            with wave.open(str(source), "rb") as handle:
+                frames = handle.getnframes()
+                rate = handle.getframerate()
+            if rate > 0:
+                self._duration_ms = max(0, round(frames / rate * 1000))
+        except (OSError, EOFError, wave.Error):
+            self._duration_ms = 0
         if sys.platform == "darwin" and self._load_avfoundation(source):
             return True
         return self._load_qt(source)
@@ -86,14 +99,15 @@ class LocalAudioPlayer(QObject):
             self._qt_audio_output.setVolume(0.9)
             self._qt_player = QMediaPlayer(self)
             self._qt_player.setAudioOutput(self._qt_audio_output)
-            self._qt_player.positionChanged.connect(
-                lambda value: self.position_changed.emit(int(value))
-            )
+            self._qt_player.positionChanged.connect(self._on_qt_position)
             self._qt_player.durationChanged.connect(self._on_qt_duration)
             self._qt_player.playbackStateChanged.connect(self._on_qt_state)
             self._qt_player.errorOccurred.connect(self._on_qt_error)
             self._qt_player.setSource(QUrl.fromLocalFile(str(source)))
             self._backend = "qt"
+            if self._duration_ms:
+                self.duration_changed.emit(self._duration_ms)
+            self.position_changed.emit(0)
             return True
         except Exception as exc:
             native_error = getattr(self, "_native_error", "")
@@ -120,6 +134,7 @@ class LocalAudioPlayer(QObject):
         self._qt_audio_output = None
         self._backend = None
         self._duration_ms = 0
+        self._requested_position_ms = 0
 
     def play(self):
         if self._backend == "avfoundation":
@@ -157,13 +172,17 @@ class LocalAudioPlayer(QObject):
             self._native_player.setCurrentTime_(value / 1000.0)
             self.position_changed.emit(value)
         elif self._backend == "qt":
+            self._requested_position_ms = value
             self._qt_player.setPosition(value)
 
     def position_ms(self) -> int:
         if self._backend == "avfoundation" and self._native_player is not None:
             return max(0, round(float(self._native_player.currentTime()) * 1000))
         if self._backend == "qt" and self._qt_player is not None:
-            return max(0, int(self._qt_player.position()))
+            reported = max(0, int(self._qt_player.position()))
+            if reported == 0 and self._requested_position_ms > 0:
+                return self._requested_position_ms
+            return reported
         return 0
 
     def is_playing(self) -> bool:
@@ -188,8 +207,15 @@ class LocalAudioPlayer(QObject):
             self.state_changed.emit(False)
 
     def _on_qt_duration(self, duration):
-        self._duration_ms = max(0, int(duration))
-        self.duration_changed.emit(self._duration_ms)
+        value = max(0, int(duration))
+        if value > 0:
+            self._duration_ms = value
+            self.duration_changed.emit(self._duration_ms)
+
+    def _on_qt_position(self, position):
+        value = max(0, int(position))
+        self._requested_position_ms = value
+        self.position_changed.emit(value)
 
     def _on_qt_state(self, state):
         from PyQt6.QtMultimedia import QMediaPlayer
