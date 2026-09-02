@@ -34,6 +34,20 @@ def _user_venv_python():
     return os.fspath(get_venv_python())
 
 
+def _user_venv_gui_python():
+    """Return the console-free interpreter for a normal Windows launch.
+
+    The bootstrapper deliberately keeps ``python.exe`` for setup commands so
+    their exit status and output remain observable.  The product window uses
+    ``pythonw.exe`` on Windows to avoid flashing a console window.
+    """
+    python = _user_venv_python()
+    if os.name != "nt":
+        return python
+    pythonw = os.path.join(os.path.dirname(python), "pythonw.exe")
+    return pythonw if os.path.isfile(pythonw) else python
+
+
 def _reexec_in_user_venv_for_asr_smoke():
     """Run dependency-heavy ASR diagnostics in the prepared user venv."""
     import json
@@ -303,6 +317,11 @@ class LauncherWindow(QMainWindow):
         self.launch_btn.hide()
         self.layout.addWidget(self.launch_btn)
 
+        self._launch_started = False
+        self._dashboard_process = None
+        self._dashboard_log_handle = None
+        self._dashboard_log_offset = 0
+
         # Auto-run dependency check
         QTimer.singleShot(500, self.start_check)
 
@@ -377,18 +396,152 @@ class LauncherWindow(QMainWindow):
                 f"padding: 6px 14px; border-radius: 4px; font-weight: bold; }}")
 
     def _launch_dashboard(self):
-        QApplication.quit()
-        coordinator = getattr(self, "_single_instance", None)
-        if coordinator is not None:
-            coordinator.release()
-        venv_py = _user_venv_python()
+        if self._launch_started:
+            return
+        self._launch_started = True
+        self.launch_btn.setEnabled(False)
+        self.retry_btn.setEnabled(False)
+        self.cancel_btn.setEnabled(False)
+        self.label.setText("Opening Realtime Subtitle…")
+        self.log_label.setText("Starting the main window…")
+        self.progress_bar.setRange(0, 0)
+
+        venv_py = _user_venv_gui_python()
         resources = os.path.dirname(os.path.abspath(__file__))
         main_py = os.path.join(resources, "main.py")
         env = os.environ.copy()
         env.pop("PYTHONHOME", None)
         env.pop("PYTHONPATH", None)
         env["VIRTUAL_ENV"] = os.path.dirname(os.path.dirname(venv_py))
-        os.execve(venv_py, [venv_py, main_py, *_main_cli_args()], env)
+        from app_paths import get_log_dir
+        from diagnostic_logger import log_diagnostic
+
+        log_dir = os.fspath(get_log_dir())
+        os.makedirs(log_dir, exist_ok=True)
+        startup_log = os.path.join(log_dir, "app-startup.log")
+        command = [venv_py, main_py, *_main_cli_args()]
+        log_diagnostic(
+            "Launch application",
+            "Starting dashboard process",
+            interpreter=os.path.basename(venv_py),
+            resources=resources,
+        )
+
+        try:
+            self._dashboard_log_handle = open(
+                startup_log, "a", encoding="utf-8", buffering=1
+            )
+            self._dashboard_log_handle.write("\n=== Dashboard launch ===\n")
+            self._dashboard_log_offset = self._dashboard_log_handle.tell()
+            kwargs = {
+                "cwd": resources,
+                "env": env,
+                "stdout": self._dashboard_log_handle,
+                "stderr": subprocess.STDOUT,
+            }
+            if os.name == "nt":
+                kwargs["creationflags"] = (
+                    getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                    | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                )
+            else:
+                kwargs["start_new_session"] = True
+            self._dashboard_process = subprocess.Popen(command, **kwargs)
+        except Exception as exc:
+            log_diagnostic(
+                "Launch application",
+                "Could not start dashboard process",
+                error_type=type(exc).__name__,
+                detail=str(exc)[:300],
+            )
+            self._show_launch_failure(str(exc), startup_log)
+            return
+
+        # Do not close the bootstrap window until the new process has survived
+        # its import and first-window construction.  This turns previously
+        # invisible pythonw.exe failures into an actionable in-product error.
+        QTimer.singleShot(2200, lambda: self._confirm_dashboard_started(startup_log))
+
+    def _confirm_dashboard_started(self, startup_log):
+        from diagnostic_logger import log_diagnostic
+
+        process = self._dashboard_process
+        if process is None:
+            self._show_launch_failure("The dashboard process was not created.", startup_log)
+            return
+        returncode = process.poll()
+        if returncode is None:
+            log_diagnostic(
+                "Launch application",
+                "Dashboard process is running",
+                pid=process.pid,
+            )
+            self._close_dashboard_log()
+            QApplication.quit()
+            return
+
+        output = self._read_dashboard_launch_output(startup_log)
+        if returncode == 0 and "Existing Realtime Subtitle instance notified" in output:
+            log_diagnostic(
+                "Launch application",
+                "Existing dashboard instance was notified",
+            )
+            self._close_dashboard_log()
+            QApplication.quit()
+            return
+
+        log_diagnostic(
+            "Launch application",
+            "Dashboard process exited during startup",
+            returncode=returncode,
+            detail=output[-500:],
+        )
+        detail = output.strip()[-1200:] or f"The process exited with code {returncode}."
+        self._show_launch_failure(detail, startup_log)
+
+    def _read_dashboard_launch_output(self, startup_log):
+        self._close_dashboard_log()
+        try:
+            with open(startup_log, "r", encoding="utf-8", errors="replace") as handle:
+                handle.seek(self._dashboard_log_offset)
+                return handle.read()
+        except OSError:
+            return ""
+
+    def _close_dashboard_log(self):
+        handle = self._dashboard_log_handle
+        self._dashboard_log_handle = None
+        if handle is not None:
+            try:
+                handle.close()
+            except OSError:
+                pass
+
+    def _show_launch_failure(self, detail, startup_log):
+        self._close_dashboard_log()
+        self._launch_started = False
+        self._dashboard_process = None
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.label.setText("Realtime Subtitle could not open")
+        self.log_label.setText(
+            "The setup is complete, but the main window could not start. "
+            "Open Logs and send app-startup.log when requesting help."
+        )
+        self.log_label.setStyleSheet("color: #f38ba8; font-size: 12px;")
+        self.launch_btn.setText("Try Opening Again")
+        self.launch_btn.setEnabled(True)
+        self.launch_btn.show()
+        self.log_btn.show()
+        self.diag_btn.show()
+        QMessageBox.critical(
+            self,
+            "Realtime Subtitle — Startup Failed",
+            "The environment and speech model are ready, but the main window "
+            "closed during startup.\n\n"
+            f"Log: {startup_log}\n\n"
+            f"Details:\n{str(detail)[:1200]}",
+        )
     
     def update_log(self, message):
         self.log_label.setText(message)
@@ -426,7 +579,10 @@ if __name__ == "__main__":
     log_diagnostic("launcher", "Bootstrap started")
     app = QApplication(sys.argv)
     from single_instance import SingleInstance
-    instance = SingleInstance(parent=app)
+    # The setup window and the product window are separate processes during
+    # handoff.  A dedicated lock prevents the launcher from accidentally
+    # making the newly spawned dashboard believe another dashboard is alive.
+    instance = SingleInstance(name="com.realtimesubtitle.launcher", parent=app)
     if not instance.is_primary:
         sys.exit(0)
     app.setStyle("Fusion")

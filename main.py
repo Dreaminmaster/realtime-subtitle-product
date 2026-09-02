@@ -51,6 +51,8 @@ def parse_args():
                        help="Run system diagnostics and exit")
     parser.add_argument("--no-permission-check", action="store_true",
                        help="Skip first-launch permission guide")
+    parser.add_argument("--startup-smoke", action="store_true",
+                       help=argparse.SUPPRESS)
     return parser.parse_args()
 
 
@@ -177,6 +179,11 @@ def main():
             if message == "show-controls" else None
         )
         dash.show()
+        log.info("Dashboard initialized and shown")
+        if args.startup_smoke:
+            # Native CI uses the real event loop long enough to catch import,
+            # plugin and first-paint failures without requiring interaction.
+            QTimer.singleShot(1500, app.quit)
     
     timer = QTimer()
     timer.start(200)

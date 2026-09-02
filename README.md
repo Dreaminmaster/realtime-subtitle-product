@@ -8,15 +8,15 @@
 
 ## 下载 / Download
 
-当前稳定版：**v2.11.0** · macOS 13+ / Windows 10 或 11（x64）
+当前稳定版：**v2.11.1** · macOS 13+ / Windows 10 或 11（x64）
 
-Current stable release: **v2.11.0** · macOS 13+ / Windows 10 or 11 (x64)
+Current stable release: **v2.11.1** · macOS 13+ / Windows 10 or 11 (x64)
 
 | 平台 / Platform | 安装包 / Installer | 适用设备 / Hardware |
 |---|---|---|
-| Windows | [下载 Windows x64 安装程序](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.11.0-windows-x64-setup.exe) | Windows 10 / 11 x64 |
-| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.11.0-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
-| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.11.0-macos-x86_64.dmg) | Intel-based Macs |
+| Windows | [下载 Windows x64 安装程序](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.11.1-windows-x64-setup.exe) | Windows 10 / 11 x64 |
+| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.11.1-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
+| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.11.1-macos-x86_64.dmg) | Intel-based Macs |
 | 校验 / Verify | [SHA256SUMS.txt](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/SHA256SUMS.txt) | 三个平台安装包 / all installers |
 
 [查看全部版本 / View all releases](https://github.com/Dreaminmaster/realtime-subtitle-product/releases)
@@ -32,6 +32,7 @@ Realtime Subtitle 是一款 macOS / Windows 实时字幕应用。语音识别默
 ### 主要功能
 
 - v2.11.0 新增真正可安装的 Windows x64 版本：自带运行环境、离线依赖、Whisper Tiny 和英中 / 中英基础离线翻译，不要求用户安装 Python。
+- v2.11.1 修复 Windows 首次准备完成后主窗口可能静默退出的问题；启动失败现在会保留窗口、展示恢复提示并写入 `app-startup.log`。
 - Windows 系统声音使用 WASAPI 回环捕获，可直接选择播放设备，不需要 VB-CABLE，也不会改变系统默认播放路径。
 - Windows 悬浮字幕使用原生 `WS_EX_NOACTIVATE` 工具窗口语义：字幕更新保持置顶但不会抢占当前 App、进入 Alt-Tab 或召回控制中心。
 - Windows 翻译页不会出现 Apple 专属入口；默认可选内置离线英中翻译，也保留 LM Studio、本地服务与在线 API。其他语言可用 LM Studio / API，避免把大体积多语模型强塞进基础安装包。
@@ -166,6 +167,7 @@ Realtime Subtitle is a native-feeling macOS and Windows control center with an a
 ### Highlights
 
 - v2.11.0 ships a real Windows x64 installer with portable Python, an offline wheelhouse, Whisper Tiny, and built-in Apache-2.0 English↔Simplified Chinese translation models.
+- v2.11.1 fixes a Windows first-launch handoff race; startup failures now remain visible and are recorded in `app-startup.log`.
 - Windows system audio uses WASAPI loopback with selectable playback endpoints. It requires no VB-CABLE and does not reroute normal playback.
 - The Windows overlay combines Qt's no-focus flag with native `WS_EX_NOACTIVATE` / `WS_EX_TOOLWINDOW` behavior, keeping captions visible without stealing focus or entering Alt-Tab.
 - Apple-only translation controls are absent on Windows. Built-in offline translation, LM Studio/local servers, and OpenAI-compatible online providers are presented as platform-appropriate choices.
@@ -299,21 +301,21 @@ Build a native DMG on a matching Mac:
 
 ```bash
 # Apple Silicon host
-bash build_dmg.sh 2.11.0 arm64
+bash build_dmg.sh 2.11.1 arm64
 
 # Intel host, or Apple Silicon with Rosetta installed
-bash build_dmg.sh 2.11.0 x86_64
+bash build_dmg.sh 2.11.1 x86_64
 
 # Windows x64 PowerShell (requires Inno Setup 6)
-.\build_windows.ps1 -Version 2.11.0
+.\build_windows.ps1 -Version 2.11.1
 ```
 
 Outputs:
 
 ```text
-dist/RealtimeSubtitle-2.11.0-macos-arm64.dmg
-dist/RealtimeSubtitle-2.11.0-macos-x86_64.dmg
-dist/RealtimeSubtitle-2.11.0-windows-x64-setup.exe
+dist/RealtimeSubtitle-2.11.1-macos-arm64.dmg
+dist/RealtimeSubtitle-2.11.1-macos-x86_64.dmg
+dist/RealtimeSubtitle-2.11.1-windows-x64-setup.exe
 ```
 
 The GitHub Actions release workflow builds macOS `arm64`, macOS `x86_64`, and Windows `x64` on native runners, verifies each artifact, creates one SHA-256 manifest, and publishes all installers to one release.

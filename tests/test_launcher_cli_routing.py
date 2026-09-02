@@ -34,3 +34,27 @@ def test_asr_smoke_does_not_reexec_inside_user_venv(monkeypatch, tmp_path):
     with patch("os.execve") as execve:
         launcher._reexec_in_user_venv_for_asr_smoke()
     execve.assert_not_called()
+
+
+def test_windows_gui_launch_prefers_pythonw(monkeypatch, tmp_path):
+    scripts = tmp_path / "Scripts"
+    scripts.mkdir()
+    python = scripts / "python.exe"
+    pythonw = scripts / "pythonw.exe"
+    python.touch()
+    pythonw.touch()
+    monkeypatch.setattr(launcher, "_user_venv_python", lambda: str(python))
+    monkeypatch.setattr(launcher.os, "name", "nt")
+
+    assert launcher._user_venv_gui_python() == str(pythonw)
+
+
+def test_windows_gui_launch_falls_back_to_console_python(monkeypatch, tmp_path):
+    scripts = tmp_path / "Scripts"
+    scripts.mkdir()
+    python = scripts / "python.exe"
+    python.touch()
+    monkeypatch.setattr(launcher, "_user_venv_python", lambda: str(python))
+    monkeypatch.setattr(launcher.os, "name", "nt")
+
+    assert launcher._user_venv_gui_python() == str(python)
