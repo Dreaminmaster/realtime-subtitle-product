@@ -158,6 +158,8 @@ class SessionHistoryPlayer(QWidget):
         header_row = QHBoxLayout()
         self.header = QLabel("Select a session")
         self.header.setObjectName("HistoryTitle")
+        self.header.setWordWrap(True)
+        self.header.setMinimumWidth(0)
         header_row.addWidget(self.header)
         header_row.addStretch()
         self.view_mode = SegmentedControl()
@@ -339,7 +341,10 @@ class SessionHistoryPlayer(QWidget):
 
     def _available_line_width(self):
         viewport_width = self.transcript.viewport().width()
-        return max(220, viewport_width - 22)
+        # Never force a line wider than its viewport.  This is what previously
+        # produced a horizontal scrollbar and apparently huge transcript text
+        # after the main window was narrowed.
+        return max(80, viewport_width - 22)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

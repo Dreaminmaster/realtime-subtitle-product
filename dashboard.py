@@ -3,9 +3,10 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QSpinBox, QDoubleSpinBox, QGridLayout,
                              QScrollArea, QSizePolicy, QSpacerItem, QFormLayout, QApplication,
                              QMessageBox, QTextEdit, QDialog, QSlider,
-                             QListWidget, QListWidgetItem, QSplitter, QFileDialog)
+                             QListWidget, QListWidgetItem, QSplitter, QFileDialog,
+                             QCheckBox, QMenuBar)
 from PyQt6.QtCore import Qt, QSize, QUrl, pyqtSignal, QThread, QTimer
-from PyQt6.QtGui import QDesktopServices, QFont, QIcon, QColor, QPixmap
+from PyQt6.QtGui import QDesktopServices, QFont, QIcon, QColor, QPixmap, QAction
 import sys
 import os
 import sounddevice as sd
@@ -158,7 +159,7 @@ class Dashboard(QWidget):
     model_download_done = pyqtSignal(str, int, object, int)  # (model_id, terminal_state, error, attempt)
     progress_event = pyqtSignal(object)  # ProgressEvent — update ProgressPanel
     translation_test_finished = pyqtSignal(int, bool, str)
-    translation_model_download_finished = pyqtSignal(str, bool, str)
+    translation_model_download_finished = pyqtSignal(str, bool, object)
     model_list_finished = pyqtSignal(bool, object, str)
     model_search_finished = pyqtSignal(bool, object, str)
 
@@ -257,6 +258,9 @@ class Dashboard(QWidget):
         self._control_center_hidden_for_session = False
         self._translation_test_generation = 0
         self._translation_test_fingerprint = None
+        self._model_download_help_url = None
+        self._translation_download_help_url = None
+        self._sparkle_updater = None
         
         # Main Layout
         self.layout = QVBoxLayout()
@@ -546,13 +550,24 @@ class Dashboard(QWidget):
         root.addWidget(hint)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
+        splitter.setHandleWidth(1)
+        self.history_splitter = splitter
         self.history_list = QListWidget()
-        self.history_list.setMinimumWidth(220)
+        self.history_list.setMinimumWidth(190)
+        self.history_list.setMaximumWidth(330)
+        self.history_list.setWordWrap(True)
+        self.history_list.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.history_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.history_list.setStyleSheet("QListWidget { font-size: 12px; } QListWidget::item { padding: 9px 10px; }")
         self.history_list.currentItemChanged.connect(self._show_history_session)
         splitter.addWidget(self.history_list)
         self.history_player = SessionHistoryPlayer(language=self.ui_language)
+        self.history_player.setMinimumWidth(0)
         self.history_player.status_changed.connect(self._set_history_status)
         splitter.addWidget(self.history_player)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
         splitter.setSizes([260, 650])
         root.addWidget(splitter, 1)
 
@@ -1737,6 +1752,13 @@ class Dashboard(QWidget):
         self.offline_translation_model_status.setObjectName("Muted")
         self.offline_translation_model_status.setWordWrap(True)
         layout.addRow(self.offline_translation_model_status)
+        self.offline_translation_model_help = QPushButton("Open model page")
+        self.offline_translation_model_help.setObjectName("SecondaryButton")
+        self.offline_translation_model_help.clicked.connect(
+            lambda: self._open_download_help_url(self._translation_download_help_url)
+        )
+        self.offline_translation_model_help.hide()
+        layout.addRow(self.offline_translation_model_help)
         
         self.target_lang = QComboBox()
         for language in ("Chinese", "English", "Japanese", "French", "Spanish", "German", "Korean"):
@@ -1966,30 +1988,47 @@ class Dashboard(QWidget):
                 translation_model_manager.download_model_sync(model_id)
                 self.translation_model_download_finished.emit(model_id, True, "")
             except Exception as exc:
-                self.translation_model_download_finished.emit(
-                    model_id, False, f"{type(exc).__name__}: {str(exc)[:180]}"
-                )
+                self.translation_model_download_finished.emit(model_id, False, exc)
 
         import threading
         threading.Thread(
             target=_download, daemon=True, name=f"translation-model-{model_id}"
         ).start()
 
-    def _on_translation_model_download_finished(self, model_id: str, ok: bool, detail: str):
+    def _on_translation_model_download_finished(self, model_id: str, ok: bool, detail):
         if str(self.offline_translation_model.currentData() or "") != model_id:
             return
         self.offline_translation_model_action.setEnabled(True)
         self._refresh_offline_translation_model_ui()
         if ok:
+            self._translation_download_help_url = None
+            self.offline_translation_model_help.hide()
             self.offline_translation_model_status.setText(
                 "✅ 下载完成，可以立即测试并使用"
                 if self.ui_language == "zh-Hans" else
                 "✅ Download complete — ready to test and use"
             )
         else:
+            from public_model_download import PublicModelDownloadError
+            if isinstance(detail, PublicModelDownloadError):
+                self._translation_download_help_url = detail.model_url
+                self.offline_translation_model_help.setText(
+                    "打开模型页面" if self.ui_language == "zh-Hans" else "Open model page"
+                )
+                self.offline_translation_model_help.show()
+                detail_text = detail.message(self.ui_language)
+            else:
+                self._translation_download_help_url = None
+                self.offline_translation_model_help.hide()
+                detail_text = str(detail or "unknown error")[:220]
             self.offline_translation_model_status.setText(
-                ("❌ 下载失败：" if self.ui_language == "zh-Hans" else "❌ Download failed: ") + detail
+                ("❌ 下载失败：" if self.ui_language == "zh-Hans" else "❌ Download failed: ") + detail_text
             )
+
+    @staticmethod
+    def _open_download_help_url(url):
+        if url:
+            QDesktopServices.openUrl(QUrl(str(url)))
 
     def _show_apple_translation_help(self):
         zh = self.ui_language == "zh-Hans"
@@ -2401,6 +2440,13 @@ class Dashboard(QWidget):
         self.model_mgmt_status.setWordWrap(True)
         self.model_mgmt_status.setObjectName("Muted")
         layout.addWidget(self.model_mgmt_status)
+        self.model_download_help = QPushButton("Open model page")
+        self.model_download_help.setObjectName("SecondaryButton")
+        self.model_download_help.clicked.connect(
+            lambda: self._open_download_help_url(self._model_download_help_url)
+        )
+        self.model_download_help.hide()
+        layout.addWidget(self.model_download_help, 0, Qt.AlignmentFlag.AlignLeft)
         
         # Clear all button
         clear_layout = QHBoxLayout()
@@ -2633,6 +2679,8 @@ class Dashboard(QWidget):
         log = logging.getLogger("RealtimeSubtitle")
         from model_download_task import SUCCEEDED, CANCELLED
         if terminal_state == SUCCEEDED:
+            self._model_download_help_url = None
+            self.model_download_help.hide()
             log.info(f"Model {model_id} downloaded")
             self.model_mgmt_status.setText(
                 f"{model_id} · 已安装" if self.ui_language == "zh-Hans"
@@ -2663,13 +2711,27 @@ class Dashboard(QWidget):
                 )
         else:
             log.error(f"Model {model_id} failed: {error}")
-            self.model_mgmt_status.setText(
-                (f"{model_id} · 下载失败（已尝试 {attempt} 次）" if self.ui_language == "zh-Hans"
-                 else f"{model_id} · failed after {attempt} attempts")
+            from public_model_download import PublicModelDownloadError
+            if isinstance(error, PublicModelDownloadError):
+                self._model_download_help_url = error.model_url
+                self.model_download_help.setText(
+                    "打开模型页面" if self.ui_language == "zh-Hans" else "Open model page"
+                )
+                self.model_download_help.show()
+                error_text = error.message(self.ui_language)
+            else:
+                self._model_download_help_url = None
+                self.model_download_help.hide()
+                error_text = str(error or "download failed")[:220]
+            prefix = (
+                f"{model_id} · 下载失败（已尝试 {attempt} 次）："
+                if self.ui_language == "zh-Hans" else
+                f"{model_id} · failed after {attempt} attempts: "
             )
+            self.model_mgmt_status.setText(prefix + error_text)
             self.model_mgmt_status.setStyleSheet("color: #f38ba8; font-size: 12px;")
             if model_id == self._accuracy_download_model_id:
-                self._accuracy_download_error = str(error or "download failed")
+                self._accuracy_download_error = error_text
         if hasattr(self, '_active_downloads'):
             self._active_downloads.pop(model_id, None)
         self._refresh_model_list()
@@ -3040,6 +3102,37 @@ class Dashboard(QWidget):
         about_layout.addWidget(privacy_note)
         layout.addWidget(about_card)
 
+        self.update_card = QFrame()
+        self.update_card.setObjectName("SettingsCard")
+        update_layout = QVBoxLayout(self.update_card)
+        update_layout.setContentsMargins(18, 16, 18, 16)
+        update_layout.setSpacing(9)
+        update_title = QLabel("Software Updates")
+        update_title.setStyleSheet("font-size: 16px; font-weight: 700;")
+        update_layout.addWidget(update_title)
+        update_copy = QLabel("Get signed releases, version details, and release notes without leaving the app.")
+        update_copy.setObjectName("Muted")
+        update_copy.setWordWrap(True)
+        update_layout.addWidget(update_copy)
+        update_actions = QHBoxLayout()
+        self.check_updates_btn = QPushButton("Check for Updates…")
+        self.check_updates_btn.setObjectName("SecondaryButton")
+        self.check_updates_btn.setEnabled(False)
+        self.check_updates_btn.clicked.connect(self._check_for_updates)
+        update_actions.addWidget(self.check_updates_btn)
+        self.automatic_updates_check = QCheckBox("Automatically download and install updates")
+        self.automatic_updates_check.setEnabled(False)
+        self.automatic_updates_check.toggled.connect(self._set_automatic_updates)
+        update_actions.addWidget(self.automatic_updates_check)
+        update_actions.addStretch()
+        update_layout.addLayout(update_actions)
+        self.update_status = QLabel("Update service is available in the packaged macOS app.")
+        self.update_status.setObjectName("Muted")
+        self.update_status.setWordWrap(True)
+        update_layout.addWidget(self.update_status)
+        self.update_card.setVisible(PLATFORM.is_macos)
+        layout.addWidget(self.update_card)
+
         action_row = QHBoxLayout()
         self.save_btn = QPushButton("Save Changes")
         self.save_btn.clicked.connect(self.save_config)
@@ -3113,6 +3206,50 @@ class Dashboard(QWidget):
         self.tabs.addTab(tab, "Diag")
         self.tabs.setTabToolTip(self.tabs.count() - 1, "Diagnostics — check system, view logs")
 
+    def configure_updater(self, updater):
+        """Attach Sparkle after the native application and dashboard exist."""
+        self._sparkle_updater = updater
+        if not PLATFORM.is_macos or not hasattr(self, "update_card"):
+            return
+        available = bool(updater and updater.available)
+        self.check_updates_btn.setEnabled(available)
+        self.automatic_updates_check.setEnabled(available)
+        if available:
+            self.automatic_updates_check.blockSignals(True)
+            self.automatic_updates_check.setChecked(updater.automatically_updates)
+            self.automatic_updates_check.blockSignals(False)
+            self._set_localized_text(self.update_status, "Updates are verified by Sparkle before installation.")
+            self._install_native_update_menu()
+        else:
+            detail = getattr(updater, "error", "") or "Update service is unavailable."
+            self.update_status.setText(detail)
+
+    def _install_native_update_menu(self):
+        if hasattr(self, "_native_update_menu"):
+            return
+        menu_bar = QMenuBar(self)
+        menu_bar.setNativeMenuBar(True)
+        app_menu = menu_bar.addMenu("Realtime Subtitle")
+        check_action = QAction("Check for Updates…", self)
+        check_action.triggered.connect(self._check_for_updates)
+        app_menu.addAction(check_action)
+        self.layout.setMenuBar(menu_bar)
+        self._native_update_menu = menu_bar
+        self._native_update_action = check_action
+
+    def _check_for_updates(self):
+        if self._sparkle_updater and self._sparkle_updater.check_for_updates():
+            self._set_localized_text(self.update_status, "Checking for updates…")
+        else:
+            self._set_localized_text(self.update_status, "Update service is unavailable in this build.")
+
+    def _set_automatic_updates(self, enabled):
+        if self._sparkle_updater and self._sparkle_updater.set_automatically_updates(enabled):
+            self._set_localized_text(
+                self.update_status,
+                "Automatic updates are on." if enabled else "Automatic updates are off.",
+            )
+
     def _change_ui_language(self, *_):
         self.ui_language = normalize_language(self.ui_language_combo.currentData())
         config.ui_language = self.ui_language
@@ -3128,6 +3265,8 @@ class Dashboard(QWidget):
             self.update_translation_mode_label()
         if hasattr(self, "accuracy_plan_label"):
             self._update_accuracy_plan_ui()
+        if hasattr(self, "_native_update_action"):
+            self._native_update_action.setText(ui_translate("Check for Updates…", self.ui_language))
 
     def _save_ui_language(self):
         import configparser

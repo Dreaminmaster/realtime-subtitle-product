@@ -4,6 +4,7 @@ transcripts
 config.ini
 .venv
 .python_cache
+.sparkle_cache
 venv
 build
 dist

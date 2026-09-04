@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version, for example 2.11.1"
+        description: "Release version, for example 2.12.0"
         required: true
-        default: "2.11.1"
+        default: "2.12.0"
       publish:
         description: "Publish or update the GitHub release"
         required: true
@@ -64,7 +64,7 @@ jobs:
             audio_playback.py session_export.py session_history_player.py \
             session_recording.py ui_components.py mac_translation.py \
             model_catalog.py model_manager.py translation_engine.py \
-            translation_model_manager.py \
+            translation_model_manager.py public_model_download.py sparkle_updater.py \
             recognition_quality.py accuracy_transcriber.py \
             platform_support.py windows_integration.py windows_system_audio.py \
             adaptive_vad.py runtime_performance.py \
@@ -95,8 +95,52 @@ jobs:
         run: |
           sw_vers
           uname -m
+      - name: Prepare Apple signing credentials
+        env:
+          APPLE_DEVELOPER_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_BASE64 }}
+          APPLE_DEVELOPER_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_NOTARY_KEY_BASE64: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        shell: bash
+        run: |
+          if [[ -n "${APPLE_DEVELOPER_CERTIFICATE_BASE64}" && -n "${APPLE_SIGNING_IDENTITY}" ]]; then
+            KEYCHAIN="${RUNNER_TEMP}/realtime-subtitle-signing.keychain-db"
+            KEYCHAIN_PASSWORD="$(uuidgen)$(uuidgen)"
+            security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN}"
+            security set-keychain-settings -lut 21600 "${KEYCHAIN}"
+            security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN}"
+            printf '%s' "${APPLE_DEVELOPER_CERTIFICATE_BASE64}" | /usr/bin/base64 -D > "${RUNNER_TEMP}/developer-id.p12"
+            security import "${RUNNER_TEMP}/developer-id.p12" -k "${KEYCHAIN}" \
+              -P "${APPLE_DEVELOPER_CERTIFICATE_PASSWORD}" -A -T /usr/bin/codesign
+            security list-keychains -d user -s "${KEYCHAIN}"
+            security set-key-partition-list -S apple-tool:,apple: -s \
+              -k "${KEYCHAIN_PASSWORD}" "${KEYCHAIN}"
+            echo "MACOS_SIGN_IDENTITY=${APPLE_SIGNING_IDENTITY}" >> "${GITHUB_ENV}"
+            if [[ -n "${APPLE_NOTARY_KEY_BASE64}" && -n "${APPLE_NOTARY_KEY_ID}" && -n "${APPLE_NOTARY_ISSUER_ID}" ]]; then
+              printf '%s' "${APPLE_NOTARY_KEY_BASE64}" | /usr/bin/base64 -D > "${RUNNER_TEMP}/AuthKey.p8"
+              xcrun notarytool store-credentials realtime-subtitle-notary \
+                --key "${RUNNER_TEMP}/AuthKey.p8" \
+                --key-id "${APPLE_NOTARY_KEY_ID}" \
+                --issuer "${APPLE_NOTARY_ISSUER_ID}" \
+                --keychain "${KEYCHAIN}"
+              echo "MACOS_NOTARY_PROFILE=realtime-subtitle-notary" >> "${GITHUB_ENV}"
+              echo "MACOS_NOTARY_KEYCHAIN=${KEYCHAIN}" >> "${GITHUB_ENV}"
+            fi
+          else
+            echo "Developer ID secrets are absent; producing an ad-hoc signed build with Sparkle EdDSA update verification."
+          fi
       - name: Build and verify DMG
         run: bash build_dmg.sh "${{ needs.metadata.outputs.version }}" "${{ matrix.arch }}"
+      - name: Verify first launch preserves bundle signature
+        env:
+          QT_QPA_PLATFORM: offscreen
+        shell: bash
+        run: |
+          APP="build/${{ matrix.arch }}/RealtimeSubtitle.app"
+          "${APP}/Contents/MacOS/realtime-subtitle" --startup-smoke
+          codesign --verify --deep --strict --verbose=2 "${APP}"
       - name: Verify target identity
         shell: bash
         run: |
@@ -113,6 +157,9 @@ jobs:
           TRANSLATION_HELPER="${APP}/Contents/Resources/bin/mac-translation"
           test -x "${TRANSLATION_HELPER}"
           file "${TRANSLATION_HELPER}" | grep -q "${{ matrix.arch }}"
+          UPDATE_RELAUNCH_HELPER="${APP}/Contents/Resources/bin/update-relaunch-helper"
+          test -x "${UPDATE_RELAUNCH_HELPER}"
+          file "${UPDATE_RELAUNCH_HELPER}" | grep -q "${{ matrix.arch }}"
           shasum -a 256 "${DMG}"
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
@@ -179,6 +226,63 @@ jobs:
           shasum -a 256 *.dmg *.exe > SHA256SUMS.txt
           ls -lh
           cat SHA256SUMS.txt
+      - name: Create release notes and signed Sparkle appcasts
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+          SPARKLE_ED25519_PRIVATE_KEY: ${{ secrets.SPARKLE_ED25519_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          if [[ -z "${SPARKLE_ED25519_PRIVATE_KEY}" ]]; then
+            echo "SPARKLE_ED25519_PRIVATE_KEY is required for a publishable update feed." >&2
+            exit 1
+          fi
+          SPARKLE_VERSION="2.9.6"
+          SPARKLE_SHA256="52bf9e88cdd972fc0c81501377a880e90d47031bd8ca5462488f843e2609e192"
+          curl -L --fail --retry 3 -o "${RUNNER_TEMP}/sparkle.tar.xz" \
+            "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
+          echo "${SPARKLE_SHA256}  ${RUNNER_TEMP}/sparkle.tar.xz" | shasum -a 256 -c -
+          mkdir -p "${RUNNER_TEMP}/sparkle"
+          tar xf "${RUNNER_TEMP}/sparkle.tar.xz" -C "${RUNNER_TEMP}/sparkle"
+
+          NOTES="release-notes-v${VERSION}.html"
+          cat > "release-assets/${NOTES}" <<EOF
+          <!doctype html><html lang="en"><meta charset="utf-8"><body>
+          <h2>Realtime Subtitle ${VERSION}</h2>
+          <ul>
+            <li>Public built-in models now always download anonymously; stale Hugging Face tokens are ignored and retried.</li>
+            <li>Model access failures now explain the cause and offer a direct recovery action instead of exposing a raw HTTP 401.</li>
+            <li>Saved-session lists and transcript lines reflow at every window size without oversized text or horizontal scrolling.</li>
+            <li>Sparkle 2 adds signed in-app update checks, automatic installation, version prompts, and release notes on macOS.</li>
+            <li>Portable-Python macOS builds now complete the verified replacement with a tested, quiet application relaunch.</li>
+          </ul>
+          <p>Audio, settings, models, and transcripts remain local unless you explicitly choose an online translation provider.</p>
+          </body></html>
+          EOF
+
+          PUB_DATE="$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S +0000')"
+          BASE_URL="https://github.com/Dreaminmaster/realtime-subtitle-product/releases/download/v${VERSION}"
+          for ARCH in arm64 x86_64; do
+            DMG="release-assets/RealtimeSubtitle-${VERSION}-macos-${ARCH}.dmg"
+            test -f "${DMG}"
+            SIGN_OUTPUT="$(printf '%s\n' "${SPARKLE_ED25519_PRIVATE_KEY}" | \
+              "${RUNNER_TEMP}/sparkle/bin/sign_update" --ed-key-file - "${DMG}")"
+            SIGNATURE="$(printf '%s' "${SIGN_OUTPUT}" | sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p')"
+            test -n "${SIGNATURE}"
+            LENGTH="$(stat -f%z "${DMG}")"
+            python3 tools/generate_sparkle_appcast.py \
+              --version "${VERSION}" \
+              --architecture "${ARCH}" \
+              --download-url "${BASE_URL}/$(basename "${DMG}")" \
+              --release-notes-url "${BASE_URL}/${NOTES}" \
+              --signature "${SIGNATURE}" \
+              --length "${LENGTH}" \
+              --pub-date "${PUB_DATE}" \
+              --output "release-assets/appcast-${ARCH}.xml"
+          done
+          # Human-facing conventional filename; packaged apps use the precise
+          # architecture feed so two packages with one version never compete.
+          cp release-assets/appcast-arm64.xml release-assets/appcast.xml
+          xmllint --noout release-assets/appcast*.xml
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -188,30 +292,23 @@ jobs:
         run: |
           TAG="v${VERSION}"
           TITLE="Realtime Subtitle ${TAG}"
-          cat > release-notes.md <<'EOF'
-          Realtime Subtitle 2.11.1 hardens the first Windows launch while preserving the streaming caption architecture introduced in 2.10.
+          cat > release-notes.md <<EOF
+          Realtime Subtitle ${VERSION} improves model recovery, responsive history, and macOS delivery.
 
-          - The Windows launcher now starts the prepared user environment with `pythonw.exe`, monitors the dashboard through first paint, and keeps setup visible if startup fails.
-          - Launcher and dashboard processes use independent single-instance locks, eliminating the handoff race that could make a successful first setup disappear after “Ready”.
-          - Dashboard stdout/stderr is retained in `app-startup.log`, and startup failures now provide an in-product recovery message instead of closing silently.
-          - Native Windows CI now exercises the real Qt dashboard event loop before packaging.
-
-          - Windows system audio uses native WASAPI loopback; VB-CABLE and playback-device rerouting are no longer required.
-          - The Windows installer includes portable Python, an offline wheelhouse, Whisper Tiny, and Apache-2.0 English↔Simplified Chinese translation models.
-          - Windows translation settings omit Apple-only controls and offer built-in offline translation, LM Studio/local servers, and OpenAI-compatible online APIs.
-          - The floating caption window uses native no-activate tool-window behavior so updates stay above other apps without stealing focus or entering Alt-Tab.
-          - Windows uses Local AppData, Windows playback-device selection, Segoe UI, and hardware-aware sustained performance budgets.
-          - Partial, Stable and Final captions, incremental translation, semantic endpointing, responsive history, lyric-style playback and session export remain shared across platforms.
+          - Public built-in models always download anonymously. A stale Hugging Face token is ignored automatically and retried once.
+          - Persistent access failures show an understandable reason and a model-page recovery action instead of a raw HTTP 401.
+          - History sessions and transcript lines reflow without oversized text or horizontal scrolling.
+          - macOS packages embed Sparkle 2 for signed update checks, automatic download and installation, version prompts, and release notes.
+          - The ad-hoc-signed macOS path was tested end to end: EdDSA verification, in-place replacement, clean shutdown, and automatic relaunch.
+          - Sparkle EdDSA verifies every update enclosure. Apple Developer ID signing and notarization are added to this same flow when those credentials become available.
 
           Downloads:
 
-          - `arm64`: Apple M1, M2, M3, M4 and newer Apple Silicon Macs
-          - `x86_64`: Intel-based Macs
-          - `windows-x64-setup.exe`: Windows 10/11 x64 installer
+          - \`arm64\`: Apple Silicon Macs
+          - \`x86_64\`: Intel Macs
+          - \`windows-x64-setup.exe\`: Windows 10/11 x64 installer
 
-          These community builds are currently unsigned. On macOS, Control-click and choose Open if Gatekeeper blocks the app. On Windows, verify the published SHA-256 checksum before choosing “Run anyway” in SmartScreen.
-
-          See the bilingual README for setup, permissions and privacy details.
+          Verify the matching entry in \`SHA256SUMS.txt\` before installation.
           EOF
           PRERELEASE_ARG=()
           if [[ "${PRERELEASE}" == "true" ]]; then

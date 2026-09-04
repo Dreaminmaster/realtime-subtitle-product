@@ -36,10 +36,10 @@ def is_compatible_faster_whisper(siblings) -> bool:
 
 
 def validate_faster_whisper_repo(repo_id: str) -> str:
-    from huggingface_hub import HfApi
+    from public_model_download import public_hf_api
 
     normalized = normalize_huggingface_repo(repo_id)
-    info = HfApi().model_info(normalized, files_metadata=False)
+    info = public_hf_api().model_info(normalized, files_metadata=False)
     if not is_compatible_faster_whisper(info.siblings):
         raise ValueError(
             "This repository is not a converted faster-whisper/CTranslate2 model"
@@ -48,14 +48,14 @@ def validate_faster_whisper_repo(repo_id: str) -> str:
 
 
 def search_faster_whisper(query: str, *, limit: int = 10) -> list[str]:
-    from huggingface_hub import HfApi
+    from public_model_download import public_hf_api
 
     value = str(query or "").strip()
     if not value:
         return []
     if "/" in value or value.startswith(("http://", "https://")):
         return [validate_faster_whisper_repo(value)]
-    results = HfApi().list_models(
+    results = public_hf_api().list_models(
         search=f"faster-whisper {value}",
         pipeline_tag="automatic-speech-recognition",
         sort="downloads",

@@ -218,8 +218,8 @@ class ModelManager:
             
             repo_id = model_id if "/" in model_id else f"Systran/faster-whisper-{model_id}"
             try:
-                from huggingface_hub import snapshot_download
-                path = snapshot_download(
+                from public_model_download import public_snapshot_download
+                path = public_snapshot_download(
                     repo_id=repo_id,
                     local_files_only=True,
                 )
@@ -416,12 +416,12 @@ class ModelManager:
         if progress_callback:
             progress_callback("downloading", 10)
         
-        from huggingface_hub import snapshot_download
+        from public_model_download import public_snapshot_download
         
         if progress_callback:
             progress_callback("resolving", 30)
         
-        snapshot_path = snapshot_download(
+        snapshot_path = public_snapshot_download(
             repo_id=repo_id,
             local_files_only=False,
         )
@@ -436,10 +436,10 @@ class ModelManager:
         if progress_callback:
             progress_callback("downloading", 10)
         
-        from huggingface_hub import snapshot_download
+        from public_model_download import public_snapshot_download
         
-        snapshot_download(
-            model_id,
+        public_snapshot_download(
+            repo_id=model_id,
             cache_dir=os.path.expanduser("~/.cache/huggingface/hub")
         )
         

@@ -1,11 +1,16 @@
 import sys
 import os
+import site
+from pathlib import Path
 
 
 _MAIN_PASSTHROUGH_FLAGS = {
     "--overlay-only",
     "--diagnostics",
     "--no-permission-check",
+    # Hidden release/CI hooks. LaunchServices flags remain filtered out.
+    "--startup-smoke",
+    "--update-smoke",
 }
 
 
@@ -46,6 +51,20 @@ def _user_venv_gui_python():
         return python
     pythonw = os.path.join(os.path.dirname(python), "pythonw.exe")
     return pythonw if os.path.isfile(pythonw) else python
+
+
+def _activate_user_venv_packages(venv_python=None):
+    """Expose prepared dependencies without abandoning the macOS app PID."""
+    python = Path(venv_python or _user_venv_python())
+    root = python.parent.parent
+    candidates = sorted((root / "lib").glob("python*/site-packages"))
+    if os.name == "nt":
+        candidates.append(root / "Lib" / "site-packages")
+    for directory in candidates:
+        if directory.is_dir():
+            site.addsitedir(os.fspath(directory))
+    os.environ["VIRTUAL_ENV"] = os.fspath(root)
+    return [os.fspath(path) for path in candidates if path.is_dir()]
 
 
 def _reexec_in_user_venv_for_asr_smoke():
@@ -433,6 +452,22 @@ class LauncherWindow(QMainWindow):
             )
             self._dashboard_log_handle.write("\n=== Dashboard launch ===\n")
             self._dashboard_log_offset = self._dashboard_log_handle.tell()
+            if sys.platform == "darwin":
+                # Keep the dashboard inside the LaunchServices-owned app
+                # process. Spawning or exec'ing a user-venv Python process
+                # discards the .app identity that Sparkle must terminate and
+                # relaunch after installation. The prepared venv remains the
+                # dependency source; only its site-packages are activated.
+                self._dashboard_log_handle.flush()
+                self._launch_main_in_process = {
+                    "main_py": main_py,
+                    "resources": resources,
+                    "argv": [main_py, *_main_cli_args()],
+                    "venv_python": venv_py,
+                }
+                self._close_dashboard_log()
+                QApplication.quit()
+                return
             kwargs = {
                 "cwd": resources,
                 "env": env,
@@ -602,4 +637,13 @@ if __name__ == "__main__":
         lambda _message: (launcher.showNormal(), launcher.raise_(), launcher.activateWindow())
     )
     launcher.show()
-    sys.exit(app.exec())
+    launcher_result = app.exec()
+    in_process = getattr(launcher, "_launch_main_in_process", None)
+    if sys.platform == "darwin" and in_process:
+        os.chdir(in_process["resources"])
+        _activate_user_venv_packages(in_process["venv_python"])
+        sys.argv = in_process["argv"]
+        from main import main as _run_main
+        _run_main()
+        sys.exit(0)
+    sys.exit(launcher_result)

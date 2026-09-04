@@ -12,9 +12,16 @@ def test_main_cli_args_only_forwards_supported_flags():
         "-psn_0_12345",
         "--auto-launch",
         "--overlay-only",
+        "--update-smoke",
         "--no-permission-check",
+        "--startup-smoke",
         "--unknown",
-    ]) == ["--overlay-only", "--no-permission-check"]
+    ]) == [
+        "--overlay-only",
+        "--update-smoke",
+        "--no-permission-check",
+        "--startup-smoke",
+    ]
 
 
 def test_asr_smoke_reports_unprepared_environment(monkeypatch, capsys, tmp_path):
@@ -58,3 +65,19 @@ def test_windows_gui_launch_falls_back_to_console_python(monkeypatch, tmp_path):
     monkeypatch.setattr(launcher.os, "name", "nt")
 
     assert launcher._user_venv_gui_python() == str(python)
+
+
+def test_activate_user_venv_packages_adds_macos_site_packages(monkeypatch, tmp_path):
+    python = tmp_path / "venv" / "bin" / "python3"
+    packages = tmp_path / "venv" / "lib" / "python3.12" / "site-packages"
+    packages.mkdir(parents=True)
+    python.parent.mkdir(parents=True, exist_ok=True)
+    python.touch()
+    added = []
+    monkeypatch.setattr(launcher.site, "addsitedir", added.append)
+
+    result = launcher._activate_user_venv_packages(str(python))
+
+    assert result == [str(packages)]
+    assert added == [str(packages)]
+    assert os.environ["VIRTUAL_ENV"] == str(tmp_path / "venv")

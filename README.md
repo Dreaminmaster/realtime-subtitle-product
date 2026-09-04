@@ -8,15 +8,15 @@
 
 ## 下载 / Download
 
-当前稳定版：**v2.11.1** · macOS 13+ / Windows 10 或 11（x64）
+当前稳定版：**v2.12.0** · macOS 13+ / Windows 10 或 11（x64）
 
-Current stable release: **v2.11.1** · macOS 13+ / Windows 10 or 11 (x64)
+Current stable release: **v2.12.0** · macOS 13+ / Windows 10 or 11 (x64)
 
 | 平台 / Platform | 安装包 / Installer | 适用设备 / Hardware |
 |---|---|---|
-| Windows | [下载 Windows x64 安装程序](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.11.1-windows-x64-setup.exe) | Windows 10 / 11 x64 |
-| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.11.1-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
-| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.11.1-macos-x86_64.dmg) | Intel-based Macs |
+| Windows | [下载 Windows x64 安装程序](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.12.0-windows-x64-setup.exe) | Windows 10 / 11 x64 |
+| Apple Silicon | [下载 ARM64 DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.12.0-macos-arm64.dmg) | M1 / M2 / M3 / M4 and newer |
+| Intel | [下载 Intel DMG](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/RealtimeSubtitle-2.12.0-macos-x86_64.dmg) | Intel-based Macs |
 | 校验 / Verify | [SHA256SUMS.txt](https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/SHA256SUMS.txt) | 三个平台安装包 / all installers |
 
 [查看全部版本 / View all releases](https://github.com/Dreaminmaster/realtime-subtitle-product/releases)
@@ -33,6 +33,7 @@ Realtime Subtitle 是一款 macOS / Windows 实时字幕应用。语音识别默
 
 - v2.11.0 新增真正可安装的 Windows x64 版本：自带运行环境、离线依赖、Whisper Tiny 和英中 / 中英基础离线翻译，不要求用户安装 Python。
 - v2.11.1 修复 Windows 首次准备完成后主窗口可能静默退出的问题；启动失败现在会保留窗口、展示恢复提示并写入 `app-startup.log`。
+- v2.12.0 加入 Sparkle 2 单一路径自动更新；在未加入 Apple Developer Program 的当前条件下，更新仍会自动下载、EdDSA 验证、替换并重启。实测无需手动重新下载 DMG，未来的 Developer ID 与公证直接叠加在同一流程。
 - Windows 系统声音使用 WASAPI 回环捕获，可直接选择播放设备，不需要 VB-CABLE，也不会改变系统默认播放路径。
 - Windows 悬浮字幕使用原生 `WS_EX_NOACTIVATE` 工具窗口语义：字幕更新保持置顶但不会抢占当前 App、进入 Alt-Tab 或召回控制中心。
 - Windows 翻译页不会出现 Apple 专属入口；默认可选内置离线英中翻译，也保留 LM Studio、本地服务与在线 API。其他语言可用 LM Studio / API，避免把大体积多语模型强塞进基础安装包。
@@ -42,6 +43,8 @@ Realtime Subtitle 是一款 macOS / Windows 实时字幕应用。语音识别默
 - 增量翻译只提交稳定前缀，使用防抖、最小增长、单个运行请求与一个最新待处理请求；会话/文本版本变化会让过期结果失效，慢服务不会阻塞识别或 UI。
 - 原文与译文会在当前字幕框内自然换行，不会被右侧裁掉；视觉换行仍属于同一条字幕。
 - 会话时间轴现在会随窗口宽度重新排版，不再出现底部横向滚动条；长双语内容在窄窗口也能完整阅读。
+- 公开内置模型现在强制匿名下载；如果本机保存了失效的 Hugging Face 令牌，App 会自动忽略后重试。仍被拒绝时会显示明确原因和模型页面按钮，不再暴露原始 `401 Client Error`。
+- macOS 安装包集成 Sparkle 2：可从应用菜单或系统设置页检查更新，并支持自动下载、安装、版本提示和更新说明。Apple Silicon 与 Intel 使用独立签名 appcast，发布流程详见 [自动更新文档](docs/automatic-updates.md)。
 - Agnes AI 与自定义 OpenAI-compatible 接口合并为“在线 API”及预设；翻译页新增按需下载、校验、选择和删除的轻量英中 / 中英离线模型，并与识别模型明确分区。
 - 均衡模式把单段语音控制在九秒以内，上下文合句长度同步收紧；草稿翻译刷新更快，同时保留节能模式控制发热。
 - v2.9.3 新增增量实时翻译：讲话中的识别草稿会按“均衡 / 更实时”节奏提前翻译，随后在同一行原位更新；最终定稿仍通过可靠队列覆盖草稿，不会把临时译文写入会话记录。
@@ -168,6 +171,7 @@ Realtime Subtitle is a native-feeling macOS and Windows control center with an a
 
 - v2.11.0 ships a real Windows x64 installer with portable Python, an offline wheelhouse, Whisper Tiny, and built-in Apache-2.0 English↔Simplified Chinese translation models.
 - v2.11.1 fixes a Windows first-launch handoff race; startup failures now remain visible and are recorded in `app-startup.log`.
+- v2.12.0 adds one Sparkle 2 update path on macOS. Under the current no-Developer-ID constraint, a tested update still downloads, passes EdDSA verification, replaces the app, and relaunches automatically; future Developer ID signing and notarization layer onto the same flow.
 - Windows system audio uses WASAPI loopback with selectable playback endpoints. It requires no VB-CABLE and does not reroute normal playback.
 - The Windows overlay combines Qt's no-focus flag with native `WS_EX_NOACTIVATE` / `WS_EX_TOOLWINDOW` behavior, keeping captions visible without stealing focus or entering Alt-Tab.
 - Apple-only translation controls are absent on Windows. Built-in offline translation, LM Studio/local servers, and OpenAI-compatible online providers are presented as platform-appropriate choices.
@@ -193,6 +197,8 @@ Realtime Subtitle is a native-feeling macOS and Windows control center with an a
 - Three explicit session outcomes before starting: **Temporary**, **Save subtitles**, or **Subtitles + recording**.
 - Native macOS recording playback for sessions created with **Subtitles + recording**, click-to-seek transcript lines, and a brighter, larger active line that follows playback like lyrics. Transcript-only sessions explain why audio is unavailable.
 - Adaptive, bubble-free transcript lines give long bilingual text its full available width.
+- Public built-in models always download anonymously. If a saved Hugging Face token has expired, the app ignores it and retries; persistent access failures explain the cause and offer a model-page recovery action instead of exposing a raw `401 Client Error`.
+- macOS packages embed Sparkle 2 for update checks from the app menu and System settings, automatic download/install, version prompts, and release notes. Apple Silicon and Intel use separate signed appcasts; see [Automatic updates](docs/automatic-updates.md).
 - Per-session Original, Translation, and Both views. Export the selected session as transcript, recording, or a bundle; transcript output follows the active view.
 - A draggable live appearance preview with vertically stacked dark and light surfaces, so long lines keep their width, plus the native macOS color panel; text colors remain independent from background opacity.
 - Compact segmented choices and app-owned popup menus remove blank native popup panels and make common options visible at a glance.
@@ -301,24 +307,24 @@ Build a native DMG on a matching Mac:
 
 ```bash
 # Apple Silicon host
-bash build_dmg.sh 2.11.1 arm64
+bash build_dmg.sh 2.12.0 arm64
 
 # Intel host, or Apple Silicon with Rosetta installed
-bash build_dmg.sh 2.11.1 x86_64
+bash build_dmg.sh 2.12.0 x86_64
 
 # Windows x64 PowerShell (requires Inno Setup 6)
-.\build_windows.ps1 -Version 2.11.1
+.\build_windows.ps1 -Version 2.12.0
 ```
 
 Outputs:
 
 ```text
-dist/RealtimeSubtitle-2.11.1-macos-arm64.dmg
-dist/RealtimeSubtitle-2.11.1-macos-x86_64.dmg
-dist/RealtimeSubtitle-2.11.1-windows-x64-setup.exe
+dist/RealtimeSubtitle-2.12.0-macos-arm64.dmg
+dist/RealtimeSubtitle-2.12.0-macos-x86_64.dmg
+dist/RealtimeSubtitle-2.12.0-windows-x64-setup.exe
 ```
 
-The GitHub Actions release workflow builds macOS `arm64`, macOS `x86_64`, and Windows `x64` on native runners, verifies each artifact, creates one SHA-256 manifest, and publishes all installers to one release.
+The GitHub Actions release workflow builds macOS `arm64`, macOS `x86_64`, and Windows `x64` on native runners, verifies each artifact, creates one SHA-256 manifest, signs architecture-specific Sparkle appcasts, and publishes all installers to one release. When protected Apple credentials are configured it also signs, notarizes, and staples the macOS app and DMG; publishing stops if the Sparkle EdDSA secret is absent.
 
 ## 项目结构 / Architecture
 
@@ -339,7 +345,7 @@ Control Center
 
 ## 已知限制 / Known limitations
 
-- The public community builds are unsigned and not notarized.
+- Current community builds are ad-hoc signed rather than Apple Developer ID signed or notarized. Sparkle update archives are independently authenticated with EdDSA. The release pipeline supports Developer ID signing and notarization, but a release is described as Apple-signed only after those credentials and Apple verification have actually succeeded.
 - System-audio capture requires macOS 13 or later and the user's Screen & System Audio Recording permission.
 - Windows system audio requires a shared-mode playback endpoint; an app holding the device in exclusive mode cannot be captured.
 - Intel recognition is supported but generally slower than Apple Silicon.

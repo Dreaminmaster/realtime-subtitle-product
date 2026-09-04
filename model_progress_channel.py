@@ -56,7 +56,18 @@ class ModelProgressChannel:
                              attempt=attempt, max_attempts=self.max_attempts, can_cancel=False)
 
     def on_fail(self, error_msg, attempt):
-        msg = error_msg or ("下载失败" if self.language == "zh-Hans" else "Download failed")
+        if error_msg:
+            try:
+                from public_model_download import PublicModelDownloadError
+                msg = (
+                    error_msg.message(self.language)
+                    if isinstance(error_msg, PublicModelDownloadError)
+                    else str(error_msg)
+                )
+            except Exception:
+                msg = str(error_msg)
+        else:
+            msg = "下载失败" if self.language == "zh-Hans" else "Download failed"
         if "timeout" in msg.lower() or "connect" in msg.lower():
             msg = ("连接超时，请检查网络后重试。" if self.language == "zh-Hans"
                    else "Connection timed out. Check your network and try again.")

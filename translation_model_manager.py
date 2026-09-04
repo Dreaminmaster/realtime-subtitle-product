@@ -147,9 +147,9 @@ class TranslationModelManager:
             raise ValueError(f"Unknown translation model: {model_id}")
         destination = self.path_for(model_id)
         destination.mkdir(parents=True, exist_ok=True)
-        from huggingface_hub import snapshot_download
+        from public_model_download import public_snapshot_download
 
-        snapshot_download(
+        public_snapshot_download(
             repo_id=item.repo_id,
             local_dir=str(destination),
             allow_patterns=(

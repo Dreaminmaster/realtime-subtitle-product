@@ -53,6 +53,8 @@ def parse_args():
                        help="Skip first-launch permission guide")
     parser.add_argument("--startup-smoke", action="store_true",
                        help=argparse.SUPPRESS)
+    parser.add_argument("--update-smoke", action="store_true",
+                       help=argparse.SUPPRESS)
     return parser.parse_args()
 
 
@@ -174,6 +176,31 @@ def main():
     else:
         from dashboard import Dashboard
         dash = Dashboard()
+        if sys.platform == "darwin":
+            from sparkle_updater import SparkleUpdater
+
+            sparkle = SparkleUpdater()
+            sparkle.start()
+            dash.configure_updater(sparkle)
+            # Sparkle owns check/download/verification/installation. In the
+            # portable-Python build its ad-hoc update can replace the outer
+            # bundle without recognizing the interpreter as the executable to
+            # relaunch. Poll only for Sparkle's expected, installed version;
+            # then let Qt shut down normally while the native helper reopens it.
+            def _finish_verified_update():
+                if sparkle.installed_update_ready and sparkle.prepare_relaunch():
+                    log.info("Verified update installed; restarting application")
+                    app.quit()
+
+            dash._updater_install_timer = QTimer(dash)
+            dash._updater_install_timer.setInterval(1000)
+            dash._updater_install_timer.timeout.connect(_finish_verified_update)
+            dash._updater_install_timer.start()
+            if args.update_smoke:
+                # Hidden release-validation hook. It exercises the exact same
+                # controller as the menu/settings actions without adding a
+                # second user-facing update mode.
+                QTimer.singleShot(1200, sparkle.check_for_updates_in_background)
         instance.message_received.connect(
             lambda message: dash._show_control_center()
             if message == "show-controls" else None

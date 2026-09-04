@@ -83,7 +83,9 @@ class DownloadTask:
                     return
                 self.last_error = "Download returned False"
             except Exception as e:
-                self.last_error = str(e)
+                # Keep the typed exception for product-facing recovery actions.
+                # String conversion is deferred until a view needs it.
+                self.last_error = e
 
             if self._cancel.is_set():
                 self._set_state(CANCELLED)

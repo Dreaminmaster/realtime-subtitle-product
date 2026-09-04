@@ -44,6 +44,12 @@ RESOURCES="${CONTENTS}/Resources"
 PYTHON_DIR="${RESOURCES}/python"
 PYTHON_BIN="${PYTHON_DIR}/bin/python3"
 DIST_DIR="${SCRIPT_DIR}/dist"
+FRAMEWORKS_DIR="${CONTENTS}/Frameworks"
+SPARKLE_VERSION="2.9.6"
+SPARKLE_SHA256="52bf9e88cdd972fc0c81501377a880e90d47031bd8ca5462488f843e2609e192"
+SPARKLE_ARCHIVE="${SCRIPT_DIR}/.sparkle_cache/Sparkle-${SPARKLE_VERSION}.tar.xz"
+SPARKLE_URL="https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
+SPARKLE_PUBLIC_ED_KEY="qZqXTbTssNkMrtU510WMUjSI+OMO+h+DoSDvoJXk6/8="
 
 # Portable Python source
 PYTHON_STANDALONE_TAG="20260602"
@@ -76,7 +82,7 @@ echo ""
 rm -rf "${BUILD_DIR}"
 # Detach any leftover mounts from previous runs
 hdiutil detach "/Volumes/${VOLUME_NAME}" 2>/dev/null || true
-mkdir -p "${MACOS_DIR}" "${RESOURCES}" "${DIST_DIR}"
+mkdir -p "${MACOS_DIR}" "${RESOURCES}" "${FRAMEWORKS_DIR}" "${DIST_DIR}"
 
 # ---- Step 1: Download & unpack portable Python ----
 echo "[1/8] Setting up portable Python..."
@@ -117,6 +123,7 @@ rsync -av --exclude='.git' \
       --exclude='.DS_Store' \
       --exclude='*.dmg' \
       --exclude='.python_cache' \
+      --exclude='.sparkle_cache' \
       --exclude='.venv' \
       --exclude='.pytest_cache' \
       --exclude='.ruff_cache' \
@@ -207,6 +214,49 @@ if [[ "${ARCH}" = "arm64" && "${TRANSLATION_INFO}" != *"arm64"* ]] \
 fi
 echo "  ✅ Apple Translation (${ARCH})"
 
+# Sparkle is embedded as an official pinned binary framework.  The checksum
+# prevents a compromised cache or release download from entering the app.
+echo "[2.4/8] Embedding Sparkle ${SPARKLE_VERSION}…"
+mkdir -p "$(dirname "${SPARKLE_ARCHIVE}")"
+if [[ ! -f "${SPARKLE_ARCHIVE}" ]]; then
+    curl -L --fail --retry 3 -o "${SPARKLE_ARCHIVE}" "${SPARKLE_URL}"
+fi
+echo "${SPARKLE_SHA256}  ${SPARKLE_ARCHIVE}" | shasum -a 256 -c -
+SPARKLE_TEMP=$(mktemp -d)
+tar xf "${SPARKLE_ARCHIVE}" -C "${SPARKLE_TEMP}"
+rm -rf "${FRAMEWORKS_DIR}/Sparkle.framework"
+cp -R "${SPARKLE_TEMP}/Sparkle.framework" "${FRAMEWORKS_DIR}/Sparkle.framework"
+mkdir -p "${RESOURCES}/ThirdPartyLicenses"
+cp "${SPARKLE_TEMP}/LICENSE" "${RESOURCES}/ThirdPartyLicenses/Sparkle-LICENSE"
+rm -rf "${SPARKLE_TEMP}"
+
+xcrun clang -O2 -fobjc-arc -dynamiclib \
+    -target "${ARCH}-apple-macos13.0" \
+    -F "${FRAMEWORKS_DIR}" \
+    "${SCRIPT_DIR}/native/SparkleBridge.m" \
+    -framework Cocoa -framework Sparkle \
+    -Wl,-rpath,@loader_path \
+    -install_name @rpath/libRealtimeSubtitleUpdater.dylib \
+    -o "${FRAMEWORKS_DIR}/libRealtimeSubtitleUpdater.dylib"
+echo "  ✅ Sparkle framework and bridge (${ARCH})"
+
+# A separate, dependency-free helper waits for the old GUI process to exit
+# before reopening the Sparkle-replaced bundle. This avoids a race with the
+# single-instance guard and is needed only because the GUI runs in portable
+# Python rather than as CFBundleExecutable itself.
+UPDATE_RELAUNCH_BIN="${RESOURCES}/bin/update-relaunch-helper"
+xcrun clang -O2 -target "${ARCH}-apple-macos13.0" \
+    "${SCRIPT_DIR}/native/UpdateRelaunchHelper.c" \
+    -o "${UPDATE_RELAUNCH_BIN}"
+chmod +x "${UPDATE_RELAUNCH_BIN}"
+UPDATE_RELAUNCH_INFO=$(file "${UPDATE_RELAUNCH_BIN}")
+if [[ "${ARCH}" = "arm64" && "${UPDATE_RELAUNCH_INFO}" != *"arm64"* ]] \
+   || [[ "${ARCH}" = "x86_64" && "${UPDATE_RELAUNCH_INFO}" != *"x86_64"* ]]; then
+    echo "  ERROR: update relaunch helper architecture mismatch: ${UPDATE_RELAUNCH_INFO}"
+    exit 1
+fi
+echo "  ✅ update relaunch helper (${ARCH})"
+
 # ---- Step 2.5: Build wheelhouse (offline dependency bundle) ----
 echo "[2.5/8] Building wheelhouse…"
 WHEELHOUSE_DIR="${RESOURCES}/wheelhouse"
@@ -289,7 +339,7 @@ MODEL_DL=$(cd "${WHEELHOUSE_DIR}" && HOME="${TMP_HOME:-/tmp}" \
 import os, shutil
 os.environ['BUNDLED_MODEL'] = '${BUNDLED_MODEL}'
 from huggingface_hub import snapshot_download
-snap = snapshot_download('Systran/faster-whisper-tiny')
+snap = snapshot_download('Systran/faster-whisper-tiny', token=False)
 dest = os.environ['BUNDLED_MODEL']
 count = 0
 for f in os.listdir(snap):
@@ -323,52 +373,11 @@ echo "  ✅ Default model bundled (${MODEL_SIZE}, $(ls -1 "${BUNDLED_MODEL}" | w
 echo "  Model files:"
 ls -lhS "${BUNDLED_MODEL}/"
 
-# ---- Step 3: Create launcher (Plan A — user-local venv) ----
-echo "[3/8] Creating launcher…"
-cat > "${MACOS_DIR}/realtime-subtitle" << 'LAUNCHER'
-#!/bin/bash
-# =============================================================================
-# Realtime Subtitle Launcher
-# Bootstraps bundled Python → launcher.py → SetupController → Dashboard.
-# Shell does NOT create venv or install deps — SetupController handles that.
-# =============================================================================
-
-set -e
-
-while [ -h "$0" ]; do
-    DIR="$(cd -P "$(dirname "$0")" && pwd)"
-    SCRIPT="$(readlink "$0")"
-    [[ "$SCRIPT" != /* ]] && SCRIPT="$DIR/$SCRIPT"
-done
-APP_DIR="$(cd -P "$(dirname "$0")/../.." && pwd)"
-RESOURCES="${APP_DIR}/Contents/Resources"
-BUNDLED_PYTHON="${RESOURCES}/python/bin/python3"
-LOG_DIR="${HOME}/Library/Logs/RealtimeSubtitle"
-LOG_FILE="${LOG_DIR}/launcher.log"
-
-mkdir -p "$LOG_DIR"
-exec 2>>"$LOG_FILE"
-
-log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG_FILE"; }
-alert() { osascript -e "display dialog \"$1\" buttons {\"OK\"} default button 1 with icon stop"; }
-
-log "=== Bootstrap started ==="
-
-# Verify bundled Python
-if [ ! -x "$BUNDLED_PYTHON" ]; then
-    alert "App bundle is incomplete.\n\nBundled Python is missing.\nPlease re-download."
-    exit 1
-fi
-log "Bundled Python: $("$BUNDLED_PYTHON" --version 2>&1)"
-
-# Override portable Python's /install prefix
-export PYTHONHOME="${RESOURCES}/python"
-cd "$RESOURCES"
-
-# Launch the setup/dashboard UI — all setup logic lives in Python, not here.
-exec "$BUNDLED_PYTHON" launcher.py "$@"
-LAUNCHER
-
+# ---- Step 3: Create a signable Mach-O launcher ----
+echo "[3/8] Building native application launcher…"
+xcrun clang -O2 -target "${ARCH}-apple-macos13.0" \
+    "${SCRIPT_DIR}/native/MacAppLauncher.c" \
+    -o "${MACOS_DIR}/realtime-subtitle"
 chmod +x "${MACOS_DIR}/realtime-subtitle"
 
 # ---- Step 4: App metadata and icon ----
@@ -409,9 +418,38 @@ cat > "${CONTENTS}/Info.plist" << PLIST
     <string>Realtime Subtitle needs Screen &amp; System Audio Recording access when System Audio is selected as the input.</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>SUFeedURL</key>
+    <string>https://github.com/Dreaminmaster/realtime-subtitle-product/releases/latest/download/appcast-${ARCH}.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>${SPARKLE_PUBLIC_ED_KEY}</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUAutomaticallyUpdate</key>
+    <true/>
+    <key>SUScheduledCheckInterval</key>
+    <integer>86400</integer>
+    <key>SUEnableSystemProfiling</key>
+    <false/>
 </dict>
 </plist>
 PLIST
+
+echo "[4.5/8] Signing application bundle…"
+bash "${SCRIPT_DIR}/scripts/sign_macos_bundle.sh" \
+    "${APP_BUNDLE}" "${MACOS_SIGN_IDENTITY:--}"
+
+if [[ -n "${MACOS_SIGN_IDENTITY:-}" && -n "${MACOS_NOTARY_PROFILE:-}" ]]; then
+    echo "  Submitting signed application for notarization…"
+    NOTARY_ZIP="${BUILD_DIR}/${APP_NAME}-${ARCH}-notary.zip"
+    ditto -c -k --keepParent "${APP_BUNDLE}" "${NOTARY_ZIP}"
+    NOTARY_ARGS=(--keychain-profile "${MACOS_NOTARY_PROFILE}" --wait)
+    if [[ -n "${MACOS_NOTARY_KEYCHAIN:-}" ]]; then
+        NOTARY_ARGS+=(--keychain "${MACOS_NOTARY_KEYCHAIN}")
+    fi
+    xcrun notarytool submit "${NOTARY_ZIP}" "${NOTARY_ARGS[@]}"
+    xcrun stapler staple "${APP_BUNDLE}"
+    rm -f "${NOTARY_ZIP}"
+fi
 
 # ---- Step 5: DMG ----
 echo "[5/8] Building DMG…"
@@ -482,6 +520,19 @@ hdiutil convert "${DIST_DIR}/tmp-${ARCH}.dmg" -format UDZO -o "${DIST_DIR}/${DMG
 }
 rm -f "${DIST_DIR}/tmp-${ARCH}.dmg"
 
+if [[ -n "${MACOS_SIGN_IDENTITY:-}" ]]; then
+    codesign --force --timestamp --sign "${MACOS_SIGN_IDENTITY}" \
+        "${DIST_DIR}/${DMG_NAME}"
+fi
+if [[ -n "${MACOS_SIGN_IDENTITY:-}" && -n "${MACOS_NOTARY_PROFILE:-}" ]]; then
+    NOTARY_ARGS=(--keychain-profile "${MACOS_NOTARY_PROFILE}" --wait)
+    if [[ -n "${MACOS_NOTARY_KEYCHAIN:-}" ]]; then
+        NOTARY_ARGS+=(--keychain "${MACOS_NOTARY_KEYCHAIN}")
+    fi
+    xcrun notarytool submit "${DIST_DIR}/${DMG_NAME}" "${NOTARY_ARGS[@]}"
+    xcrun stapler staple "${DIST_DIR}/${DMG_NAME}"
+fi
+
 # ---- Step 6: Verify ----
 echo ""
 echo "[6/8] Verifying..."
@@ -536,6 +587,34 @@ if [ ! -f "${APP_BUNDLE}/Contents/MacOS/realtime-subtitle" ]; then
     echo "  ❌ launcher missing"; FAIL=true
 else
     echo "  ✅ launcher present"
+fi
+
+if [ ! -d "${APP_BUNDLE}/Contents/Frameworks/Sparkle.framework" ]; then
+    echo "  ❌ Sparkle framework missing"; FAIL=true
+elif [ ! -f "${APP_BUNDLE}/Contents/Frameworks/libRealtimeSubtitleUpdater.dylib" ]; then
+    echo "  ❌ Sparkle bridge missing"; FAIL=true
+elif [ "$(plutil -extract SUPublicEDKey raw "${APP_BUNDLE}/Contents/Info.plist" 2>/dev/null)" != "${SPARKLE_PUBLIC_ED_KEY}" ]; then
+    echo "  ❌ Sparkle public key missing"; FAIL=true
+else
+    echo "  ✅ Sparkle ${SPARKLE_VERSION} embedded and configured"
+fi
+if [ ! -f "${APP_BUNDLE}/Contents/Resources/ThirdPartyLicenses/Sparkle-LICENSE" ]; then
+    echo "  ❌ Sparkle license notice missing"; FAIL=true
+else
+    echo "  ✅ Sparkle license notice bundled"
+fi
+
+UPDATE_RELAUNCH_HELPER="${APP_BUNDLE}/Contents/Resources/bin/update-relaunch-helper"
+if [ ! -x "${UPDATE_RELAUNCH_HELPER}" ]; then
+    echo "  ❌ update relaunch helper missing"; FAIL=true
+else
+    UPDATE_RELAUNCH_VERIFY=$(file "${UPDATE_RELAUNCH_HELPER}")
+    if [[ "${ARCH}" = "arm64" && "${UPDATE_RELAUNCH_VERIFY}" != *"arm64"* ]] \
+       || [[ "${ARCH}" = "x86_64" && "${UPDATE_RELAUNCH_VERIFY}" != *"x86_64"* ]]; then
+        echo "  ❌ update relaunch helper architecture mismatch: ${UPDATE_RELAUNCH_VERIFY}"; FAIL=true
+    else
+        echo "  ✅ update relaunch helper ${ARCH}"
+    fi
 fi
 
 # Native system-audio helper is bundled for the selected architecture.
